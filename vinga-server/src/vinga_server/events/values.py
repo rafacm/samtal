@@ -46,6 +46,7 @@ from functools import cache
 from typing import ClassVar, Final, Literal
 
 from vinga_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
+from vinga_server.memory.schema import MemoryScope
 
 # --- what a value may be ----------------------------------------------
 
@@ -1245,6 +1246,17 @@ class McpRefusal(StrEnum):
     UNEXPECTED = "unexpected"
 
 
+# The one closed set here that this module does not declare. Which
+# scopes memory has is a fact of the memory schema: the check constraint
+# on the facts table and the store's own arithmetic are built from
+# `MemoryScope`, and a second spelling beside them would be a vocabulary
+# with a drift pending. Imported and re-exported, so a variant annotates
+# its field from the same place every other closed set is reached from,
+# and so the direction of the dependency stays the one this package
+# keeps: the memory schema is a leaf that declares tables and nothing
+# else, which is why importing it here reaches no store and no driver.
+
+
 # --- the formatted fragments ------------------------------------------
 #
 # A sentence sometimes renders a shape rather than a value: a
@@ -1447,6 +1459,7 @@ __all__ = [
     "McpRefusal",
     "McpReloadOutcome",
     "McpTransport",
+    "MemoryScope",
     "NotOffered",
     "Nothing",
     "OriginProvenance",

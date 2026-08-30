@@ -1785,49 +1785,55 @@ providers.%s.%s reaches %s, which inside a container is the container itself rat
 
 ### `memory_unreadable`
 
-An agent's memory could not be read; it remembers nothing this round.
+One scope of an agent's memory could not be read, so the agent remembers
+nothing of it this round. Said once per scope the read could not answer, since
+a read that serves a whole prompt answers three of them.
 
 #### Variant 1: `vinga_server.memory.store` at WARNING
 
 ```text
-could not read memory for agent %s (%s); it remembers nothing this round
+could not read %s memory for agent %s (%s); it remembers nothing of it this round
 ```
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
-| 1 | `agent` (`IDENTIFIER`) | no |  |  |
-| 2 | `error` (`CLASS_NAME`) | no |  |  |
+| 1 | `scope` (`TOKEN`) | no | one of: `agent`, `conversation`, `device` |  |
+| 2 | `agent` (`IDENTIFIER`) | no |  |  |
+| 3 | `error` (`CLASS_NAME`) | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `agent` | `IDENTIFIER` | yes | no |  | The agent whose reply the read was for, which is the acting agent rather than the owner of the rows: a device scope is read on behalf of whichever agent is speaking on that device. |
+| `scope` | `TOKEN` | yes | no | one of: `agent`, `conversation`, `device` | Which memory could not be read. A read that answers several scopes at once says this once per scope it could not answer, so nothing renders empty unreported. |
 | `error` | `CLASS_NAME` | yes | no |  |  |
 
 ### `memory_unwritable`
 
-A fact an agent was asked to remember could not be stored, so nothing was
-remembered. The write path's own event, beside the read path's above: the two
-fail differently and answer differently. A read that fails is contained (the
-agent remembers nothing this round and the reply happens), while a write that
+A change an agent asked for could not be stored, so nothing was changed. The
+write path's own event, beside the read path's above: the two fail differently
+and answer differently. A read that fails is contained (the agent remembers
+nothing of that scope this round and the reply happens), while a write that
 fails is a sanitized refusal the model reads out, so this is where an operator
 learns what the database actually said, by class name and never by message.
 
 #### Variant 1: `vinga_server.memory.store` at WARNING
 
 ```text
-could not store a fact for agent %s (%s); nothing was remembered
+could not write %s memory for agent %s (%s); nothing was changed
 ```
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
-| 1 | `agent` (`IDENTIFIER`) | no |  |  |
-| 2 | `error` (`CLASS_NAME`) | no |  |  |
+| 1 | `scope` (`TOKEN`) | no | one of: `agent`, `conversation`, `device` |  |
+| 2 | `agent` (`IDENTIFIER`) | no |  |  |
+| 3 | `error` (`CLASS_NAME`) | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `agent` | `IDENTIFIER` | yes | no |  | The agent that was acting, by its configured name. |
+| `scope` | `TOKEN` | yes | no | one of: `agent`, `conversation`, `device` | Which memory the refused write was for. |
 | `error` | `CLASS_NAME` | yes | no |  |  |
 
 ### `filler_disabled`

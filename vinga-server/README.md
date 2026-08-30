@@ -2092,8 +2092,8 @@ This index is the other half: what exists, and when it fires.
 | `mcp_tool_shadowed` | a published tool is dropped because a more specific entry owns its name |
 | `mcp_reload` | a reload of the MCP servers finishes, whether or not the caller is still connected |
 | `provider_reaches_loopback` | a provider entry built inside a container names this machine in its endpoint |
-| `memory_unreadable` | an agent's memory could not be read, so it remembers nothing this round |
-| `memory_unwritable` | a fact an agent was asked to remember could not be stored, so nothing was remembered |
+| `memory_unreadable` | one scope of an agent's memory could not be read, so it remembers nothing of that scope this round |
+| `memory_unwritable` | a change an agent asked for could not be stored, so nothing was changed |
 | `filler_disabled` | filler synthesis failed for one agent, so latency masking is off for it |
 | `capture_started` | a session is being recorded |
 | `capture_declined` | a session is not being recorded, and why |

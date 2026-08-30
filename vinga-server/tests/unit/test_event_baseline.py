@@ -765,10 +765,10 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                               "unchanged")),
     ),
     "vinga_server.memory.store:MemoryStore.read #1": (
-        ("MemoryUnreadable", ("agent", "error", "event")),
+        ("MemoryUnreadable", ("agent", "error", "event", "scope")),
     ),
     "vinga_server.memory.store:MemoryStore._store #1": (
-        ("MemoryUnwritable", ("agent", "error", "event")),
+        ("MemoryUnwritable", ("agent", "error", "event", "scope")),
     ),
     "vinga_server.ws:conversation #1": (
         ("AuthRejected", ("device", "event", "reason")),

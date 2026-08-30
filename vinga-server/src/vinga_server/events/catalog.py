@@ -93,6 +93,7 @@ from vinga_server.events.values import (
     McpRefusal,
     McpReloadOutcome,
     McpTransport,
+    MemoryScope,
     Nothing,
     NotOffered,
     OriginProvenance,
@@ -2572,31 +2573,48 @@ class McpReloadApplied(Variant):
 
 @dataclass(frozen=True)
 class MemoryUnreadable(Variant):
-    """An agent's memory could not be read."""
+    """One scope of an agent's memory could not be read."""
 
     CHANNEL: ClassVar[str] = MEMORY_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
-        "could not read memory for agent %s (%s); it remembers nothing this round"
+        "could not read %s memory for agent %s (%s); it remembers nothing of it "
+        "this round"
     )
-    ARGS: ClassVar[tuple[str, ...]] = ("agent", "error")
+    ARGS: ClassVar[tuple[str, ...]] = ("scope", "agent", "error")
 
-    agent: Identifier = value()
+    agent: Identifier = value(
+        note=(
+            "The agent whose reply the read was for, which is the acting "
+            "agent rather than the owner of the rows: a device scope is read "
+            "on behalf of whichever agent is speaking on that device."
+        )
+    )
+    scope: MemoryScope = value(
+        note=(
+            "Which memory could not be read. A read that answers several "
+            "scopes at once says this once per scope it could not answer, so "
+            "nothing renders empty unreported."
+        )
+    )
     error: ClassName = value()
 
 
 @dataclass(frozen=True)
 class MemoryUnwritable(Variant):
-    """A fact an agent was asked to remember could not be stored."""
+    """A change to one scope of an agent's memory could not be stored."""
 
     CHANNEL: ClassVar[str] = MEMORY_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
-        "could not store a fact for agent %s (%s); nothing was remembered"
+        "could not write %s memory for agent %s (%s); nothing was changed"
     )
-    ARGS: ClassVar[tuple[str, ...]] = ("agent", "error")
+    ARGS: ClassVar[tuple[str, ...]] = ("scope", "agent", "error")
 
-    agent: Identifier = value()
+    agent: Identifier = value(
+        note="The agent that was acting, by its configured name."
+    )
+    scope: MemoryScope = value(note="Which memory the refused write was for.")
     error: ClassName = value()
 
 
@@ -3052,18 +3070,24 @@ PROVIDER_REACHES_LOOPBACK = declare(
 
 MEMORY_UNREADABLE = declare(
     "memory_unreadable",
-    note="An agent's memory could not be read; it remembers nothing this round.",
+    note=(
+        "One scope of an agent's memory could not be read, so the agent "
+        "remembers nothing of it this round. Said once per scope the read "
+        "could not answer, since a read that serves a whole prompt answers "
+        "three of them."
+    ),
     variants=(MemoryUnreadable,),
 )
 
 MEMORY_UNWRITABLE = declare(
     "memory_unwritable",
     note=(
-        "A fact an agent was asked to remember could not be stored, so "
-        "nothing was remembered. The write path's own event, beside the "
-        "read path's above: the two fail differently and answer "
+        "A change an agent asked for could not be stored, so nothing was "
+        "changed. The write path's own event, beside the read path's "
+        "above: the two fail differently and answer "
         "differently. A read that fails is contained (the agent "
-        "remembers nothing this round and the reply happens), while a "
+        "remembers nothing of that scope this round and the reply "
+        "happens), while a "
         "write that fails is a sanitized refusal the model reads out, "
         "so this is where an operator learns what the database actually "
         "said, by class name and never by message."
