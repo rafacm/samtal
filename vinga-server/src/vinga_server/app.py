@@ -46,6 +46,7 @@ from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
+from vinga_server.memory import open_memory
 from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
@@ -292,6 +293,20 @@ async def _build_composition(
         # unwinds through it, and a writer started later would be one
         # more window where a refusal leaves a thread behind.
         conversations.start()
+    # What an agent was asked to remember, in a schema of its own beside
+    # the record's (#314). Opened here, which is what migrates it, and
+    # consumed by nothing yet: what this milestone ships is the chain,
+    # empty and current, and the store that reads and writes it arrives
+    # with the cutover. The disposal is registered in the same breath,
+    # so a boot that fails after this point unwinds through the stack
+    # rather than leaving a pool nobody owns.
+    #
+    # Unconditionally, and not behind the `memory:` section the
+    # file-backed store still reads above: migrating creates an empty
+    # table, an empty table is not a memory, and a deployment that
+    # stores nothing has nothing in it.
+    memory_store = open_memory(database)
+    stack.callback(memory_store.close)
     # The filled pauses, in each agent's own voice. Synthesized here
     # rather than beside the providers because synthesis is async, and
     # before the generation below because they are part of the world it
