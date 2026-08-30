@@ -283,10 +283,16 @@ surface, its API reference is the document that earns generating.
   instances over separate engines, interleaved `remember` calls,
   every fact present up to the cap; the existing
   `the_lock_held(MEMORY_CHAIN)` harness proves serialization);
-  database refusal (lock held past `LOCK_TIMEOUT_MS`: `read`
-  answers `""` plus `memory_unreadable`, `remember` raises the
-  sanitized busy failure and the tool result carries the fixed
-  sentence); the no-leak sentinel (credential-shaped database
+  database refusal, split by path because the paths differ: `read`
+  fails only on a genuine read failure (the store handed a read
+  engine whose backend is gone, or `USAGE` on the schema revoked
+  mid-run) and answers `""` plus `memory_unreadable`, never
+  raising; `remember` under the held `MEMORY_CHAIN` lock past
+  `LOCK_TIMEOUT_MS` raises the sanitized busy failure and the tool
+  result carries the fixed sentence; and the inverse property the
+  design claims is pinned in the same family: `read` still answers
+  the stored facts while another connection holds the chain lock,
+  because reads never request it; the no-leak sentinel (credential-shaped database
   password and URL, driven through read failure, write failure and
   boot, asserted absent from tool-result text, every log record's
   `__dict__`, both log formats, and the exception chains).
@@ -397,6 +403,11 @@ resolution.
    Use a genuine read failure; reserve the held lock for the
    write-busy test; add the inverse assertion that `read` succeeds
    while another connection holds `MEMORY_CHAIN`.
+
+   *Resolution*: adopted; the refusal family in Tests is split by
+   path, `read`'s failure driven by a genuinely failing read
+   backend, the held lock reserved for `remember`, and the
+   nonblocking read under a held lock pinned as its own case.
 
 3. **P1: the transactional rollback test fails before the insert.**
    The write engine takes the advisory lock on `begin`, so a
