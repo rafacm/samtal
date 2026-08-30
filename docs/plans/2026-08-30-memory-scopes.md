@@ -218,10 +218,20 @@ documented, not enforced).
 under #190 to: a held fact lives until the thread named by its
 `forgotten_in` is erased or pruned, at which point the coupling below
 takes it, and permanent forgetting never enters the held area at all.
-No session-close hook, because a session's close is not a thread's
-end (the thread is resumable, and an undo after an explicit resume is
-the reversibility decision working). The consequence is stated in the
-docs: the undo window is the thread's lifetime, not the connection's.
+No session-close hook where threads are resumable, because there a
+session's close is not a thread's end (an undo after an explicit
+resume is the reversibility decision working), and the consequence
+is stated in the docs: the undo window is the thread's lifetime, not
+the connection's. Where threads are not resumable, session close is
+the thread's end and the purge runs there: on a deployment with no
+conversation store, no thread rows land, no retention runs, and a
+closed session's threads can never be resumed, so the runtime purges
+their state and held rows as the session tears down (off the loop,
+contained like every memory failure, `memory_cleanup_failed` on
+error), which is what keeps a long-running recording-off process
+bounded without waiting for a reboot. The factory knows the
+condition already: it is handed `conversations`, and it passes the
+purge closure only when that is `None`.
 
 **The cross-store deletion is one transaction under a fixed
 ascending lock order, and thread-keyed memory writes join the
@@ -475,7 +485,10 @@ Named by role, homes confirmed against the authority taxonomy:
   - *Coupling*: erasing a thread through the API takes its state
     and its held facts and answers the new counts; retention prune
     takes the same; the boot sweep takes an orphan older than grace
-    and leaves a younger one; a live `remember` during an erasure
+    and leaves a younger one; on a recording-off deployment two
+    sessions close in one process lifetime and their threads' state
+    and held rows are gone without a restart; a live `remember`
+    during an erasure
     serializes correctly (the two-writer arrangement from #314,
     reused); every transaction that takes both chains' locks takes
     them in ascending key order (asserted by a test walking the
@@ -692,6 +705,13 @@ resolution.
    process. Purge the connection's thread ids at session close
    where threads cannot be resumed, with a test that proves rows
    disappear without a restart.
+
+   *Resolution*: adopted: where no conversation store exists the
+   runtime purges its threads' state and held rows at session
+   teardown (contained, `memory_cleanup_failed` on error), gated on
+   the factory's existing `conversations is None`; the named test
+   closes two sessions in one process lifetime and finds the rows
+   gone without a restart.
 
 7. **P2: the proposed construction and shutdown order is currently
    impossible.** The conversation store is constructed and started
