@@ -27,18 +27,16 @@ from vinga_server.db import DOMAIN_CHAIN, URL_REFUSED, StoreChain, connection_ur
 from vinga_server.db.migrations import autogen
 
 
-def _chain_in(tmp_path: Path) -> StoreChain:
-    """The domain chain, with its migrations somewhere disposable.
+def _chain_in(tmp_path: Path, chain: StoreChain = DOMAIN_CHAIN) -> StoreChain:
+    """One chain, with its migrations somewhere disposable.
 
     Same schema and same lock key, because the subject is the connection
     and not the chain: what moves is only the directory the revision
     file is written into.
     """
     where = tmp_path / "migrations"
-    shutil.copytree(DOMAIN_CHAIN.migrations, where)
-    return StoreChain(
-        schema=DOMAIN_CHAIN.schema, migrations=where, lock_key=DOMAIN_CHAIN.lock_key
-    )
+    shutil.copytree(chain.migrations, where)
+    return StoreChain(schema=chain.schema, migrations=where, lock_key=chain.lock_key)
 
 
 def _url_of(database: str) -> str:
@@ -115,6 +113,98 @@ def test_the_scratch_database_is_made_migrated_and_taken_away(
     written = set((chain.migrations / "versions").glob("*.py")) - before
     assert len(written) == 1, written
     assert not _exists(autogen.SCRATCH)
+
+
+# Which chain a selector reaches
+#
+# The command is one piece of work with the chain as its only argument,
+# which is what `StoreChain` is for, and the selectors are therefore the
+# whole of what can be wrong about it: a flag that was deleted, or one
+# mapped to the wrong chain, would write a candidate migration for a
+# schema nobody asked about. Nothing else in this suite would notice,
+# because every case above passes the chain in directly.
+#
+# Asserted through `generate`, which is the public seam `main` reaches
+# the work through, so what is pinned is the argument the command
+# composes rather than an internal call.
+
+
+def _selected(monkeypatch: pytest.MonkeyPatch) -> list[StoreChain]:
+    """Every chain this run's command hands to the work, in order."""
+    seen: list[StoreChain] = []
+
+    def spy(message: str, chain: StoreChain) -> None:
+        seen.append(chain)
+
+    monkeypatch.setattr(autogen, "generate", spy)
+    return seen
+
+
+def test_the_selectors_name_the_chains_they_say_they_do(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All three, by the spelling an operator types.
+
+    The domain chain has no flag because it is what the command did when
+    it was the only chain there was, and that is asserted here too: a
+    default quietly moved to another chain is the same defect as a flag
+    pointing at the wrong one.
+    """
+    from vinga_server.conversations.store import CONVERSATIONS_CHAIN
+    from vinga_server.memory import MEMORY_CHAIN
+
+    expected = {
+        (): DOMAIN_CHAIN,
+        ("--conversations",): CONVERSATIONS_CHAIN,
+        ("--memory",): MEMORY_CHAIN,
+    }
+    for selector, chain in expected.items():
+        seen = _selected(monkeypatch)
+
+        assert autogen.main([*selector, "a probe of which chain"]) == 0, selector
+
+        assert seen == [chain], selector
+
+
+def test_the_usage_line_names_every_selector(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A flag nothing prints is a flag nobody finds. The usage is what a
+    maintainer reads when they get the arguments wrong, so it names the
+    chains the command can be pointed at."""
+    assert autogen.main([]) == 2
+
+    usage = capsys.readouterr().err
+    assert "--conversations" in usage
+    assert "--memory" in usage
+
+
+def test_the_memory_chain_autogenerates_against_a_scratch_database(
+    blank_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The third chain through the whole lifecycle, which is how its
+    baseline was written in the first place.
+
+    The environment under `memory/migrations/` refuses to run without a
+    connection and a chain on the config's attributes, so this is the
+    one path that proves the command supplies both for it: a revision
+    file is written, which is only possible against a database Alembic
+    reached, migrated and compared.
+    """
+    from vinga_server.memory import MEMORY_CHAIN
+
+    monkeypatch.setenv("VINGA_DB_URL", _url_of(blank_database))
+    chain = _chain_in(tmp_path, MEMORY_CHAIN)
+    before = set((chain.migrations / "versions").glob("*.py"))
+
+    autogen.generate("a probe of the third chain", chain)
+
+    written = set((chain.migrations / "versions").glob("*.py")) - before
+    assert len(written) == 1, written
+    assert not _exists(autogen.SCRATCH)
+    # And the database the URL named is as blank as it was: the scratch
+    # database is derived from that connection, never the one it names.
+    assert MEMORY_CHAIN.schema not in _schemas(blank_database)
 
 
 # What a failing maintenance lifecycle is allowed to say
