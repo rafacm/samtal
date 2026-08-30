@@ -120,8 +120,8 @@ os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
 # start at 1.
 #
 # The stamps survive it by construction rather than by an exclusion
-# list: the tables truncated are enumerated from the two `schema.py`
-# metadata objects, and neither of them carries an `alembic_version`
+# list: the tables truncated are enumerated from the three `schema.py`
+# metadata objects, and none of them carries an `alembic_version`
 # table. Truncating those would leave the next opener rerunning a
 # baseline against schemas that already have its tables.
 #
@@ -307,20 +307,25 @@ def _maintenance():
 
 
 def _application_tables() -> list[str]:
-    """Every table the two stores own, schema-qualified, in an order
+    """Every table the three stores own, schema-qualified, in an order
     `TRUNCATE` accepts.
 
     Read off the metadata rather than listed, which is what keeps the
-    two `alembic_version` tables out of it: they are Alembic's and are
-    in neither metadata object, so the stamps survive truncation because
-    nothing here can name them.
+    three `alembic_version` tables out of it: they are Alembic's and are
+    in none of the metadata objects, so the stamps survive truncation
+    because nothing here can name them.
     """
     from vinga_server.conversations import schema as conversations_schema
     from vinga_server.db import schema as domain_schema
+    from vinga_server.memory import schema as memory_schema
 
     return [
         f'"{table.schema}"."{table.name}"'
-        for metadata in (domain_schema.metadata, conversations_schema.metadata)
+        for metadata in (
+            domain_schema.metadata,
+            conversations_schema.metadata,
+            memory_schema.metadata,
+        )
         for table in metadata.sorted_tables
     ]
 
@@ -402,20 +407,22 @@ def _exists(connection, name: str) -> bool:
 
 
 def _migrate(name: str) -> None:
-    """Both chains to head in `name`, through the product's own openers.
+    """Every chain to head in `name`, through the product's own openers.
 
     The product's, and not a metadata `create_all`: what a test opens
     afterwards has to be the schema a deployment's migration produces,
-    including the two version tables, or the lane would be proving a
+    including the three version tables, or the lane would be proving a
     shape nothing ships.
     """
     from vinga_server.config.models import DatabaseConfig
     from vinga_server.conversations.store import open_conversations
     from vinga_server.db import open_database
+    from vinga_server.memory import open_memory
 
     settings = DatabaseConfig(host=DB_HOST, port=DB_PORT, name=name, user=DB_USER)
     open_database(settings).dispose()
     open_conversations(settings).dispose()
+    open_memory(settings).close()
 
 
 def drop_database(name: str) -> None:
@@ -517,7 +524,7 @@ _database_default(LANE_DATABASE)
 
 
 def clear_store() -> None:
-    """Everything both stores hold, gone, with the identity counters
+    """Everything the stores hold, gone, with the identity counters
     back at one and the migration stamps untouched.
 
     Public because one caller is not a fixture: the event baseline
