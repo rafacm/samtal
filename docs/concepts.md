@@ -456,10 +456,14 @@ That injection is also where memory leaves the host, and the two halves
 of the answer are worth stating separately. As **storage**, memory never
 leaves: it is rows in the deployment's own database and no other server
 is told about them. As **prompt content**, it goes wherever the rest of
-the prompt goes: what a conversation is keeping and what the agent
-remembers are read into every reply, so they follow the active LLM
-provider's egress exactly as the transcript and the persona do. An agent
-on a cloud model sends what it remembered along with what was just said.
+the prompt goes: what a conversation is keeping, what the agent
+remembers and what the device's notes hold are read into every reply,
+and `recall` answers with more of them on demand, so all of it follows
+the active LLM provider's egress exactly as the transcript and the
+persona do. An agent on a cloud model sends what it remembered along
+with what was just said. The device scope is the half worth saying
+plainly: a note about the room or the household reaches the provider of
+*every* agent bound to that device, not only the one that was told it.
 `server.local_only` is the existing guard and it is the same one: a
 provider that sends session data off the host cannot be booted under it.
 
@@ -474,16 +478,6 @@ there starts with an empty ledger. Anything that should outlive the
 conversation has to be promoted to agent memory with `remember`, which
 is what a game agent's "save the game" and a tutor's "you have mastered
 this" actually are.
-
-**Where remembered things go.** They are stored on your own host and
-leave it only the way the rest of a prompt does: whatever is injected
-or looked up is sent to the agent's LLM provider with the reply it is
-part of, so a cloud provider sees it and a local one does not. The
-device scope is worth saying plainly: a note about the household
-reaches the provider of *every* agent bound to that device, not only
-the one that was told it. `server.local_only: true` is the existing
-guard, and it is a boot check rather than a promise: a server that
-starts under it has no provider that sends session data anywhere.
 
 Whether a *particular* agent may remember at all is not answerable
 today, deliberately: per-agent control arrives with the scopes' own

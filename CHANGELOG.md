@@ -9,6 +9,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **An assistant can correct, remove and bring back what it
+  remembered, and keep notes about the place** (#83). `remember` gains
+  a scope and answers with the number the fact is kept under, and four
+  builtins join it. `update_memory` replaces one fact's words by that
+  number; `forget` removes one and answers with the words it removed,
+  which the assistant is asked to say out loud so the user can ask for
+  it back with `restore_memory`; `permanently: true` erases outright
+  instead, with nothing to bring back. `recall` looks facts up by their
+  words over everything the agent and its device hold, newest first,
+  and is where the numbers come from: the injected block shows none.
+  Every numbered operation reaches the agent's own facts and its
+  device's and nothing else, and a number belonging to somebody else is
+  answered exactly as a number belonging to nobody.
+  `remember` called with `scope: device` keeps the fact for the board
+  rather than for the agent, shared by every agent bound to it: the
+  room, the household, how the hardware here behaves. It is steered by
+  the tool's description rather than enforced, and the two memories stay
+  separate in every direction. A device note therefore reaches the LLM
+  provider of every agent on that device, which is worth knowing before
+  telling one something about your household; storage never leaves your
+  host, and `server.local_only` is the guard it always was.
 - **A conversation can write down what is currently true in it** (#83).
   Two new builtins, `set_state` and `clear_state`, keep a small keyed
   ledger for the conversation happening now, under names the assistant
@@ -79,6 +100,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **An agent may remember far more than a prompt can carry** (#83). The
+  agent scope grows from 200 facts in 8 KiB to 1000 in 64 KiB, and the
+  block injected into a reply becomes the newest 40 lines within 4 KiB
+  rather than the whole scope. Everything past that is still remembered
+  and is reached with `recall`, which searches the injected part too.
+  Nothing is lost in the upgrade: what was stored is what is stored, and
+  a deployment whose agents have fewer than 40 facts sends exactly the
+  prompt it sent before.
+- **A single fact too long for its scope is now refused** (#83).
+  `remember` used to keep one, because the pruning never goes below one
+  fact, which left that scope over its own cap for as long as the fact
+  lived. It is refused with a fixed sentence asking for fewer words, on
+  every door: the tool, the store, and the correction. Facts already
+  stored are untouched.
+- **Four more reserved names** (#83). Builtin tool names may not be used
+  as `mcp_servers` entry names, and the set has grown by `update_memory`,
+  `forget`, `restore_memory` and `recall`. A deployment with an entry
+  called one of those refuses the boot with the existing sentence naming
+  the reserved set; rename the entry and its tools are published under
+  the new prefix.
 - **`set_state` and `clear_state` are reserved names** (#83). Builtin
   tool names may not be used as `mcp_servers` entry names, and the set
   has grown by two. A deployment with an entry called `set_state` or
