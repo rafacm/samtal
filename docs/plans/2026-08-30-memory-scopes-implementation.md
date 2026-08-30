@@ -209,3 +209,107 @@ and one an amendment to the plan itself.
   grace period and without its anti-join; and `read_for_prompt` reading
   each scope on a connection of its own.
 - Not verified: the `image` job, which builds and smokes the container.
+
+### PR review round
+
+External review of the branch as pushed to PR #359, at `a73f7b41`
+against `origin/main`: backend codex (codex-cli 0.151.0), model
+gpt-5.6-sol, read-only sandbox, 2026-08-30, runtime 8m20s. Four
+findings, two P1 and two P2, verdict as received: mergeable after the
+listed fixes. Condensed below as received, each with its resolution and
+the commit that landed it.
+
+Three of the four share a shape worth naming: a bound or a boundary
+stated in prose and not enforced in code. A refusal that was documented
+as sanitized and was not; two caps that were named in the plan and were
+over-run by a line or a sentence; a vocabulary that was declared closed
+and was left to the database to close. The fourth is the opposite, a
+released behavior that changed while the milestone said it would not.
+
+1. **P1: the cross-store purge exposed raw database exceptions.** It
+   executed both deletes with no failure boundary and said so in its
+   docstring, so a SQLAlchemy error travelled to the caller carrying
+   the statement it ran and the parameters bound into it. Those
+   parameters are thread ids, which is what an erasure exists to
+   remove. The no-leak family covered `purge_threads`, which `_cleaned`
+   contains, and drove the bare `purge` only on success. Catch inside,
+   build a fixed refusal outside the handler, re-raise so the caller's
+   transaction still rolls back, and add a sentinel-bearing failing
+   test that walks the chain.
+
+   *Resolution* (`75cf806c`): adopted whole, with two sentences of its
+   own rather than the two a model reads out, because what asks for a
+   purge is an erasure or a retention prune and its reader is an
+   operator. Chosen by class through `db.is_busy`, built inside the
+   handler and raised after it, cause and context severed. The test
+   binds a credential-shaped thread id into a delete a trigger refuses
+   and hunts it through the sentence, the chain and both log formats;
+   the mutation that removes the boundary lets the driver's error out
+   with the id in it.
+
+2. **P1: M1 changed behavior the milestone promised to keep.** Two
+   parts. `remember` delegated to `add` and so began refusing a single
+   fact larger than `MAX_BYTES`, where #314 kept it (the prune never
+   goes below one fact); and the events' `scope` field and
+   `memory_cleanup_failed` were the plan's M2 items, shipped here,
+   while the changelog claimed nothing above the store changed.
+
+   *Resolution*, in two commits. The behavior half (`81426b49`):
+   adopted whole. `remember` writes through the same transaction and
+   stops short of that one refusal, with the reason on the sentence; a
+   compatibility test stores an over-cap fact and reads it back, and
+   the refusal stays on `add` and `update`, which nothing calls yet.
+   The tool's own changeover arrives in M3, where its changelog
+   announces it. The event half (`6d9782bc`): the placement moved
+   rather than the code. The emit sites are the operations M1
+   implements, and shipping an event whose required fields change one
+   release later would hand an operator's parser `memory_unwritable`
+   without a scope in one release and with one in the next, for paths
+   that never behaved differently. M1's milestone bullet gains the two
+   event items, M2's loses them, the deviation is recorded above, and
+   the changelog now states that the two events gained a field and that
+   a third arrived.
+
+3. **P2: the core and the lookup did not enforce the bounds they
+   name.** `_core` stopped trimming at one line, so an accepted fact
+   between `CORE_BYTES` and `MAX_BYTES` produced an over-cap prompt
+   block; `_bounded` appended `MORE_MATCHED` outside `RECALL_BYTES`,
+   and the byte-bound test asserted the overflow; and a single match
+   longer than `RECALL_BYTES` answered with the refinement sentence
+   alone, so the id the plan says recall must expose was unreachable
+   for exactly the fact a model would want it for.
+
+   *Resolution* (`ba2875ac`): adopted whole. The core trims to empty,
+   which loses nothing (the fact is stored, looked up and corrected by
+   its id) and is the only way the block's cap can be true. The
+   lookup's bound is on the answer, sentence included, so each prefix
+   is measured as the answer it would produce and the continuation
+   counts against both limits. One match always survives, cut from the
+   right so its id is intact, with a fixed marker saying it was cut.
+   Three mutations, one per bound, each caught by its own case.
+
+4. **P2: a conversation scope reached the database and was misreported.**
+   The four fact operations accepted every member of the vocabulary,
+   `_caps` treated anything not device as agent, and the row met the
+   table's check constraint, whose violation the write seam maps to
+   `memory_unwritable` and a storage failure. A caller's mistake was
+   answered by telling an operator that a healthy database refused a
+   write.
+
+   *Resolution* (`4f51e82e`): adopted whole. Every fact operation asks
+   `_only_a_fact_scope` before a connection and answers one fixed
+   sentence naming the two members a fact may carry, never the one that
+   was passed; `_caps` says why it knows about two scopes. The test
+   drives all four operations and asserts no row moved and no
+   storage-failure event was emitted, and the mutation that drops the
+   guard reproduces the finding exactly, `IntegrityError` and all.
+
+### Verification after the review round
+
+- `uv run ruff check .`: clean. `uv run mypy`: clean.
+- `uv run pytest tests/unit -q`: 4650 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: the same.
+- `uv run pytest tests/integration -q`: 226 passed.
+- The five generated documents regenerate to their committed bytes, and
+  the command-spellings census is current.
+- Every guard above was run against its mutation before being trusted.
