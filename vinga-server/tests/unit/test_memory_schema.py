@@ -7,17 +7,17 @@ migrations ship inside the package a wheel is built from, that its row
 ids come from a sequence, and that its advisory key is somebody else's
 neither in value nor in effect.
 
-Nothing here reads or writes a fact through the store, because the
-store does not read or write one yet: what this milestone ships is the
-chain, migrated and empty, and `read` and `remember` arrive with the
-cutover. The rows planted below are planted through the schema's own
-table, which is what a suite about a schema has to reach.
+Nothing here reads or writes a fact through the store, and that is a
+division of labour rather than a limitation: `read` and `remember` are
+`test_memory_store.py`'s subject, and a suite about a schema has to
+reach the table itself. The rows planted below are planted through the
+schema's own table for that reason.
 
 The store is opened through `open_memory` and the database is inspected
 through `db.read_engine` and `db.write_engine`, both of them public
 doors onto a database somebody else has migrated. Nothing here reaches
-into the store for an engine: what it owns is the migration and the
-disposal, and those are the whole of its interface today.
+into the store for an engine: what this suite needs of it is the
+migration and the disposal.
 """
 
 from pathlib import Path

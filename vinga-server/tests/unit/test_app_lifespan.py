@@ -172,12 +172,13 @@ def memory_stores(
 ) -> tuple[list[MemoryStore], list[MemoryStore]]:
     """Every memory store this run opens, and every one it closes.
 
-    The store is behaviorally dormant this milestone (#314): nothing
-    reads or writes a fact through it, so an opener deleted from the
-    build would leave every suite green and a deployment with an
-    unmigrated schema. What is asserted is therefore the boot's own two
-    acts, the open that migrates and the close registered beside it, and
-    the schema really appearing in a database that had none.
+    The boot's own two acts, asserted where nothing else asserts them
+    (#314): a reply that reads memory proves the store it was handed,
+    not the open that migrated the schema and not the close registered
+    beside it, so an opener deleted from the build would leave a
+    deployment migrating nothing and a suite that never noticed. What
+    is pinned here is therefore the open, the close, and the schema
+    really appearing in a database that had none.
     """
     opened: list[MemoryStore] = []
     closed: list[MemoryStore] = []

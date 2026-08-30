@@ -345,7 +345,7 @@ class CaptureConfig(BaseModel):
 
     # Refuse to start a capture when the volume has less free than this.
     # The byte budget above does not protect the volume on its own: the
-    # model caches and agent memory share it and grow underneath.
+    # model caches share it and grow underneath.
     min_free_mb: float = Field(default=1000.0, ge=0)
 
 
