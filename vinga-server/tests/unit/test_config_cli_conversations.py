@@ -372,7 +372,7 @@ def test_delete_confirms_at_a_terminal_and_answers_the_counts(
     run, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Registered destructive, so it asks; and the counts it prints are
-    the four a thread erasure takes, with nothing said about the
+    the six a thread erasure takes, with nothing said about the
     sessions and the events it deliberately leaves standing."""
     recorded("alpha")
     at_a_terminal(monkeypatch, "y\n")
@@ -386,6 +386,8 @@ def test_delete_confirms_at_a_terminal_and_answers_the_counts(
         "tool_invocations: 0",
         "conversations: 1",
         "milestones: 0",
+        "state: 0",
+        "held_facts: 0",
     ]
     assert out(run, capsys, "conversation", "list")[1].startswith(
         "this server has recorded no"

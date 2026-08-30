@@ -3074,7 +3074,7 @@
       },
       "delete": {
         "summary": "Erase Session",
-        "description": "Erase one named session: its row, its turns wherever their\nthreads are, the calls those turns made, and its events.\n\nErasure outranks every copy the store derived from what is going\n(`threads.erase_sessions` says exactly which), and it is one\ntransaction, so a session's rows go together or none of them\ndoes. A session that is still running when its row goes stops\nbeing recorded at the writer's next marker; what it says after\nthat is not kept.",
+        "description": "Erase one named session: its row, its turns wherever their\nthreads are, the calls those turns made, and its events.\n\nErasure outranks every copy the store derived from what is going\n(`threads.erase_sessions` says exactly which), and it is one\ntransaction, so a session's rows go together or none of them\ndoes. A session that is still running when its row goes stops\nbeing recorded at the writer's next marker; what it says after\nthat is not kept.\n\nA thread this leaves with nothing is deleted whole, and its\nmemory goes with it in the same transaction: what that\nconversation was keeping, and the facts it forgot and could have\nbrought back.",
         "operationId": "erase_session_sessions__session__delete",
         "parameters": [
           {
@@ -3451,7 +3451,7 @@
       },
       "delete": {
         "summary": "Erase Conversation",
-        "description": "Erase one named thread: its row, its turns out of whatever\nsessions they were spoken in, the calls those turns made, and\nits recap checkpoints.\n\nThe sessions themselves are untouched, and so is their\ntelemetry: a session is a connection episode and it still\nhappened, with a gap in it now. A thread that is still being\nspoken to when its row goes stops being recorded at the writer's\nnext marker, and the conversation in the room carries on.",
+        "description": "Erase one named thread: its row, its turns out of whatever\nsessions they were spoken in, the calls those turns made, and\nits recap checkpoints.\n\nIts memory goes with it in the same transaction: what that\nconversation was keeping, and the facts it forgot and could have\nbrought back. What the agent remembers about the user and about\nthe device is not a thread's and stays.\n\nThe sessions themselves are untouched, and so is their\ntelemetry: a session is a connection episode and it still\nhappened, with a gap in it now. A thread that is still being\nspoken to when its row goes stops being recorded at the writer's\nnext marker, and the conversation in the room carries on.",
         "operationId": "erase_conversation_conversations__conversation__delete",
         "parameters": [
           {
@@ -4629,6 +4629,16 @@
             "type": "integer",
             "title": "Milestones",
             "description": "How many recap checkpoints were deleted: those whose recorded coverage held an erased turn, every checkpoint descended from one along the `parent` lineage, and those belonging to a thread that went whole."
+          },
+          "state": {
+            "type": "integer",
+            "title": "State",
+            "description": "How many notes the deleted threads were keeping went with them. A conversation's state shares its thread's lifecycle, so it is deleted in the same transaction and this count is as true as the others."
+          },
+          "held_facts": {
+            "type": "integer",
+            "title": "Held Facts",
+            "description": "How many facts those threads had forgotten and could still have brought back went with them. What an agent remembers about the user or the device is not a thread's and is not counted here."
           }
         },
         "additionalProperties": false,
@@ -4639,10 +4649,12 @@
           "tool_invocations",
           "events",
           "conversations",
-          "milestones"
+          "milestones",
+          "state",
+          "held_facts"
         ],
         "title": "Erasure",
-        "description": "What a deletion took, per table.\n\nCounts rather than an acknowledgement sentence, because the caller\nof a purge asked about a set it named by selector and cannot know\nwhat was in it. Six numbers rather than one, because the tables go\nfor different reasons: a session's own row, the turns that named it\nwherever their thread is, the invocations under those turns, the\nsession's telemetry, the recap checkpoints whose coverage held an\nerased turn, and the threads left with nothing."
+        "description": "What a deletion took, per table.\n\nCounts rather than an acknowledgement sentence, because the caller\nof a purge asked about a set it named by selector and cannot know\nwhat was in it. Eight numbers rather than one, because the tables go\nfor different reasons: a session's own row, the turns that named it\nwherever their thread is, the invocations under those turns, the\nsession's telemetry, the recap checkpoints whose coverage held an\nerased turn, the threads left with nothing, and the two halves of\nthe memory those threads took with them."
       },
       "FillerDiff": {
         "properties": {
@@ -5810,6 +5822,16 @@
             "type": "integer",
             "title": "Milestones",
             "description": "How many recap checkpoints went: the thread's own, and everything descended from one along the `parent` lineage."
+          },
+          "state": {
+            "type": "integer",
+            "title": "State",
+            "description": "How many notes this conversation was keeping went with it. Its state shares its lifecycle, so it is deleted in the same transaction and this count is as true as the others."
+          },
+          "held_facts": {
+            "type": "integer",
+            "title": "Held Facts",
+            "description": "How many facts this conversation had forgotten and could still have brought back went with it. What the agent remembers about the user or the device is not this thread's and is not counted here."
           }
         },
         "additionalProperties": false,
@@ -5818,10 +5840,12 @@
           "conversations",
           "turns",
           "tool_invocations",
-          "milestones"
+          "milestones",
+          "state",
+          "held_facts"
         ],
         "title": "ThreadErasure",
-        "description": "What erasing a thread took, per table.\n\nFour counts and deliberately not the six a session erasure answers:\nerasing a thread takes its turns out of whatever sessions they were\nspoken in and touches neither those sessions nor their telemetry. A\nsession is a connection episode and it still happened, with a gap in\nit now."
+        "description": "What erasing a thread took, per table.\n\nSix counts and deliberately not the eight a session erasure answers:\nerasing a thread takes its turns out of whatever sessions they were\nspoken in and touches neither those sessions nor their telemetry. A\nsession is a connection episode and it still happened, with a gap in\nit now.\n\nThe two about memory are here because a conversation's own memory is\nthe thread's rather than the session's: it goes when the thread does,\nin the same transaction, whichever door the deletion came through."
       },
       "ToolInvocation": {
         "properties": {
