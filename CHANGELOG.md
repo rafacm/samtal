@@ -106,8 +106,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   rather than the whole scope. Everything past that is still remembered
   and is reached with `recall`, which searches the injected part too.
   Nothing is lost in the upgrade: what was stored is what is stored, and
-  a deployment whose agents have fewer than 40 facts sends exactly the
-  prompt it sent before.
+  an agent whose facts fit inside both of the block's limits, 40 lines
+  and 4 KiB, sends exactly the prompt it sent before. An agent with
+  fewer than 40 facts that ran past 4 KiB of them is the one case that
+  moves, and it moves by injecting less: the oldest lines fall out of
+  the block and stay in the memory, where `recall` reaches them.
 - **A single fact too long for its scope is now refused** (#83).
   `remember` used to keep one, because the pruning never goes below one
   fact, which left that scope over its own cap for as long as the fact
