@@ -590,7 +590,11 @@ class PipelineRuntime:
         # a device tool may take stays this module's answer.
         self._sources: tuple[ToolSource, ...] = (
             BuiltinTools(
-                self._agents, memory, DEFAULT_TOOL_TIMEOUT_S, self._resumption
+                self._agents,
+                memory,
+                DEFAULT_TOOL_TIMEOUT_S,
+                self._memory_context,
+                self._resumption,
             ),
             DeviceTools(output, DEFAULT_TOOL_TIMEOUT_S),
             McpTools(mcp_servers, DEFAULT_TOOL_TIMEOUT_S),
@@ -630,6 +634,28 @@ class PipelineRuntime:
     @_conversation.setter
     def _conversation(self, conversation: str | None) -> None:
         self._events.conversation = conversation
+
+    @property
+    def _device(self) -> str | None:
+        """The board this conversation is happening on, which is what
+        the device scope of memory is addressed by.
+
+        A property over the events object beside `_agent` and
+        `_conversation`, and for the same reason: the edge writes the MAC
+        there as soon as it is normalized, so that is where it lives, and
+        a second copy here would be a second answer to one question.
+        """
+        return self._events.device
+
+    def _memory_context(self) -> builtin.MemoryContext:
+        """Which memory this session's tool calls belong to, asked at the
+        moment a call runs.
+
+        Not kept, because two of the three moves a reply can make change
+        the answer: a note written after a session has moved to another
+        thread belongs to the thread it is on now.
+        """
+        return builtin.MemoryContext(self._device, self._conversation)
 
     @property
     def _turns(self) -> list[Turn]:

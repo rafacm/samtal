@@ -4,8 +4,8 @@ Three sources of tools reach the same list, and the model sees one flat
 set of names. Rather than detect collisions when the list is merged and
 then have to invent a tie-break, the namespace is structural:
 
-- builtins are bare (`switch_agent`, `remember`, `new_conversation`,
-  `resume_conversation`);
+- builtins are bare (`switch_agent`, `remember`, `set_state`,
+  `clear_state`, `new_conversation`, `resume_conversation`);
 - the device's tools keep the firmware's `self.` prefix, with the dots
   sanitized away (`self_audio_speaker_set_volume`);
 - an MCP server's tools carry their configuration entry name and a
@@ -36,6 +36,11 @@ SERVER_SEPARATOR = "__"
 
 SWITCH_AGENT = "switch_agent"
 REMEMBER = "remember"
+# The two the conversation's own ledger is written with. Bare like the
+# rest, and named here for the same reason: what an entry may not be
+# called is decided by this tuple.
+SET_STATE = "set_state"
+CLEAR_STATE = "clear_state"
 # The two the conversation itself is moved with. Named here like the
 # other builtins, which is what reserves them against an MCP entry by
 # construction: the reservation is the reason this tuple exists, and a
@@ -43,7 +48,14 @@ REMEMBER = "remember"
 # far side may shadow.
 NEW_CONVERSATION = "new_conversation"
 RESUME_CONVERSATION = "resume_conversation"
-BUILTIN_TOOL_NAMES = (SWITCH_AGENT, REMEMBER, NEW_CONVERSATION, RESUME_CONVERSATION)
+BUILTIN_TOOL_NAMES = (
+    SWITCH_AGENT,
+    REMEMBER,
+    SET_STATE,
+    CLEAR_STATE,
+    NEW_CONVERSATION,
+    RESUME_CONVERSATION,
+)
 
 # Names an mcp_servers entry may not take, because they already mean
 # something in the merged list.

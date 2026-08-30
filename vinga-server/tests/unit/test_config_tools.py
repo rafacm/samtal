@@ -123,7 +123,10 @@ def test_a_prompt_name_keeps_the_whitespace_it_was_written_with() -> None:
     assert config.mcp_servers["ha"].inject_prompts == [written]
 
 
-@pytest.mark.parametrize("name", ["self", "switch_agent", "remember", "home.assistant"])
+@pytest.mark.parametrize(
+    "name",
+    ["self", "switch_agent", "remember", "set_state", "clear_state", "home.assistant"],
+)
 def test_a_reserved_or_unusable_entry_name_fails_the_boot(name: str) -> None:
     """The section and the rule, and never the name: a name that fails
     the charset is exactly the string that must not be echoed, which is

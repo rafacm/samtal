@@ -35,7 +35,7 @@ groups' names. No two sources can own one name, so asking them in a
 fixed order settles nothing that was ever in doubt.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 from vinga_server.device.boundary import DeviceOutput
@@ -117,24 +117,32 @@ class BuiltinTools:
     which namespace the model reached into, and whether the call then
     ran is what the result says.
 
-    Three of the four are offered here and executed by the runtime,
-    because what they do is end the tool loop rather than produce a
-    result the model reads: `switch_agent` moves the conversation to
-    another agent, `new_conversation` and a `resume_conversation` naming
-    a thread move it to another conversation. `switch_agent` and
-    `new_conversation` reach `dispatch` only if that handling ever stops
-    catching them, and are answered as the builtin that cannot run.
+    Three of them are offered here and executed by the runtime, because
+    what they do is end the tool loop rather than produce a result the
+    model reads: `switch_agent` moves the conversation to another agent,
+    `new_conversation` and a `resume_conversation` naming a thread move
+    it to another conversation. `switch_agent` and `new_conversation`
+    reach `dispatch` only if that handling ever stops catching them, and
+    are answered as the builtin that cannot run.
 
     The two conversation tools are offered whether or not this server
     can resume anything, which is the point of the refusal they answer
     with: a tool that is simply absent is a tool a model invents, and a
     refusal it can read out is something the user hears.
 
-    `remember` is offered to every agent, unconditionally, because
-    remembered facts live in a schema this server migrates at every boot
-    (#314) and there is no deployment without one. It used to be offered
-    only where a memory directory was configured, which is the one
-    branch this class lost.
+    `remember` and the two state tools are offered to every agent,
+    unconditionally, because memory lives in a schema this server
+    migrates at every boot (#314) and there is no deployment without one.
+    `remember` used to be offered only where a memory directory was
+    configured, which is the one branch this class lost.
+
+    `context` is what the two state tools are addressed by: a callable
+    rather than a value, because a reply can move a session to another
+    conversation and a note written after that move belongs to the thread
+    the session is on now. It is a constructor concern of this one source
+    rather than a widening of `ToolSource`: the protocol asks what every
+    source has to answer, and where a session's memory lives is not one
+    of those questions.
 
     `threads` is the search half of the resumption flow, absent in every
     deployment that has not switched resumption on and compared
@@ -146,11 +154,13 @@ class BuiltinTools:
         agents: Sequence[str],
         memory: MemoryStore,
         timeout_s: float,
+        context: Callable[[], builtin.MemoryContext],
         threads: ThreadSearch | None = None,
     ) -> None:
         self._agents = agents
         self._memory = memory
         self._timeout_s = timeout_s
+        self._context = context
         self._threads = threads
 
     def snapshot(self, agent: str) -> Sequence[ToolDef]:
@@ -160,6 +170,8 @@ class BuiltinTools:
         if len(self._agents) > 1:
             tools.append(builtin.switch_agent_tool(self._agents))
         tools.append(builtin.remember_tool())
+        tools.append(builtin.set_state_tool())
+        tools.append(builtin.clear_state_tool())
         tools.append(builtin.new_conversation_tool())
         tools.append(builtin.resume_conversation_tool())
         return tools
@@ -170,6 +182,20 @@ class BuiltinTools:
     async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         if claim.name == names.REMEMBER:
             return await builtin.remember(self._memory, agent, claim.arguments or {}), False
+        if claim.name == names.SET_STATE:
+            return (
+                await builtin.set_state(
+                    self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
+        if claim.name == names.CLEAR_STATE:
+            return (
+                await builtin.clear_state(
+                    self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
         if claim.name == names.RESUME_CONVERSATION:
             # The search half. A call that named a conversation never
             # arrives here: the runtime takes those, because a selection

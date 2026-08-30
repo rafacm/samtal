@@ -30,16 +30,30 @@ def test_a_usable_entry_name_is_accepted(name: str) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["self", "switch_agent", "remember", "home.assistant", "a b", ""],
+    [
+        "self",
+        "switch_agent",
+        "remember",
+        "set_state",
+        "clear_state",
+        "new_conversation",
+        "resume_conversation",
+        "home.assistant",
+        "a b",
+        "",
+    ],
 )
 def test_a_reserved_or_unusable_entry_name_is_refused(name: str) -> None:
     # Reserved names are what makes collisions unrepresentable: an entry
     # called "self" could shadow a device tool, and one called
-    # "switch_agent" a builtin. There are two builtins now, and a name
-    # that stops being one becomes usable as an entry name; what that
-    # permits is an entry, never a bare tool, since an entry's tools
+    # "switch_agent" a builtin. The set grows with the builtins, which is
+    # a compatibility surface: an entry already called `set_state` meets
+    # the refusal after an upgrade and has to be renamed. A name that
+    # stops being a builtin becomes usable as an entry name again; what
+    # that permits is an entry, never a bare tool, since an entry's tools
     # publish as `<entry>__<tool>` and an MCP tool is always qualified.
     assert not names.is_valid_entry_name(name)
+    assert name in names.RESERVED_ENTRY_NAMES or not names.TOOL_NAME_PATTERN.match(name)
 
 
 def test_a_server_tool_carries_its_entry_and_routes_back_to_it() -> None:

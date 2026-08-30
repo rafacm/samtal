@@ -30,7 +30,14 @@ from tests.support.configs import (
 from tests.support.events import events
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import call, history, run_reply, session_for, talking
+from tests.support.sessions import (
+    call,
+    events_of,
+    history,
+    run_reply,
+    session_for,
+    talking,
+)
 from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
@@ -38,6 +45,7 @@ from vinga_server.app import create_app
 from vinga_server.config import Config
 from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import ToolCall, Turn
+from vinga_server.tools import builtin
 from vinga_server.tools.builtin import switch_agent_tool
 from vinga_server.tools.mcp import McpServers
 
@@ -172,19 +180,24 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
 
     # Both offers whole, so the conditional tool is the entire
     # difference between them: the device bound to one agent has nowhere
-    # to switch, and is offered only the three that are always offered.
-    # Those three are unconditional on purpose: what a server that
+    # to switch, and is offered only the five that are always offered.
+    # Those five are unconditional on purpose: what a server that
     # cannot resume anything answers with is a sentence the agent reads
     # out, a tool that is simply absent is a tool a model invents
-    # (#190), and there is no deployment without a memory store (#314).
+    # (#190), and there is no deployment without a memory store (#314),
+    # which is what makes the ledger offered wherever memory is.
     assert [tool.name for tool in alone.seen[0][1]] == [
         "remember",
+        "set_state",
+        "clear_state",
         "new_conversation",
         "resume_conversation",
     ]
     assert [tool.name for tool in paired.seen[0][1]] == [
         "switch_agent",
         "remember",
+        "set_state",
+        "clear_state",
         "new_conversation",
         "resume_conversation",
     ]
@@ -312,6 +325,8 @@ async def test_remembering_is_offered_and_executed() -> None:
     assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
     assert [tool.name for tool in script.seen[0][1]] == [
         "remember",
+        "set_state",
+        "clear_state",
         "new_conversation",
         "resume_conversation",
     ]
@@ -352,6 +367,105 @@ async def test_a_remembered_fact_is_in_the_next_replys_prompt() -> None:
     (system,) = script.systems
     assert "the user is vegetarian" in system
     assert system.startswith("POET")
+
+
+async def test_the_ledger_is_written_and_cleared_through_its_two_tools() -> None:
+    """The two state tools end to end, in the order a conversation uses
+    them: something becomes true, it changes, and then it stops being
+    true. The ledger is read back through the store's own prompt read,
+    keyed by the thread this session is on, because that is what the
+    next round would be sent."""
+    store = lane_memory()
+    script = ScriptedLlm(
+        [
+            [call("set_state", key="scene", value="the tavern")],
+            "You are in the tavern.",
+            [call("set_state", key="scene", value="the docks")],
+            "Off you go.",
+            [call("clear_state", key="scene")],
+            "The scene is over.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+    thread = events_of(session).conversation
+    assert thread is not None
+
+    await run_reply(session, "we are in a tavern")
+    assert ledger(store, thread) == "- scene: the tavern"
+
+    await run_reply(session, "we leave for the docks")
+    assert ledger(store, thread) == "- scene: the docks"
+
+    await run_reply(session, "that scene is over")
+    assert ledger(store, thread) == ""
+
+
+async def test_a_state_tool_confirms_what_it_did_in_the_models_own_words() -> None:
+    """What the model reads back, which is what it phrases out loud: the
+    note as it was written, and the honest answer for a name that held
+    nothing."""
+    store = lane_memory()
+    script = ScriptedLlm(
+        [
+            [
+                call("set_state", key="  hit  points ", value="9  of  12"),
+                call("clear_state", key="scene"),
+            ],
+            "Noted.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    await run_reply(session, "I take three damage")
+
+    written, cleared = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not written.is_error and not cleared.is_error
+    # Normalized to the line the ledger stores, so the confirmation and
+    # the next round's block say the same thing.
+    assert written.content == "Noted hit points: 9 of 12"
+    assert cleared.content == "Nothing was written down under scene"
+
+
+@pytest.mark.parametrize(
+    ("called", "arguments", "refusal"),
+    [
+        ("set_state", {"key": "scene"}, builtin.SET_STATE_NEEDS_BOTH),
+        ("set_state", {"value": "the tavern"}, builtin.SET_STATE_NEEDS_BOTH),
+        ("set_state", {"key": "  ", "value": "the tavern"}, builtin.SET_STATE_NEEDS_BOTH),
+        ("clear_state", {}, builtin.CLEAR_STATE_NEEDS_A_KEY),
+        ("clear_state", {"key": None}, builtin.CLEAR_STATE_NEEDS_A_KEY),
+    ],
+)
+async def test_a_state_tool_asked_with_arguments_it_cannot_use_refuses(
+    called: str, arguments: dict[str, Any], refusal: str
+) -> None:
+    """The ValueError shape every builtin's bad arguments take: an error
+    result the model reads and can call again from. The sentence is
+    compared by equality against the module's own constant, and nothing
+    is written."""
+    store = lane_memory()
+    script = ScriptedLlm([[call(called, **arguments)], "Let me try that again."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+    thread = events_of(session).conversation
+    assert thread is not None
+
+    await run_reply(session, "keep track of this")
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    # The loop names the tool that failed and then says what it said, so
+    # the sentence is the end of the result rather than the whole of it.
+    assert result.content.endswith(refusal)
+    assert ledger(store, thread) == ""
+
+
+def ledger(store: MemoryStore, conversation: str) -> str:
+    """One conversation's ledger as the next round would be sent it."""
+    return store.read_for_prompt("poet", None, conversation).state
 
 
 async def test_malformed_arguments_come_back_as_an_error_result() -> None:
