@@ -192,6 +192,8 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
     # which is what makes the ledger offered wherever memory is.
     assert [tool.name for tool in alone.seen[0][1]] == [
         "remember",
+        "update_memory",
+        "forget",
         "set_state",
         "clear_state",
         "new_conversation",
@@ -200,6 +202,8 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
     assert [tool.name for tool in paired.seen[0][1]] == [
         "switch_agent",
         "remember",
+        "update_memory",
+        "forget",
         "set_state",
         "clear_state",
         "new_conversation",
@@ -329,6 +333,8 @@ async def test_remembering_is_offered_and_executed() -> None:
     assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
     assert [tool.name for tool in script.seen[0][1]] == [
         "remember",
+        "update_memory",
+        "forget",
         "set_state",
         "clear_state",
         "new_conversation",
@@ -371,6 +377,71 @@ async def test_a_remembered_fact_is_in_the_next_replys_prompt() -> None:
     (system,) = script.systems
     assert "the user is vegetarian" in system
     assert system.startswith("POET")
+
+
+async def test_a_fact_forgotten_mid_reply_is_out_of_the_next_rounds_prompt() -> None:
+    """The clock the memory blocks have always kept, on the tool that
+    takes something away: the know-how half is cached for the activation
+    and the scopes are read every round, so a fact forgotten in one round
+    of a reply is gone from the round after it, inside the same reply.
+
+    The removal answers with the words it took, which is what the agent
+    then says out loud so the user can ask for them back.
+    """
+    store = lane_memory()
+    fact_id = await store.add(
+        MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+    )
+    script = ScriptedLlm([[call("forget", id=fact_id)], "That is gone now."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    assert await run_reply(session, "forget that I am vegetarian") == ["That is gone now."]
+
+    asked, after = script.systems
+    assert "the user is vegetarian" in asked
+    assert "vegetarian" not in after
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not result.is_error
+    assert result.content == f"Forgot [{fact_id}]: the user is vegetarian"
+
+
+async def test_a_device_fact_reaches_the_next_agent_on_that_device() -> None:
+    """What the device scope is for, at the seam where it shows: the poet
+    keeps one note about the place and one about the person, and the
+    tutor it hands the conversation to on the same board is sent the
+    first and not the second.
+
+    Driven through a handover because that is how a second agent gets to
+    speak on one device, and the tutor's prompt is assembled after the
+    switch, which is exactly the round under test.
+    """
+    store = lane_memory()
+    poet = ScriptedLlm(
+        [
+            [
+                call("remember", text="the kettle is loud", scope="device"),
+                call("remember", text="the user is vegetarian"),
+            ],
+            [call("switch_agent", agent="tutor")],
+        ]
+    )
+    tutor = ScriptedLlm(["Hello from the tutor."])
+    session = session_for(
+        base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor}, memory=store
+    )
+
+    assert await run_reply(session, "the kettle here is loud") == ["Hello from the tutor."]
+
+    # The poet's own next round carries both, under two headings.
+    assert "the kettle is loud" in poet.systems[-1]
+    assert "the user is vegetarian" in poet.systems[-1]
+    # The tutor is sent the place's note and not the poet's own memory,
+    # which is the scope separation from both sides at once.
+    (handed,) = tutor.systems
+    assert "the kettle is loud" in handed
+    assert "the user is vegetarian" not in handed
 
 
 async def test_the_ledger_is_written_and_cleared_through_its_two_tools() -> None:

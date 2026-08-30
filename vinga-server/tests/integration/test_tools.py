@@ -326,6 +326,8 @@ PUBLISHED = {
 # this test rather than passing under a subtraction.
 DUE_BUILTINS: set[str] = {
     "remember",
+    "update_memory",
+    "forget",
     "set_state",
     "clear_state",
     "new_conversation",

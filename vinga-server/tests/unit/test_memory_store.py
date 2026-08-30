@@ -53,7 +53,13 @@ from vinga_server.memory.store import (
 )
 from vinga_server.runtime import prompt
 from vinga_server.tools import builtin
-from vinga_server.tools.builtin import MemoryContext, remember, remember_tool
+from vinga_server.tools.builtin import (
+    MemoryContext,
+    forget,
+    remember,
+    remember_tool,
+    update_memory,
+)
 
 
 def _connection() -> psycopg.Connection:
@@ -1423,6 +1429,103 @@ def test_the_tool_asks_for_one_short_fact_and_whose_it_is() -> None:
     # is not something a fact can belong to, so it is not something the
     # model can be shown.
     assert tool.input_schema["properties"]["scope"]["enum"] == ["agent", "device"]
+
+
+async def test_correcting_and_forgetting_reach_the_device_too() -> None:
+    """The model names a number and not a memory, so the tool asks each
+    memory this session can reach. The device's is what the second
+    attempt exists for: the agent's own is tried first and refuses.
+    """
+    store = memory()
+    theirs = await store.add(
+        MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet"
+    )
+
+    corrected = await update_memory(
+        store, HERE, "poet", {"id": theirs, "text": "the kettle whistles"}
+    )
+    removed = await forget(store, HERE, "poet", {"id": str(theirs)})
+
+    assert corrected == f"Corrected [{theirs}]: the kettle whistles"
+    # The words are what the agent says out loud, so the removal answers
+    # with them and with the number they were kept under.
+    assert removed == f"Forgot [{theirs}]: the kettle whistles"
+    assert _rows("aa:bb", scope="device") == []
+    assert _held("aa:bb", scope="device") == [("the kettle whistles", THREAD)]
+
+
+async def test_a_number_this_session_cannot_reach_is_one_refusal() -> None:
+    """Another agent's fact and a number that names nothing are answered
+    identically, which is what makes a refusal confirm nothing about
+    what exists elsewhere."""
+    store = memory()
+    theirs = await store.add(
+        MemoryScope.AGENT, "tutor", "the user is learning Spanish", agent="tutor"
+    )
+
+    with pytest.raises(ValueError) as correcting:
+        await update_memory(store, HERE, "poet", {"id": theirs, "text": "something else"})
+    with pytest.raises(ValueError) as forgetting:
+        await forget(store, HERE, "poet", {"id": theirs})
+    with pytest.raises(ValueError) as missing:
+        await forget(store, HERE, "poet", {"id": theirs + 10_000})
+
+    assert str(correcting.value) == store_module.NO_FACT_TO_UPDATE
+    assert str(forgetting.value) == store_module.NO_FACT_TO_FORGET
+    assert str(missing.value) == store_module.NO_FACT_TO_FORGET
+    # Nothing of the attempts travels out on a chain: the refusal is
+    # built inside the arm that caught one and raised after it.
+    assert correcting.value.__context__ is None
+    assert correcting.value.__cause__ is None
+    assert _rows("tutor") == ["the user is learning Spanish"]
+
+
+async def test_forgetting_for_good_is_asked_for_exactly() -> None:
+    """Anything but true is the soft removal, which is the direction a
+    misread argument should fail in: a held fact costs a row, and an
+    erased one costs the fact."""
+    store = memory()
+    gone = await store.add(
+        MemoryScope.AGENT, "poet", "the card number is 4111", agent="poet"
+    )
+    kept = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+
+    assert await forget(store, HERE, "poet", {"id": gone, "permanently": True}) == (
+        f"Forgot [{gone}]: the card number is 4111"
+    )
+    await forget(store, HERE, "poet", {"id": kept, "permanently": "yes please"})
+
+    assert _rows("poet") == []
+    assert _held("poet") == [("the user is vegetarian", THREAD)]
+
+
+@pytest.mark.parametrize(
+    ("call", "arguments", "refusal"),
+    [
+        (update_memory, {"text": "a fact"}, builtin.UPDATE_NEEDS_A_NUMBER_AND_TEXT),
+        (update_memory, {"id": "seven", "text": "a fact"}, builtin.UPDATE_NEEDS_A_NUMBER_AND_TEXT),
+        (update_memory, {"id": True, "text": "a fact"}, builtin.UPDATE_NEEDS_A_NUMBER_AND_TEXT),
+        (update_memory, {"id": 7}, builtin.UPDATE_NEEDS_A_NUMBER_AND_TEXT),
+        (update_memory, {"id": 7, "text": "  "}, builtin.UPDATE_NEEDS_A_NUMBER_AND_TEXT),
+        (forget, {}, builtin.FORGET_NEEDS_A_NUMBER),
+        (forget, {"id": None}, builtin.FORGET_NEEDS_A_NUMBER),
+        (forget, {"id": 1.5}, builtin.FORGET_NEEDS_A_NUMBER),
+    ],
+)
+async def test_a_numbered_tool_asked_with_arguments_it_cannot_use_refuses(
+    call: object, arguments: dict[str, object], refusal: str
+) -> None:
+    """The ValueError shape, decided before any memory is reached: what
+    is missing is named rather than what arrived, since what arrived is
+    the model's own and what it needs back is what to send instead."""
+    store = memory()
+    stored = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+
+    with pytest.raises(ValueError) as refused:
+        await call(store, HERE, "poet", arguments)  # type: ignore[operator]
+
+    assert str(refused.value) == refusal
+    assert _numbered("poet") == [(stored, "the user is vegetarian")]
 
 
 async def test_remembered_facts_reach_the_model_through_the_prompt() -> None:

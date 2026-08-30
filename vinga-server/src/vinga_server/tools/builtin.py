@@ -31,7 +31,7 @@ them is a fixed sentence with nothing in it that a room said: what the
 model is told is what happened and what to do about it.
 """
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -142,6 +142,77 @@ def remember_tool() -> ToolDef:
                 },
             },
             "required": ["text"],
+        },
+    )
+
+
+def update_memory_tool() -> ToolDef:
+    """Correct one fact already remembered, in place.
+
+    Separate from remembering it again, because a memory that answered a
+    correction with a second fact would hold both and read them out
+    together: the number is the identity, and correcting it is what
+    keeps one true thing where there was one thing.
+    """
+    return ToolDef(
+        name=names.UPDATE_MEMORY,
+        description=(
+            "Correct one fact you have already remembered, by the number recall "
+            "answers with. What you send replaces what it said. Use it when "
+            "something you remembered has changed or turns out to have been wrong."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "The number of the fact to correct.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": (
+                        "What that fact should say instead, as one short sentence."
+                    ),
+                },
+            },
+            "required": ["id", "text"],
+        },
+    )
+
+
+def forget_tool() -> ToolDef:
+    """Remove one fact, softly by default.
+
+    The description tells the model to say what was removed, which is
+    what makes the removal reversible in practice: the undo exists in
+    the store either way, but a user who never heard what went cannot
+    ask for it back.
+    """
+    return ToolDef(
+        name=names.FORGET,
+        description=(
+            "Remove one fact you remembered, by the number recall answers with. It "
+            "answers with what it removed: say that out loud, so the user knows what "
+            "went and can ask you to bring it back. Set permanently to true only when "
+            "the user asks for something to be erased for good, which cannot be "
+            "undone."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "The number of the fact to remove.",
+                },
+                "permanently": {
+                    "type": "boolean",
+                    "description": (
+                        "True to erase it outright, with no way to bring it back. "
+                        "Leave it out unless the user asked for exactly that."
+                    ),
+                },
+            },
+            "required": ["id"],
         },
     )
 
@@ -447,6 +518,18 @@ UNKNOWN_SCOPE = (
     'to, or "device", for something about this place and its household'
 )
 
+# And what the two numbered tools refuse a call that named no fact. They
+# name the lookup, because that is where a number comes from: the
+# injected block shows none.
+UPDATE_NEEDS_A_NUMBER_AND_TEXT = (
+    'update_memory needs the "id" of the fact to correct, which recall answers with, '
+    'and the "text" to replace it with'
+)
+
+FORGET_NEEDS_A_NUMBER = (
+    'forget needs the "id" of the fact to remove, which recall answers with'
+)
+
 
 async def remember(
     store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
@@ -471,6 +554,114 @@ async def remember(
     owner = agent if scope is MemoryScope.AGENT else _device_of(context)
     fact_id = await store.add(scope, owner, text, agent=agent)
     return f"Remembered [{fact_id}]: {_said(text)}"
+
+
+async def update_memory(
+    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+) -> str:
+    """Execute `update_memory` against whichever memory holds the fact."""
+    fact_id = _numbered(arguments.get("id"), UPDATE_NEEDS_A_NUMBER_AND_TEXT)
+    text = arguments.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError(UPDATE_NEEDS_A_NUMBER_AND_TEXT)
+    await _wherever_it_is(
+        _owners(context, agent),
+        lambda scope, owner: store.update(scope, owner, fact_id, text, agent=agent),
+    )
+    return f"Corrected [{fact_id}]: {_said(text)}"
+
+
+async def forget(
+    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+) -> str:
+    """Execute `forget`, answering with the words that were removed.
+
+    The words come back so the agent can say them, which is the whole of
+    what makes a soft removal reversible in a conversation: the row is
+    held either way, and a user who never heard what went cannot ask for
+    it back.
+
+    `permanently` is true only when it arrives as true. Anything else is
+    the soft removal, which is the direction a misread argument should
+    fail in: what a held fact costs is a row, and what an erased one
+    costs is the fact.
+    """
+    fact_id = _numbered(arguments.get("id"), FORGET_NEEDS_A_NUMBER)
+    removed = await _wherever_it_is(
+        _owners(context, agent),
+        lambda scope, owner: store.forget(
+            scope,
+            owner,
+            fact_id,
+            _conversation_of(context),
+            agent=agent,
+            permanently=arguments.get("permanently") is True,
+        ),
+    )
+    return f"Forgot [{fact_id}]: {removed}"
+
+
+def _owners(context: MemoryContext, agent: str) -> tuple[tuple[MemoryScope, str], ...]:
+    """The memories this session may reach a fact in, in the order they
+    are tried.
+
+    The agent's own and the device's, which is exactly what its prompt is
+    assembled from: a number the model read out of a lookup came from one
+    of those two, and nothing else is reachable from here at all.
+    """
+    return ((MemoryScope.AGENT, agent), (MemoryScope.DEVICE, _device_of(context)))
+
+
+async def _wherever_it_is[T](
+    owners: Sequence[tuple[MemoryScope, str]],
+    act: Callable[[MemoryScope, str], Awaitable[T]],
+) -> T:
+    """One numbered operation, tried against each memory the session may
+    reach until one of them owns the fact.
+
+    Generic over what the operation answers with, because they differ: a
+    correction answers nothing and a removal answers the words it
+    removed, and one search rather than one per answer is what keeps the
+    rule below written once.
+
+    The model names a number and not a memory, and a number names at most
+    one fact in the whole store, so asking both is the whole of the
+    search. Which of them holds it is not the model's to know: the store
+    bounds every number by the ownership in its own WHERE clause, so a
+    refusal here means the fact is not this session's to touch and never
+    that it is somebody else's.
+
+    What travels when none of them owns it is the last refusal, built
+    inside the arm that caught it and raised after, so nothing of the
+    attempts rides out on a chain. The store's sentence is the same
+    whichever memory refused, deliberately, so the answer says nothing
+    about what exists elsewhere.
+    """
+    refusal: ValueError | None = None
+    for scope, owner in owners:
+        try:
+            return await act(scope, owner)
+        except ValueError as no_such_fact:
+            refusal = ValueError(str(no_such_fact))
+    assert refusal is not None
+    raise refusal
+
+
+def _numbered(value: object, refusal: str) -> int:
+    """One fact's number as the model sent it.
+
+    Digits in a string are accepted beside an integer, because a model
+    reads the number out of a lookup line and hands it back as it read
+    it; refusing that would be refusing the model its own answer. A
+    boolean is not a number here, whatever Python thinks.
+    """
+    if isinstance(value, bool):
+        raise ValueError(refusal)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    raise ValueError(refusal)
 
 
 def _fact_scope(named: object) -> MemoryScope:

@@ -130,19 +130,19 @@ class BuiltinTools:
     with: a tool that is simply absent is a tool a model invents, and a
     refusal it can read out is something the user hears.
 
-    `remember` and the two state tools are offered to every agent,
-    unconditionally, because memory lives in a schema this server
-    migrates at every boot (#314) and there is no deployment without one.
-    `remember` used to be offered only where a memory directory was
-    configured, which is the one branch this class lost.
+    The memory family is offered to every agent, unconditionally,
+    because memory lives in a schema this server migrates at every boot
+    (#314) and there is no deployment without one. `remember` used to be
+    offered only where a memory directory was configured, which is the
+    one branch this class lost.
 
-    `context` is what the two state tools are addressed by: a callable
-    rather than a value, because a reply can move a session to another
-    conversation and a note written after that move belongs to the thread
-    the session is on now. It is a constructor concern of this one source
-    rather than a widening of `ToolSource`: the protocol asks what every
-    source has to answer, and where a session's memory lives is not one
-    of those questions.
+    `context` is what every one of those tools is addressed by: a
+    callable rather than a value, because a reply can move a session to
+    another conversation and a note written after that move belongs to
+    the thread the session is on now. It is a constructor concern of this
+    one source rather than a widening of `ToolSource`: the protocol asks
+    what every source has to answer, and where a session's memory lives
+    is not one of those questions.
 
     `threads` is the search half of the resumption flow, absent in every
     deployment that has not switched resumption on and compared
@@ -170,6 +170,8 @@ class BuiltinTools:
         if len(self._agents) > 1:
             tools.append(builtin.switch_agent_tool(self._agents))
         tools.append(builtin.remember_tool())
+        tools.append(builtin.update_memory_tool())
+        tools.append(builtin.forget_tool())
         tools.append(builtin.set_state_tool())
         tools.append(builtin.clear_state_tool())
         tools.append(builtin.new_conversation_tool())
@@ -183,6 +185,20 @@ class BuiltinTools:
         if claim.name == names.REMEMBER:
             return (
                 await builtin.remember(
+                    self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
+        if claim.name == names.UPDATE_MEMORY:
+            return (
+                await builtin.update_memory(
+                    self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
+        if claim.name == names.FORGET:
+            return (
+                await builtin.forget(
                     self._memory, self._context(), agent, claim.arguments or {}
                 ),
                 False,

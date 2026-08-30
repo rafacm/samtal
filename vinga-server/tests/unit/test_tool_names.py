@@ -29,19 +29,7 @@ def test_a_usable_entry_name_is_accepted(name: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name",
-    [
-        "self",
-        "switch_agent",
-        "remember",
-        "set_state",
-        "clear_state",
-        "new_conversation",
-        "resume_conversation",
-        "home.assistant",
-        "a b",
-        "",
-    ],
+    "name", [*names.RESERVED_ENTRY_NAMES, "home.assistant", "a b", ""]
 )
 def test_a_reserved_or_unusable_entry_name_is_refused(name: str) -> None:
     # Reserved names are what makes collisions unrepresentable: an entry
