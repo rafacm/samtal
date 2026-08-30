@@ -403,7 +403,7 @@ out where it went rather than that it vanished.
 
 ### Deviations from the plan
 
-Four, one of them a design addition the lane forced.
+Five, one of them a design addition the lane forced.
 
 - **`close()` waits for the calls already inside a connection.** The
   plan has `close` dispose both engines, which is what M1 shipped. With
@@ -433,6 +433,17 @@ Four, one of them a design addition the lane forced.
   writes it, and `test_event_docs.py` holds every declared event to
   having one, so `memory_unwritable` was added there in the
   regeneration commit beside the generated page.
+- **M1's "not yet" sentences were part of M2's footprint after all.**
+  M1's own review round (finding 3) corrected six places that said the
+  cutover had happened when it had not: the provisioning file's header,
+  the promises page's baseline bullet, the schema module's docstring,
+  the baseline migration's docstring, the README's upgrade and analyst
+  paragraphs, and the changelog entry's title. Every one of them is
+  falsified by this milestone, in the same dated release, so each was
+  moved again here. The plan's footprint could not have named them,
+  since they were written after it; the rule that a current-state
+  statement moves in the milestone that falsifies it is what found
+  them.
 - **The architecture diagram gained a database rather than moving a
   box.** The plan says the memory side-store moves into the database.
   The overview had no database in it at all, the conversation record

@@ -1,12 +1,12 @@
 """Agent memory baseline
 
 The whole of the memory chain: one table, `facts`, and the index the
-ordered read and the prune walk will share. It is the storage half of
-moving remembered facts out of the Markdown files under `memory.dir`,
-and it lands on its own: the server migrates this schema at every boot
-and writes nothing to it, because the store that reads and writes a
-fact arrives with the cutover. Until then the files are still where
-remembered facts live.
+ordered read and the prune walk share. It is the storage half of moving
+remembered facts out of the Markdown files under `memory.dir`, and it
+landed on its own so that the release carrying it is one an existing
+deployment can take by itself: the server migrates this schema at every
+boot, and the store that reads and writes a fact came with the cutover
+in the same dated release.
 
 The revision id opens the unused `2xxx` numbering block, which no
 database has ever been stamped at: the SQLite-era `2001_json_body_baseline`
@@ -17,10 +17,10 @@ before it: this baseline is the first revision this chain has ever had,
 and a deployment upgrading into it starts with an empty table.
 
 It creates nothing an operator has to migrate into. The file-backed
-store is retired by the cutover rather than imported, which
-`CHANGELOG.md` announces: existing files under the old `memory.dir` are
-not read, not imported and not deleted, and archiving them is the
-operator's own deliberate act.
+store was retired rather than imported, which `CHANGELOG.md` announces:
+existing files under the old `memory.dir` are not read, not imported
+and not deleted, and archiving them is the operator's own deliberate
+act.
 
 The schema is not created here, for the reason the two sibling
 baselines give: with `version_table_schema` configured, Alembic creates

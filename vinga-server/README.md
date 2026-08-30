@@ -2439,9 +2439,8 @@ read-only session as the role
 provisions. It has `SELECT` on every table in the `record`
 schema, now and after the next migration, and nothing at all on the two
 schemas beside it: `domain`, where the stored secrets' ciphertexts
-live, and `memory`, which is empty in this release and whose read
-surface is being designed as an addressed API rather than as raw
-tables:
+live, and `memory`, whose read surface is being designed as an
+addressed API rather than as raw tables:
 
 ```bash
 psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
@@ -2650,13 +2649,8 @@ image.** The upgrade order is always the same: rerun the updated
 boot. Every statement in the file is written to be run again, so a
 rerun over a database that already has everything is a no-op.
 
-This release moves it, because it adds a third schema, `memory`,
-reserved for what an agent is asked to remember. Nothing writes to it
-yet: remembered facts are still the files under `memory.dir` described
-above, and the release that moves them into the schema is the next one.
-What lands now is the schema itself, empty and migrated, so that the
-move is a server upgrade rather than a server upgrade and a database
-change at once. On the privilege
+This release moves it, because it adds a third schema, `memory`, where
+what an agent was asked to remember is stored. On the privilege
 contract above, the server role has no `CREATE` on the database and
 cannot make a new schema for itself, so an image started before the
 rerun refuses to start with a fixed sentence naming this rerun and
