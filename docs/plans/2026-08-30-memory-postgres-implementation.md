@@ -499,3 +499,101 @@ Five, one of them a design addition the lane forced.
   The one user-visible difference is that `remember` is now offered in
   deployments that had no `memory:` section, which is the behavior
   change the changelog announces.
+
+### PR review round
+
+External review of the branch as pushed to PR #358, `origin/main...a8f79d75`:
+backend codex (codex-cli 0.151.0), model gpt-5.6-sol, 2026-08-30,
+runtime 10m09s. Four findings, three P2 and one P3, verdict as
+received: mergeable after the listed fixes. Condensed below as
+received, each with its resolution and the commit that landed it.
+
+Two of the four are the same shape, and it is the shape a milestone
+about concurrency should expect: a test that describes a race it does
+not force, and a shutdown that describes a wait it does not keep. Both
+were arrangements that pass for the right reason on a quiet machine and
+for no reason at all on a loaded one.
+
+1. **P2: the two-writer case can pass without the advisory lock.**
+   `gather` does not make the second transaction observe the
+   pre-commit state; one may commit before the other selects, so a
+   runner that happens to order them gets the right survivors with the
+   chain lock gone. Force the interleaving with a test-only gate, then
+   verify by running the mutation rather than by reasoning about it.
+
+   *Resolution* (`8ad4a4e4`): adopted whole. The first writer is parked
+   inside its transaction by a trigger that waits on a key this suite
+   holds, and the second starts only once the database reports the
+   first parked. Where the gate hangs turned out to be the whole of the
+   fix, and the first attempt was wrong: parked after its insert, the
+   first writer still reads the other's committed rows when it resumes,
+   because every statement of a READ COMMITTED transaction takes its
+   own snapshot, and the arithmetic comes out right unlocked. That
+   version was written, run against the mutation, and found to pass it.
+   Parked after its prune, the writer has already decided, and the
+   mutation fails on the survivor set: four rows, over the cap, still
+   carrying the fact the pruning was supposed to drop.
+
+2. **P2: `close()` still races its calls.** It disposed on a wait that
+   expired, although a legitimate `remember` can sit on the advisory
+   gate for the whole of `LOCK_TIMEOUT_MS`, and the five seconds it
+   waited was related to nothing; and with no closing state a worker
+   queued behind the close could increment the counter after the close
+   had observed zero. Refuse admission once closing, defer the disposal
+   past the timeout path, size the wait against `LOCK_TIMEOUT_MS`, and
+   pin both with deterministic cases.
+
+   *Resolution* (`9c4b55b8`): adopted whole. `QUIET_TIMEOUT_S` is
+   derived from `LOCK_TIMEOUT_MS` with the margin the refusal's own
+   round trip costs, and its comment says what bounds it. The store
+   marks itself closing under the lock it counts under, before it
+   waits, and a call arriving from then on meets `StoreClosed` where it
+   asks for admission, which is before the engine in its `with` is
+   evaluated; both call sites contain it exactly as they contain a
+   database that is not there. The disposal is claimed under the lock
+   by whichever of the close and the last call out finds the store
+   quiet, so an expired wait hands it over rather than forcing it, and
+   it happens once. Both cases are arranged rather than timed, and both
+   were run against their mutations: disposing without the wait fails
+   the first and brings back the leaked connection the original warning
+   named, and dropping the admission guard fails the second by
+   answering with the fact.
+
+3. **P2: the prompt route still calls the memory read a file read.**
+   `config/api.py`, reproduced in the committed OpenAPI document, and
+   the implementation record misattributes why that document moved.
+
+   *Resolution* (`89962e0a`): adopted, and applied to the sentence
+   beside it: "a runtime read rather than a database one" was true
+   about the configuration half and misleading once the memory half
+   became a database round trip, so it distinguishes the running server
+   from the stored half instead, which is what it always meant. The
+   document was regenerated through its generator, and the pin the
+   finding asks for went into the suite that already holds these
+   descriptions to their meaning: the prompt read has to say database
+   round trip and worker thread, and the file-backed vocabulary is
+   refused outright. The record now says the document embeds the field
+   description and the route descriptions both, which is the half that
+   did not move when it should have.
+
+4. **P3: pre-cutover wording survives in current-state comments.** The
+   tool router's switched-off builtin, the capture floor's volume, the
+   schema suite's "cannot read or write yet", and the lifespan helper's
+   "behaviorally dormant".
+
+   *Resolution* (`09086ef9`): all four brought to the storage that is
+   there now. Two of them keep their point and lose their example: the
+   router still needs a builtin that cannot run, which is now
+   `switch_agent` on a device bound to one agent, and the lifespan
+   helper still needs its two acts pinned, because a reply that reads
+   memory proves the store it was handed and never the open that
+   migrated the schema. Dated plans and records were left alone.
+
+One thing surprised us, and it is the reason finding 1 was worth its
+P2. The first fix for it was itself a test that passed under the
+mutation, for a reason nothing in the case was written to notice: READ
+COMMITTED gives every statement its own snapshot, so a transaction
+parked between its insert and its read is not a transaction that has
+decided anything. A gate is only a gate where the decision is already
+made, and the only way to know which side of that line a case sits on
+is to run the mutation.
