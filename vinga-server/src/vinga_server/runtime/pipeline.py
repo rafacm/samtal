@@ -2125,24 +2125,32 @@ class PipelineRuntime:
 
     async def _system_prompt(self) -> str:
         """The prompt this round is sent: the half cached at activation,
-        plus whatever the agent remembers right now.
+        plus everything memory holds for it right now.
 
-        The half is not rebuilt here. What this adds is the memory
-        block, which keeps the clock it has always had: read on every
-        round, so a fact remembered in one session is known to a
-        concurrent one on its next reply, which is a contract that
-        predates this split.
+        The half is not rebuilt here. What this adds is the scope blocks,
+        which keep the clock the memory block has always had: read on
+        every round, so a fact remembered in one session is known to a
+        concurrent one on its next reply and a note written in one round
+        is read in the next, which is a contract that predates this
+        split.
 
-        The read itself is a database round trip and runs in a worker
-        thread rather than on the loop every live conversation shares,
-        exactly as the file read before it did. It takes no advisory
-        lock, so it never waits on a `remember` in flight. It is
-        resolved before the request is built, which is what lets the
-        assembler stay a pure function of the text it is handed.
+        One read for all three scopes rather than three, which is what
+        keeps the cost of this line where it was: it is a database round
+        trip and runs in a worker thread rather than on the loop every
+        live conversation shares, exactly as the file read before it did.
+        It takes no advisory lock, so it never waits on a `remember` in
+        flight. It is resolved before the request is built, which is what
+        lets the assembler stay a pure function of the text it is handed.
         """
         assert self._know_how is not None and self._agent is not None
-        facts = await asyncio.to_thread(self._memory.read, self._agent)
-        return prompt.with_memory(self._know_how, facts).text
+        assert self._conversation is not None
+        scopes = await asyncio.to_thread(
+            self._memory.read_for_prompt,
+            self._agent,
+            self._device,
+            self._conversation,
+        )
+        return prompt.with_scopes(self._know_how, scopes).text
 
     async def _speak_after(
         self,

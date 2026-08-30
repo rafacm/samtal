@@ -5,8 +5,10 @@ about is the two clocks. The know-how half (the persona, the fragments
 the agent includes and the guidance of the entries it is granted) is
 assembled once per
 activation and cached, so a reply never rebuilds it and an agent switch
-always does. The memory block keeps the clock it has always had, read
-per round, and moves off the event loop rather than moving in time.
+always does. The memory blocks keep the clock the first of them has
+always had, read per round, and moved off the event loop rather than
+moved in time; the ledger a conversation keeps is read on that same
+clock, so what one round wrote down is what the next round is sent.
 """
 
 import asyncio
@@ -16,11 +18,12 @@ import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
-from tests.support.sessions import call, run_reply, session_with
+from tests.support.sessions import call, events_of, run_reply, session_with
 from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
-from vinga_server.memory.store import MemoryStore
+from vinga_server.memory.store import MemoryStore, PromptMemory
 from vinga_server.runtime.prompt import (
+    STATE_HEADING,
     Guidance,
     ServerInstructions,
     ServerPrompt,
@@ -226,25 +229,32 @@ async def test_a_fact_remembered_between_replies_is_in_the_next_one() -> None:
 async def test_the_memory_read_happens_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`MemoryStore.read` is a synchronous database round trip reached
-    from the loop every live conversation shares, so it runs in a worker
-    thread. Proven by which thread it ran on rather than by reading the
-    call site."""
+    """`MemoryStore.read_for_prompt` is a synchronous database round
+    trip reached from the loop every live conversation shares, so it runs
+    in a worker thread. Proven by which thread it ran on rather than by
+    reading the call site.
+
+    One read for all three scopes, and therefore one hop per round: the
+    count is asserted as well as the thread, because three reads off the
+    loop would cost a reply three round trips where it used to pay
+    one."""
     store = lane_memory()
     await store.remember("poet", "the user is vegetarian")
     reads: list[int] = []
-    real = MemoryStore.read
+    real = MemoryStore.read_for_prompt
 
-    def read(self: MemoryStore, agent: str) -> str:
+    def read(
+        self: MemoryStore, agent: str, device: str | None, conversation: str
+    ) -> PromptMemory:
         reads.append(threading.get_ident())
-        return real(self, agent)
+        return real(self, agent, device, conversation)
 
-    monkeypatch.setattr(MemoryStore, "read", read)
+    monkeypatch.setattr(MemoryStore, "read_for_prompt", read)
     session = session_with(CountingServers(), {"poet": ScriptedLlm(["Said."])}, memory=store)
 
     await run_reply(session, "hello")
 
-    assert reads, "the memory was never read"
+    assert len(reads) == 1, "the round's memory was not read exactly once"
     assert all(where != threading.get_ident() for where in reads)
 
 
@@ -269,6 +279,58 @@ async def test_an_agent_that_remembers_nothing_gets_no_memory_block() -> None:
         ).text
     ]
     assert servers.asked == ["poet"]
+
+
+# The ledger's clock, which is the memory block's
+
+
+async def test_a_note_set_between_rounds_is_in_the_next_prompt() -> None:
+    """The ledger is read on the same clock the facts are, so what one
+    round wrote down is what the next round is sent. A set, a change and
+    a clear each land in the following prompt, and none of them rebuilds
+    the half."""
+    store = lane_memory()
+    llm = RecordingLlm()
+    servers = CountingServers()
+    session = session_with(servers, {"poet": llm}, memory=store)
+    thread = events_of(session).conversation
+    assert thread is not None
+
+    await run_reply(session, "hello")
+    await store.set_state(thread, "scene", "the tavern", agent="poet")
+    await run_reply(session, "where are we")
+    await store.set_state(thread, "scene", "the docks", agent="poet")
+    await run_reply(session, "and now")
+    await store.clear_state(thread, "scene", agent="poet")
+    await run_reply(session, "and now")
+
+    assert STATE_HEADING not in llm.systems[0]
+    assert f"{STATE_HEADING}\n- scene: the tavern" in llm.systems[1]
+    assert f"{STATE_HEADING}\n- scene: the docks" in llm.systems[2]
+    assert STATE_HEADING not in llm.systems[3]
+    # And the cached half was never rebuilt to notice any of it.
+    assert servers.asked == ["poet"]
+
+
+async def test_a_fresh_activation_starts_with_an_empty_ledger() -> None:
+    """State is the thread's, and a new session mints a new thread. So
+    the second conversation on the same device with the same agent
+    begins with nothing written down, which is what "it dies with its
+    conversation" means from the user's side."""
+    store = lane_memory()
+    first = session_with(CountingServers(), {"poet": RecordingLlm()}, memory=store)
+    thread = events_of(first).conversation
+    assert thread is not None
+    await store.set_state(thread, "scene", "the tavern", agent="poet")
+
+    llm = RecordingLlm()
+    second = session_with(CountingServers(), {"poet": llm}, memory=store)
+    assert events_of(second).conversation != thread
+    await run_reply(second, "hello")
+
+    (system,) = llm.systems
+    assert STATE_HEADING not in system
+    assert "the tavern" not in system
 
 
 # The event
@@ -308,10 +370,10 @@ async def test_activation_logs_what_the_know_how_half_holds(
     assert system.startswith(expected.text)
     assert "vegetarian" not in expected.text
     assert "vegetarian" in system[expected.characters :]
-    # Memory is deliberately absent: this fires once per activation and
-    # memory is read per round, and the event carries neither its size
-    # nor a word of what it holds.
-    assert "memory" not in assembled.sources
+    # Memory is deliberately absent, every scope of it: this fires once
+    # per activation and memory is read per round, and the event carries
+    # neither a size nor a word of what any of them holds.
+    assert not {"memory", "state", "device"} & set(assembled.sources)
     assert "vegetarian" not in str(assembled.__dict__)
 
 

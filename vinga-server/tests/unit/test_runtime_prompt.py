@@ -13,6 +13,7 @@ indentation), not just over a tidy one.
 
 import pytest
 
+from vinga_server.memory.store import PromptMemory
 from vinga_server.runtime import prompt
 
 
@@ -25,6 +26,14 @@ def previously(persona: str, facts: str) -> str:
     return f"{persona}\n\n{prompt.MEMORY_HEADING}\n{facts}".strip()
 
 
+def remembered(facts: str) -> PromptMemory:
+    """The agent's own scope and nothing else, which is what every
+    deployment has the day the scopes land: no conversation has kept a
+    note yet and no device has been told anything, so the prompt is what
+    it was before there were scopes."""
+    return PromptMemory(state="", agent=facts, device="")
+
+
 PERSONAS = ["POET", "", "   ", "  You are a poet.  \n", "line\n\nline"]
 
 FACTS = ["", "- the user is vegetarian", "- one\n- two"]
@@ -35,13 +44,13 @@ FACTS = ["", "- the user is vegetarian", "- one\n- two"]
 def test_with_no_guidance_the_prompt_is_byte_for_byte_the_old_one(
     persona: str, facts: str
 ) -> None:
-    assembled = prompt.with_memory(prompt.know_how(persona), facts)
+    assembled = prompt.with_scopes(prompt.know_how(persona), remembered(facts))
 
     assert assembled.text == previously(persona, facts)
 
 
 def test_the_order_is_persona_then_guidance_then_memory() -> None:
-    assembled = prompt.with_memory(
+    assembled = prompt.with_scopes(
         prompt.know_how(
             "You are the house assistant.",
             guidance=[
@@ -49,7 +58,7 @@ def test_the_order_is_persona_then_guidance_then_memory() -> None:
                 prompt.Guidance("weather", "Give temperatures in Celsius."),
             ],
         ),
-        "- the user is vegetarian",
+        remembered("- the user is vegetarian"),
     )
 
     assert assembled.text == (
@@ -70,7 +79,7 @@ def test_the_fragments_sit_between_the_persona_and_the_guidance() -> None:
     """The whole order in one assembly, with nothing put over a
     fragment: a heading would editorialize text the operator
     composed."""
-    assembled = prompt.with_memory(
+    assembled = prompt.with_scopes(
         prompt.know_how(
             "You are the house assistant.",
             [
@@ -79,7 +88,7 @@ def test_the_fragments_sit_between_the_persona_and_the_guidance() -> None:
             ],
             [prompt.Guidance("home", "Ask before unlocking the door.")],
         ),
-        "- the user is vegetarian",
+        remembered("- the user is vegetarian"),
     )
 
     assert assembled.text == (
@@ -113,13 +122,13 @@ def test_a_fragment_is_injected_byte_for_byte() -> None:
     shares, so this is asserted where a fragment is neither of them.
     The parametrized test below is what covers a fragment that is."""
     written = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
-    assembled = prompt.with_memory(
+    assembled = prompt.with_scopes(
         prompt.know_how(
             "P",
             [prompt.Fragment("household", written)],
             [prompt.Guidance("home", "Ask first.")],
         ),
-        "- a fact",
+        remembered("- a fact"),
     )
 
     assert assembled.blocks[1].text == written
@@ -152,7 +161,7 @@ def test_a_fragment_obeys_the_rules_every_block_obeys(
     reported nowhere. Milestone 1 pinned this over personas and
     guidance; a new block type has to be inside it rather than beside
     it."""
-    assembled = prompt.with_memory(prompt.know_how(persona, fragments), facts)
+    assembled = prompt.with_scopes(prompt.know_how(persona, fragments), remembered(facts))
 
     assert "\n\n".join(block.text for block in assembled.blocks) == assembled.text
     assert assembled.characters == sum(assembled.sizes().values()) + 2 * (
@@ -246,13 +255,13 @@ def test_a_shipped_prompt_is_reported_by_position_and_carries_its_name() -> None
 
 
 def test_an_ordinary_block_carries_no_name() -> None:
-    assembled = prompt.with_memory(
+    assembled = prompt.with_scopes(
         prompt.know_how(
             "P",
             fragments=[prompt.Fragment("household", "F")],
             guidance=[prompt.Guidance("home", "G")],
         ),
-        "- a fact",
+        remembered("- a fact"),
     )
 
     assert [block.name for block in assembled.blocks] == [None, None, None, None]
@@ -297,7 +306,7 @@ def test_the_prompt_is_the_blocks_and_nothing_else(
     block reports is a byte the model is sent."""
     for assembled in (
         prompt.know_how(persona, guidance=guidance),
-        prompt.with_memory(prompt.know_how(persona, guidance=guidance), facts),
+        prompt.with_scopes(prompt.know_how(persona, guidance=guidance), remembered(facts)),
     ):
         assert "\n\n".join(block.text for block in assembled.blocks) == assembled.text
         assert assembled.characters == sum(assembled.sizes().values()) + 2 * (
@@ -318,7 +327,7 @@ def test_no_block_holds_whitespace_the_prompt_does_not(
     written, which is the persona standing alone: trimming it would be
     this module editing the value it was handed, and it is what the
     byte-equality pin holds."""
-    assembled = prompt.with_memory(prompt.know_how(persona, guidance=guidance), facts)
+    assembled = prompt.with_scopes(prompt.know_how(persona, guidance=guidance), remembered(facts))
     if len(assembled.blocks) == 1:
         assert assembled.text == assembled.blocks[0].text
         return
@@ -330,8 +339,9 @@ def test_no_block_holds_whitespace_the_prompt_does_not(
 
 
 def test_every_block_carries_its_provenance_and_its_size() -> None:
-    assembled = prompt.with_memory(
-        prompt.know_how("POET", guidance=[prompt.Guidance("home", "H")]), "- a fact"
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET", guidance=[prompt.Guidance("home", "H")]),
+        remembered("- a fact"),
     )
 
     assert assembled.sizes() == {
@@ -348,7 +358,7 @@ def test_an_agent_with_no_prompt_of_its_own_contributes_no_block() -> None:
     """The prompt does not begin with a blank line, and the blocks do
     not claim one: a block is what the model receives, and this one
     would be nothing."""
-    assembled = prompt.with_memory(prompt.know_how(""), "- a fact")
+    assembled = prompt.with_scopes(prompt.know_how(""), remembered("- a fact"))
 
     assert [block.provenance for block in assembled.blocks] == ["memory"]
     assert assembled.text.startswith(prompt.MEMORY_HEADING)
@@ -364,10 +374,96 @@ def test_the_know_how_half_is_the_persona_alone_without_guidance() -> None:
 
 def test_memory_that_is_empty_leaves_the_cached_half_alone() -> None:
     """Identity, not equality: the half is cached per activation and a
-    round that remembers nothing must not rebuild it."""
+    round that remembers nothing must not rebuild it. All three scopes
+    empty is the same answer as no memory at all, which is what every
+    deployment has until an agent uses one."""
     half = prompt.know_how("POET", guidance=[prompt.Guidance("home", "H")])
 
-    assert prompt.with_memory(half, "") is half
+    assert prompt.with_scopes(half, remembered("")) is half
+    assert prompt.with_scopes(half, PromptMemory("", "", "")) is half
+
+
+# The three scopes, in the order they take precedence in
+
+
+def test_the_three_blocks_are_appended_in_their_order_of_precedence() -> None:
+    """The whole rendering, headings and blank lines included, because
+    it is a documented contract rather than an implementation detail.
+
+    The order is the precedence, and each block says its own rank where
+    the model reads it: the ledger from the top, because everything after
+    it is older, and the device's notes from below, because everything
+    before them outranks them.
+    """
+    assembled = prompt.with_scopes(
+        prompt.know_how("You are the house assistant."),
+        PromptMemory(
+            state="- scene: the tavern",
+            agent="- the user is vegetarian",
+            device="- the kitchen speaker is the loud one",
+        ),
+    )
+
+    assert assembled.text == (
+        "You are the house assistant.\n"
+        "\n"
+        f"{prompt.STATE_HEADING}\n"
+        "- scene: the tavern\n"
+        "\n"
+        f"{prompt.MEMORY_HEADING}\n"
+        "- the user is vegetarian\n"
+        "\n"
+        f"{prompt.DEVICE_HEADING}\n"
+        "- the kitchen speaker is the loud one"
+    )
+    assert [block.provenance for block in assembled.blocks] == [
+        "persona",
+        "state",
+        "memory",
+        "device",
+    ]
+
+
+def test_each_scope_is_counted_under_a_token_of_its_own() -> None:
+    """Three blocks under one token would collapse into one number in
+    the event and in the accounting, and what an operator tunes against
+    is what each of them costs."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET"),
+        PromptMemory(state="- a: b", agent="- a fact", device="- a note"),
+    )
+
+    assert assembled.sizes() == {
+        "persona": len("POET"),
+        "state": len(prompt.STATE_HEADING) + len("\n- a: b"),
+        "memory": len(prompt.MEMORY_HEADING) + len("\n- a fact"),
+        "device": len(prompt.DEVICE_HEADING) + len("\n- a note"),
+    }
+    assert assembled.characters == len(assembled.text)
+
+
+@pytest.mark.parametrize(
+    ("scopes", "expected"),
+    [
+        (PromptMemory(state="- a: b", agent="", device=""), ["persona", "state"]),
+        (PromptMemory(state="", agent="- a fact", device=""), ["persona", "memory"]),
+        (PromptMemory(state="", agent="", device="- a note"), ["persona", "device"]),
+        (
+            PromptMemory(state="- a: b", agent="", device="- a note"),
+            ["persona", "state", "device"],
+        ),
+    ],
+)
+def test_a_scope_with_nothing_in_it_renders_no_block(
+    scopes: PromptMemory, expected: list[str]
+) -> None:
+    """A heading over nothing is a heading the model has to make sense
+    of. Absence is the honest rendering of an empty scope, and it is what
+    keeps a deployment using one of the three from paying for three."""
+    assembled = prompt.with_scopes(prompt.know_how("POET"), scopes)
+
+    assert [block.provenance for block in assembled.blocks] == expected
+    assert assembled.text == "\n\n".join(block.text for block in assembled.blocks)
 
 
 def test_the_heading_names_the_prefix_the_model_can_call() -> None:
