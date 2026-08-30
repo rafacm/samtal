@@ -94,6 +94,22 @@ def _held(owner: str, scope: str = "agent") -> list[tuple[str, str]]:
         holder.close()
 
 
+def _state(conversation: str) -> list[tuple[str, str]]:
+    """One conversation's ledger, by key, as the database holds it."""
+    holder = _connection()
+    try:
+        return [
+            (row[0], row[1])
+            for row in holder.execute(
+                "select key, value from memory.state where conversation = %s "
+                "order by key",
+                (conversation,),
+            )
+        ]
+    finally:
+        holder.close()
+
+
 # The gate the two-writer case is arranged around
 #
 # An advisory key of this suite's own, in nobody's chain: what a test
@@ -599,6 +615,121 @@ async def test_a_lookup_is_bounded_by_bytes_as_well_as_by_lines(
     found = store.recall("poet", "aa:bb", "cheese")
 
     assert found.splitlines() == [newest, middle, store_module.MORE_MATCHED]
+
+
+# The conversation's ledger
+#
+# Keyed, current-only, and shared with its thread's lifecycle. The key
+# is the identity, so a write replaces rather than accumulating, and a
+# write that would take the ledger past either of its bounds is refused
+# rather than silently trimmed: a ledger that drops keys is one the
+# model cannot trust.
+
+
+async def test_writing_the_same_key_again_replaces_what_it_held() -> None:
+    store = memory()
+    await store.set_state(THREAD, "turn", "white to move", agent="poet")
+    await store.set_state(THREAD, "board", "e4 e5", agent="poet")
+    await store.set_state(THREAD, "turn", "black to move", agent="poet")
+
+    assert _state(THREAD) == [("board", "e4 e5"), ("turn", "black to move")]
+
+
+async def test_one_conversations_ledger_is_not_another_s() -> None:
+    store = memory()
+    await store.set_state(THREAD, "turn", "white to move", agent="poet")
+    await store.set_state(OTHER_THREAD, "turn", "black to move", agent="poet")
+
+    assert _state(THREAD) == [("turn", "white to move")]
+    assert _state(OTHER_THREAD) == [("turn", "black to move")]
+
+
+async def test_a_new_key_past_the_key_cap_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store_module, "STATE_KEYS", 2)
+    store = memory()
+    await store.set_state(THREAD, "one", "first", agent="poet")
+    await store.set_state(THREAD, "two", "second", agent="poet")
+
+    with pytest.raises(ValueError) as refusal:
+        await store.set_state(THREAD, "three", "third", agent="poet")
+
+    assert str(refusal.value) == store_module.STATE_FULL
+    assert _state(THREAD) == [("one", "first"), ("two", "second")]
+    # And an overwrite of a key that is already there still lands, since
+    # it takes no new room in the ledger.
+    await store.set_state(THREAD, "two", "second again", agent="poet")
+    assert _state(THREAD) == [("one", "first"), ("two", "second again")]
+
+
+async def test_an_overwrite_that_grows_past_the_byte_cap_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The case a key cap alone would miss: no new key, and the ledger
+    still ends up bigger than it may be. The old value stands, which is
+    what makes the refusal safe to act on."""
+    # Room for the grown note on its own, and not for the ledger it
+    # would leave behind, which is exactly the case a key cap misses.
+    monkeypatch.setattr(
+        store_module, "STATE_BYTES", len(b"- two: second and then some")
+    )
+    store = memory()
+    await store.set_state(THREAD, "one", "first", agent="poet")
+    await store.set_state(THREAD, "two", "second", agent="poet")
+
+    with pytest.raises(ValueError) as refusal:
+        await store.set_state(THREAD, "two", "second and then some", agent="poet")
+
+    assert str(refusal.value) == store_module.STATE_TOO_MUCH
+    assert _state(THREAD) == [("one", "first"), ("two", "second")]
+
+
+async def test_a_single_note_too_long_for_the_ledger_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clearing everything else could not make room for this one, so it
+    is refused before a connection is reached, with a sentence of its
+    own: what the model should do is say less, not clear something."""
+    monkeypatch.setattr(store_module, "STATE_BYTES", 40)
+    store = memory()
+    await store.set_state(THREAD, "one", "first", agent="poet")
+
+    with pytest.raises(ValueError) as refusal:
+        await store.set_state(THREAD, "two", "x" * 41, agent="poet")
+
+    assert str(refusal.value) == store_module.STATE_ENTRY_TOO_LONG
+    assert _state(THREAD) == [("one", "first")]
+
+
+async def test_a_note_with_no_name_or_nothing_to_say_is_refused() -> None:
+    store = memory()
+
+    with pytest.raises(ValueError) as unnamed:
+        await store.set_state(THREAD, "   ", "something", agent="poet")
+    with pytest.raises(ValueError) as unsaid:
+        await store.set_state(THREAD, "turn", "  ", agent="poet")
+
+    assert str(unnamed.value) == store_module.NOTHING_TO_SET
+    assert str(unsaid.value) == store_module.NOTHING_TO_SET
+    assert _state(THREAD) == []
+
+
+async def test_clearing_answers_how_much_it_took() -> None:
+    store = memory()
+    await store.set_state(THREAD, "one", "first", agent="poet")
+    await store.set_state(THREAD, "two", "second", agent="poet")
+    await store.set_state(OTHER_THREAD, "one", "elsewhere", agent="poet")
+
+    assert await store.clear_state(THREAD, "one", agent="poet") == 1
+    assert _state(THREAD) == [("two", "second")]
+    # Clearing what is already clear is what the caller asked for, and
+    # the count is what says nothing was there.
+    assert await store.clear_state(THREAD, "one", agent="poet") == 0
+
+    assert await store.clear_state(THREAD, agent="poet") == 1
+    assert _state(THREAD) == []
+    assert _state(OTHER_THREAD) == [("one", "elsewhere")]
 
 
 # The cap invariant, across every mutation
