@@ -148,11 +148,25 @@ tool's territory. Device scope: `DEVICE_LINES = 30` within
 `DEVICE_BYTES = 2048`, injected whole, pruned oldest-first at write
 (the same trade `remember` has always made, on a scope the issue
 calls few). Conversation state: `STATE_KEYS = 50` and
-`STATE_BYTES = 4096` of rendered ledger; overwriting an existing key
-is always allowed, a new key past the cap is refused with a fixed
-sentence naming the cap, because a ledger that silently drops keys is
-a ledger the model cannot trust. All constants stay module-level and
-read at call time.
+`STATE_BYTES = 4096` of rendered ledger; a write that would leave
+the ledger past either cap is refused with a fixed sentence naming
+the cap, whether it is a new key or an overwrite grown too large,
+because a ledger that silently drops keys is a ledger the model
+cannot trust, and one that silently grows is not capped. All
+constants stay module-level and read at call time.
+
+One transactional invariant covers every mutation, and held rows
+sit outside it. Held facts are excluded from all cap arithmetic and
+are never pruned: they share their thread's lifecycle, and a prune
+that took one would break the undo the softness exists for. Every
+mutating transaction (add, update, restore, and the operator PUT)
+leaves the scope's active rows within its caps by dropping oldest
+active facts, so an update that grows a fact, or a restore into a
+scope that refilled meanwhile, succeeds and re-prunes rather than
+failing or silently exceeding; and any single fact or state value
+whose rendered line alone exceeds its scope's byte cap is refused
+with a fixed sentence, since pruning everything else could not make
+it fit.
 
 **The tool family is seven, named from the user's own verbs.**
 `remember(text, scope)` (scope an enum of `agent` and `device`,
@@ -443,7 +457,13 @@ Named by role, homes confirmed against the authority taxonomy:
     forget hides from every read and recall, restore by id and by
     last-forgotten-in-this-thread brings back the exact original
     bytes; permanent forget survives no restore; state upserts by
-    key and refuses the key past the cap with the fixed sentence;
+    key and refuses a new key past the key cap, an overwrite past
+    the byte cap, and a single oversized value, each with its fixed
+    sentence; the cap invariant across mutations (an oversized add
+    and an oversized update refused; an update that grows a fact
+    re-prunes the oldest active; a restore after the released
+    capacity refilled succeeds and re-prunes; held rows present at
+    both caps are untouched by every prune and still restorable);
     per-scope caps prune independently (an agent at cap does not
     touch device rows and conversely, proven by exact survivor
     sets); the core/remainder boundary from both sides (the oldest
@@ -655,6 +675,15 @@ resolution.
    Define one transactional invariant across add, update, soft
    forget, restore, operator PUT, and state upsert, with oversized
    items refused by a fixed sentence and the named boundary tests.
+
+   *Resolution*: adopted whole: held rows are outside all cap
+   arithmetic and never pruned; every mutating transaction restores
+   the active-row bound by dropping oldest actives, so grown updates
+   and restores into refilled scopes re-prune rather than overflow
+   or fail; a single item over its scope's byte cap is refused, and
+   state refuses any write past either of its caps, overwrites
+   included; the reviewer's four boundary tests are named in the
+   store family.
 
 6. **P2: recording-off deployments are cleaned only when they
    reboot.** With recording off no thread rows land and no
