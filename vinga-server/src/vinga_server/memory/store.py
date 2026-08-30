@@ -80,6 +80,14 @@ MAX_LINES = 200
 DEVICE_BYTES = 2048
 DEVICE_LINES = 30
 
+# What one conversation's ledger keeps. Fifty entries inside four
+# kilobytes, and a write that would leave it past either is refused
+# rather than silently trimmed: a ledger that drops keys is a ledger the
+# model cannot trust, and one that grows without a bound is not a
+# ledger at all.
+STATE_BYTES = 4096
+STATE_KEYS = 50
+
 # What a lookup answers with. Bounded because a match set is unbounded
 # by nature and a tool result is read by a model with a context window:
 # twenty lines inside two kilobytes, and a fixed sentence saying so
@@ -146,6 +154,28 @@ NO_FACT_TO_RESTORE = (
 )
 
 NOTHING_TO_LOOK_FOR = "there is nothing to look for"
+
+NOTHING_TO_SET = "there is nothing to write down: a note needs a name and something to say"
+
+# The three a ledger write is refused with, each naming the bound it
+# would have crossed. Refusals rather than a silent trim, and separate
+# sentences rather than one, because what a model should do next differs:
+# clear something, say something shorter, or say this one thing shorter.
+STATE_FULL = (
+    "this conversation is already keeping as many notes as it can hold. Nothing was "
+    "written down; clear one that no longer matters and write this one again"
+)
+
+STATE_TOO_MUCH = (
+    "this conversation cannot hold any more than it already does. Nothing was written "
+    "down; clear a note that no longer matters, or say this one in fewer words"
+)
+
+STATE_ENTRY_TOO_LONG = (
+    "this note is too long to keep: one note has to fit inside the space this "
+    "conversation keeps for all of them. Nothing was written down; say it in fewer "
+    "words"
+)
 
 # What a bounded lookup ends with when it left something out. Fixed and
 # value-free like every other sentence here: it says that more matched
@@ -637,6 +667,96 @@ class MemoryStore:
 
         return self._written(agent, scope, work)
 
+    async def set_state(
+        self, conversation: str, key: str, value: str, *, agent: str
+    ) -> None:
+        """Write down what is currently true in this conversation, under
+        a name the model chose.
+
+        Upsert by key is the whole of the semantics: the key is the
+        identity, so writing the same one again replaces what it held
+        rather than adding a second entry. There is no undo, and there is
+        nothing to undo: a ledger of what is currently true is not a
+        record of the user's words, which is what the soft forgetting of
+        facts exists to protect.
+
+        A write that would leave the ledger past either of its bounds is
+        refused, and that is the whole reason the bounds are stated here
+        rather than enforced by a trim. Dropping a key to make room would
+        make every entry a guess about whether it is still there, and
+        growing past the byte bound would put an unbounded ledger into
+        every round's prompt.
+
+        Whether the ledger is over its bound is decided inside the
+        transaction, under the chain's lock, so the count this write is
+        held against is the count the write lands on.
+        """
+        named = _one_line(key)
+        said = _one_line(value)
+        if not named or not said:
+            raise ValueError(NOTHING_TO_SET)
+        if len(_entry(named, said).encode("utf-8")) > STATE_BYTES:
+            raise ValueError(STATE_ENTRY_TOO_LONG)
+        await asyncio.to_thread(self._set_state, agent, conversation, named, said)
+
+    def _set_state(
+        self, agent: str, conversation: str, key: str, value: str
+    ) -> None:
+        def work(connection: Connection) -> None:
+            held = dict(_ledger(connection, conversation))
+            if key not in held and len(held) + 1 > STATE_KEYS:
+                raise _Refused(STATE_FULL)
+            after = dict(held)
+            after[key] = value
+            if len(_ledger_rendered(sorted(after.items())).encode("utf-8")) > STATE_BYTES:
+                raise _Refused(STATE_TOO_MUCH)
+            now = _utc_now().isoformat()
+            # Decided here rather than with an upsert, because the chain's
+            # advisory lock has already made this transaction the only
+            # writer: what the read above saw is what the write below
+            # lands on.
+            if key in held:
+                connection.execute(
+                    sql_update(schema.state)
+                    .where(
+                        schema.state.c.conversation == conversation,
+                        schema.state.c.key == key,
+                    )
+                    .values(value=value, updated_at=now)
+                )
+            else:
+                connection.execute(
+                    schema.state.insert().values(
+                        conversation=conversation,
+                        key=key,
+                        value=value,
+                        updated_at=now,
+                    )
+                )
+
+        self._written(agent, MemoryScope.CONVERSATION, work)
+
+    async def clear_state(
+        self, conversation: str, key: str | None = None, *, agent: str
+    ) -> int:
+        """Forget one thing this conversation was keeping, or the whole
+        ledger, and answer how many entries went.
+
+        No refusal for a key that is not there, and no held area either.
+        Clearing what is already clear is what the caller asked for, and
+        the count is what says whether anything was.
+        """
+        return await asyncio.to_thread(self._clear_state, agent, conversation, key)
+
+    def _clear_state(self, agent: str, conversation: str, key: str | None) -> int:
+        def work(connection: Connection) -> int:
+            where = [schema.state.c.conversation == conversation]
+            if key is not None:
+                where.append(schema.state.c.key == _one_line(key))
+            return int(connection.execute(delete(schema.state).where(*where)).rowcount)
+
+        return self._written(agent, MemoryScope.CONVERSATION, work)
+
     async def restore(
         self,
         scope: MemoryScope,
@@ -834,6 +954,33 @@ def _over_the_cap(
     return [row_id for row_id, _ in stored if row_id not in surviving]
 
 
+def _ledger(connection: Connection, conversation: str) -> list[tuple[str, str]]:
+    """One conversation's ledger, by key.
+
+    Ordered by the key rather than by when it was written, because a
+    ledger is a set of current truths rather than a history: the reading
+    order a model meets should not move because one entry was touched.
+    """
+    return [
+        (key, value)
+        for key, value in connection.execute(
+            select(schema.state.c.key, schema.state.c.value)
+            .where(schema.state.c.conversation == conversation)
+            .order_by(schema.state.c.key)
+        ).all()
+    ]
+
+
+def _entry(key: str, value: str) -> str:
+    """One ledger line, which is what both the rendering and the byte
+    bound are counted in."""
+    return f"- {key}: {value}"
+
+
+def _ledger_rendered(held: Sequence[tuple[str, str]]) -> str:
+    return "\n".join(_entry(key, value) for key, value in held)
+
+
 def _matching(
     connection: Connection, agent: str, device: str, wanted: str
 ) -> list[tuple[int, str]]:
@@ -945,12 +1092,18 @@ __all__ = [
     "MORE_MATCHED",
     "NOTHING_TO_LOOK_FOR",
     "NOTHING_TO_REMEMBER",
+    "NOTHING_TO_SET",
     "NO_FACT_TO_FORGET",
     "NO_FACT_TO_RESTORE",
     "NO_FACT_TO_UPDATE",
     "QUIET_TIMEOUT_S",
     "RECALL_BYTES",
     "RECALL_LINES",
+    "STATE_BYTES",
+    "STATE_ENTRY_TOO_LONG",
+    "STATE_FULL",
+    "STATE_KEYS",
+    "STATE_TOO_MUCH",
     "TOO_LONG",
     "UNWRITABLE",
     "MemoryScope",
