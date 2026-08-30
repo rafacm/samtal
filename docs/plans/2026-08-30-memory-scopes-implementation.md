@@ -316,7 +316,7 @@ released behavior that changed while the milestone said it would not.
 
 ## M2: conversation state end to end
 
-PR TBD.
+PR #360.
 
 ### What landed
 
