@@ -57,6 +57,31 @@ third, citing this plan as the record; adding a chain is an ordinary
 forward extension, not a priced exit, because nothing existing is
 re-cut.
 
+**An existing deployment upgrades by running the provisioning file
+before the M1 image, and a boot that cannot create the schema
+refuses with the fix.** `upgrade_to_head` creates a missing schema
+itself, which needs `CREATE` on the database; the compose
+development loop has it (the server role owns the database), but
+the provisioning file's own contract supports a restricted runtime
+role that does not, and that file runs only when a data directory
+initializes, so an existing least-privilege deployment would meet
+M1 as a boot that cannot create `memory`. The choreography is
+therefore stated, documented in the deployment docs and the
+changelog in M1: rerun the updated `deploy/postgres-init.sql`
+administratively (it is repeatable by design, #283) before
+deploying the M1 image, exactly the rerun-after-reset instruction
+the recovery docs already carry; the file creates the schema with
+`AUTHORIZATION` to the server role, and boot then verifies rather
+than creates. A boot whose schema creation is refused by the
+database answers with a fixed value-free sentence naming the
+provisioning rerun, through the migration-failure classification
+that already owns that surface. The integration lane proves the
+whole path: provision the previous two-schema shape, store rows in
+both, run the updated file as the administrator, then migrate and
+boot all three chains as the restricted role with the rows intact;
+the existing schema-ownership and restricted-role assertions extend
+to the third schema alongside the `vinga_ro` denial.
+
 **The analyst role does not read memory.** `deploy/postgres-init.sql`
 creates the `memory` schema with `AUTHORIZATION` to the server role
 and grants `vinga_ro` nothing on it, with the same explicit `REVOKE`
@@ -318,9 +343,11 @@ surface, its API reference is the document that earns generating.
   migrating) the chain, `deploy/postgres-init.sql`'s third schema
   with the revoke and the #83 comment, the lane fixtures and the
   wheel step covering the third chain, the autogen flag, the drift
-  and open suites, the promises-page baseline bullet,
-  `docs/README.md`'s bullet, changelog. No caller changes; the
-  schema is dormant. Design footprint: the `StoreChain` seam
+  and open suites, the upgrade choreography (deployment docs and
+  changelog naming the provisioning rerun, the fixed
+  cannot-create-schema refusal, the old-shape upgrade integration
+  test), the promises-page baseline bullet, `docs/README.md`'s
+  bullet, changelog. No caller changes; the schema is dormant. Design footprint: the `StoreChain` seam
   carries a third chain with no opener changes, which is the seam
   doing its job.
 - [ ] **M2: the store cutover.** `memory/store.py` (`MemoryStore`
@@ -356,6 +383,13 @@ resolution.
    rows, upgrades as administrator, and boots all three chains as
    the restricted role; extend the schema-owner and restricted-role
    assertions, not only the `vinga_ro` denial.
+
+   *Resolution*: adopted whole, as its own resolved question: the
+   administrative rerun of the repeatable provisioning file before
+   the M1 image is the documented order, the boot that cannot
+   create the schema refuses with a fixed sentence naming that
+   rerun, and the integration lane drives the old-shape upgrade
+   end to end as the restricted role with rows preserved.
 
 2. **P1: the proposed read-refusal test exercises a lock that reads
    never request.** Reads use `read_engine` without the chain
