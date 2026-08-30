@@ -121,8 +121,9 @@ UNREACHABLE = (
     "`docker compose up -d --wait`"
 )
 
-# What a boot that may not create the schema it needs is told, and the
-# whole of the upgrade choreography a release that adds one asks for.
+# What a boot that may not create a schema it is missing is told, and
+# the whole of the upgrade choreography a release that adds one asks
+# for.
 #
 # `deploy/postgres-init.sql` runs when a data directory initializes, and
 # it deliberately leaves the server role without `CREATE` on the
@@ -131,6 +132,17 @@ UNREACHABLE = (
 # the recovery documentation already carries, and the file is repeatable
 # by construction, so the sentence names it and nothing else.
 #
+# It answers exactly one statement, and that narrowness is the whole of
+# what makes it true. The rerun creates schemas that are missing and
+# does nothing else: its creates are `IF NOT EXISTS`, so a schema that
+# is there under the wrong owner is not fixed by running it again, and
+# neither is a table-level grant a later migration wanted. Those are
+# real failures with different answers, and telling their operator to
+# run a file that will change nothing would be worse than the general
+# sentence, which at least does not prescribe. So this is raised at the
+# `CREATE SCHEMA` in `upgrade_to_head` rather than classified out of
+# whatever a migration happened to fail on.
+#
 # Fixed and value-free like every other refusal here. The schema that
 # was missing is not quoted back: it is this module's own constant
 # rather than anything a caller reaches, and naming it would put a
@@ -138,12 +150,12 @@ UNREACHABLE = (
 # connection is not repeated for the reason the sentences around it
 # give.
 SCHEMA_NOT_PERMITTED = (
-    "the vinga database refused this server a privilege its migration needs, which "
-    "on an existing deployment means a schema this release adds and a server role "
-    "that deliberately may not create one. Rerun deploy/postgres-init.sql "
-    "administratively against this database before starting this image: it creates "
-    "every schema the server owns with AUTHORIZATION to the server role, and every "
-    "statement in it is written to be run again. Nothing of the connection is "
+    "the vinga database is missing a schema this server owns, and the role it "
+    "connects as may not create one, which is the least-privilege contract working "
+    "as intended. Rerun deploy/postgres-init.sql administratively against this "
+    "database before starting this image: it creates every schema the server owns "
+    "with AUTHORIZATION to the server role, every statement in it is written to be "
+    "run again, and nothing already stored is touched. Nothing of the connection is "
     "repeated here, because a database URL carries credentials in its authority and "
     "can carry another in its query"
 )
@@ -402,6 +414,17 @@ def upgrade_to_head(engine: Engine, chain: StoreChain) -> None:
     do". Asking first is what lets a deployment provision the schemas
     with `deploy/postgres-init.sql` and give the server role nothing
     but its own schemas.
+
+    That same statement is the one place `SCHEMA_NOT_PERMITTED` is
+    raised, and the placement is the sentence's warrant. What it
+    prescribes is a rerun of the provisioning file, and the file creates
+    missing schemas and nothing else, so it is the answer to this
+    refusal and to no other privilege failure a migration can meet: a
+    schema standing under the wrong owner is not moved by a rerun, and a
+    table-level grant a later revision wanted is not granted by one.
+    Everything else that this connection is refused travels out as it
+    is and is sanitized by `migration_failure`, which says the instance
+    cannot be used as configured and prescribes nothing.
     """
     with engine.connect() as connection:
         # Takes the lock before Alembic looks at the version table: the
@@ -414,9 +437,25 @@ def upgrade_to_head(engine: Engine, chain: StoreChain) -> None:
             text("SELECT to_regnamespace(:name) IS NOT NULL"), {"name": chain.schema}
         ).scalar()
         if not found:
-            # The name is this module's own constant, never a value from
-            # anywhere a caller reaches.
-            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{chain.schema}"'))
+            # Built inside the handler and raised after it, the rule this
+            # module keeps everywhere: the driver's own error holds the
+            # DSN it connected on, and `from exc` would leave it reachable
+            # from the refusal that travels. A failure that is not the
+            # privilege is re-raised untouched, so the caller's own
+            # handler classifies it.
+            refusal: ConfigError | None = None
+            try:
+                # The name is this module's own constant, never a value
+                # from anywhere a caller reaches.
+                connection.execute(
+                    text(f'CREATE SCHEMA IF NOT EXISTS "{chain.schema}"')
+                )
+            except Exception as exc:
+                if not _not_permitted(exc):
+                    raise
+                refusal = StorageError(SCHEMA_NOT_PERMITTED)
+            if refusal is not None:
+                raise refusal
         config = AlembicConfig()
         config.set_main_option("script_location", str(chain.migrations))
         config.attributes["connection"] = connection
@@ -494,19 +533,20 @@ def is_busy(exc: BaseException) -> bool:
 def migration_failure(exc: Exception) -> ConfigError:
     """What an open that did not migrate is answered with.
 
-    Four sentences and no fifth: the lock that did not arrive, which the
-    caller may retry; a database stamped at a revision a re-cut deleted,
-    which has to be replaced; a privilege the role does not have, which
-    is the provisioning file's rerun; and everything else, which is an
+    Three sentences and no fourth: the lock that did not arrive, which
+    the caller may retry; a database stamped at a revision a re-cut
+    deleted, which has to be replaced; and everything else, which is an
     instance the server cannot use as configured. None of them carries a
     word of the driver's own text, because a psycopg connection error
     quotes the DSN it tried.
 
-    The privilege arm is classified by exception class and never by
-    message, the rule this module holds everywhere: `InsufficientPrivilege`
-    is walked to through SQLAlchemy's `orig` exactly as the retryable set
-    is, so a database that phrases its refusal differently, or in another
-    language, is classified the same.
+    A privilege the role does not have is deliberately not a fourth arm
+    here. It has an answer only when the refused statement is the
+    `CREATE SCHEMA` in `upgrade_to_head`, which is where the sentence
+    naming the provisioning rerun is raised; a privilege failure
+    anywhere else in a migration is one that rerunning the file will not
+    change, and falls through to the general sentence below rather than
+    being told to run something that does nothing.
 
     The middle arm is narrow on purpose, because the sentence it answers
     with says to throw a database away. Three things have to hold before
@@ -526,20 +566,20 @@ def migration_failure(exc: Exception) -> ConfigError:
         return DatabaseBusyError(MIGRATION_BUSY)
     if _stranded(exc):
         return StorageError(SUPERSEDED_REVISION)
-    if _not_permitted(exc):
-        return StorageError(SCHEMA_NOT_PERMITTED)
     return StorageError(UNREACHABLE)
 
 
-def _not_permitted(exc: Exception) -> bool:
-    """Whether the database refused this migration a privilege.
+def _not_permitted(exc: BaseException) -> bool:
+    """Whether the database refused this statement for want of a
+    privilege.
 
-    The one failure whose answer is an administrative rerun rather than
-    a connection to check, and the shape an existing least-privilege
-    deployment meets a release that adds a schema in: `CREATE SCHEMA`
-    checks `CREATE` on the database before it looks at whether the
-    schema is there, so the role that has served every previous release
-    is refused here and nowhere else.
+    Asked at one call site, the `CREATE SCHEMA` in `upgrade_to_head`,
+    because that is the one refusal with a remedy: a role that may not
+    create a schema is exactly what a least-privilege deployment has,
+    and the provisioning file is what creates one for it. Asked of a
+    whole migration it would answer for failures the same file cannot
+    fix, and the sentence would then prescribe a command that changes
+    nothing.
 
     Walked through `orig` like `is_busy`, and by class, because a driver
     error arrives wrapped and its message is the one thing that may not

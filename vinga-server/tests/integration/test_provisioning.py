@@ -62,6 +62,7 @@ from vinga_server.db import (
     DEFAULT_PASSWORD,
     PASSWORD_ENV,
     SCHEMA_NOT_PERMITTED,
+    UNREACHABLE,
     connection_url,
     open_database,
 )
@@ -711,6 +712,63 @@ def test_a_deployment_on_the_two_schema_shape_upgrades_by_rerunning_it(
         assert _as_analyst(blank_database, f"select * from memory.{table.name}") == (
             "refused: 42501"
         ), table.name
+
+
+def test_a_schema_under_the_wrong_owner_is_not_told_to_rerun_the_file(
+    blank_database: str, server_role: str
+) -> None:
+    """The boundary of the rerun sentence, driven at a real refusal.
+
+    The schema is there, so nothing creates one; it belongs to the
+    administrator rather than to the server role, so Alembic is refused
+    when it makes its own version table inside it. That is a privilege
+    failure in a migration, and it must NOT be answered with the rerun:
+    the provisioning file's creates are `IF NOT EXISTS`, so running it
+    again would find the schema present, change nothing, and leave an
+    operator to discover that for themselves. The general sentence is
+    the honest answer, because it prescribes nothing.
+
+    This is the case a classifier that read the exception class out of
+    the whole migration would get wrong, and the reason the rerun
+    sentence is raised at the schema creation instead.
+    """
+    _sql(blank_database, 'create schema "memory"')
+    settings = _as_server_role(blank_database, server_role)
+
+    with pytest.raises(StorageError) as refusal:
+        open_memory(settings)
+
+    assert str(refusal.value) == UNREACHABLE
+    assert str(refusal.value) != SCHEMA_NOT_PERMITTED
+    assert "deploy/postgres-init.sql" not in str(refusal.value)
+    # The chain is severed here as it is everywhere else: what psycopg
+    # raised holds the DSN it connected on.
+    assert refusal.value.__cause__ is None
+    assert refusal.value.__context__ is None
+
+
+def test_the_missing_schema_refusal_severs_what_the_driver_raised(
+    blank_database: str, server_role: str
+) -> None:
+    """The other side of the same boundary, and the half the unit lane
+    cannot reach: the refusal that DOES name the rerun, raised at a real
+    `CREATE SCHEMA` a real role was refused, carrying no chain out.
+
+    `psycopg` quotes the DSN it connected on, so a refusal that left the
+    driver's error reachable would put a password on a startup log.
+    """
+    _the_two_schema_shape(blank_database, server_role)
+    settings = _as_server_role(blank_database, server_role)
+
+    with pytest.raises(StorageError) as refusal:
+        open_memory(settings)
+
+    # The sentence itself is the module's own constant, which is what
+    # makes "no value travels" an equality rather than a substring hunt;
+    # the chain is what a hunt could not have covered anyway.
+    assert str(refusal.value) == SCHEMA_NOT_PERMITTED
+    assert refusal.value.__cause__ is None
+    assert refusal.value.__context__ is None
 
 
 def test_the_file_runs_again_over_what_it_already_made(
