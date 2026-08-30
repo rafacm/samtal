@@ -6322,7 +6322,7 @@
               }
             ],
             "default": null,
-            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: switch_agent and remember appear under a structural condition (a device bound to more than one agent, memory configured) rather than by grant.",
+            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant.",
             "title": "Mcp"
           },
           "filler": {
@@ -6445,7 +6445,7 @@
               }
             ],
             "default": null,
-            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: switch_agent and remember appear under a structural condition (a device bound to more than one agent, memory configured) rather than by grant.",
+            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant.",
             "title": "Mcp"
           },
           "filler": {

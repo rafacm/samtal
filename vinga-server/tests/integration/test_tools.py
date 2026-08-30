@@ -14,6 +14,8 @@ import pytest
 
 from tests.integration.conftest import dominant_hz, spoken
 from vinga_server.config import Config
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.memory import open_memory
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -163,7 +165,7 @@ async def test_a_switch_to_an_unbound_agent_is_answered_by_the_first(serve, simu
 
 
 async def test_a_fact_remembered_in_one_conversation_reaches_the_next(
-    serve, simulate, tmp_path: Path
+    serve, simulate
 ) -> None:
     # The reply quotes the system prompt it was handed, so the injected
     # facts are visible in what the device hears. The second
@@ -178,11 +180,16 @@ async def test_a_fact_remembered_in_one_conversation_reaches_the_next(
             "tool_name": "remember",
             "tool_arguments": {"text": fact},
         },
-        memory={"dir": str(tmp_path / "memory")},
     )
     async with serve(config) as port:
         first, _ = await simulate(port, DEVICE_MAC)
-        stored = (tmp_path / "memory" / "assistant.md").read_text(encoding="utf-8")
+        # Read back through the store the server writes through, opened
+        # here as a second process would open it.
+        store = open_memory(DatabaseConfig())
+        try:
+            stored = store.read("assistant")
+        finally:
+            store.close()
         second, _ = await simulate(port, DEVICE_MAC)
 
     assert stored.splitlines() == [f"- {fact}"]
@@ -305,18 +312,19 @@ PUBLISHED = {
     "tools__inside__secret_word",
 }
 
-# The builtins due in this configuration, which is the two that are
+# The builtins due in this configuration, which is the three that are
 # always due. `switch_agent` is not among them: each device here is
-# bound to a single agent, so there is nowhere to switch. `remember` is
-# not either: the configuration has no memory section, so no memory
-# store exists. The two conversation tools are, because they are offered
-# whether or not a deployment can resume anything: what a server that
-# cannot answers with is a sentence the agent reads out, and a tool that
-# is simply absent is a tool a model invents (#190).
+# bound to a single agent, so there is nowhere to switch. `remember` is,
+# because remembered facts live in a schema every server migrates at
+# boot and no deployment is without one (#314); the two conversation
+# tools are, because they are offered whether or not a deployment can
+# resume anything: what a server that cannot answers with is a sentence
+# the agent reads out, and a tool that is simply absent is a tool a
+# model invents (#190).
 # Spelled as a set the assertions below compare against, so that a
 # conditional builtin appearing where its condition does not hold fails
 # this test rather than passing under a subtraction.
-DUE_BUILTINS: set[str] = {"new_conversation", "resume_conversation"}
+DUE_BUILTINS: set[str] = {"remember", "new_conversation", "resume_conversation"}
 
 
 async def test_a_restricted_agent_is_offered_exactly_its_subset(serve, simulate) -> None:

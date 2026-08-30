@@ -6,10 +6,13 @@ source priority: VINGA_-prefixed environment variables (nested keys joined
 with __, for example VINGA_SERVER__PORT) override the YAML file, which
 overrides the field defaults.
 
-The file holds `server` and `memory`. The domain half lives in the
-database, so a domain section left in the file, or a VINGA_ override for
-one, refuses the boot naming where it moved and the command that writes
-it: a key that quietly stopped applying is the trap this closes.
+The file holds `server`. The domain half lives in the database, so a
+domain section left in the file, or a VINGA_ override for one, refuses
+the boot naming where it moved and the command that writes it: a key
+that quietly stopped applying is the trap this closes. A section that
+retired rather than moved (`memory:`, since remembered facts joined the
+database too) refuses through the same door and answers the other
+question: what it configured is unconditional now.
 Composition then puts the two halves together into `Config`, which is
 what validates the whole snapshot the way it always has.
 """
@@ -125,6 +128,29 @@ MOVED_KEY_COMMANDS: dict[str, str] = {
 # Where the reference for the moved half is, quoted in the refusal
 # because that document is what a reader needs next.
 DOMAIN_REFERENCE = "docs/reference/domain-config.md"
+
+# The sections that did not move anywhere: they are gone, and what they
+# configured is now simply how the server behaves.
+#
+# `memory:` chose a directory for one file per agent. Remembered facts
+# live in the database this server already keeps its other two stores
+# in (#314), which needs no directory and no choice, so the section
+# retired whole rather than gaining a key that means nothing.
+#
+# Refused rather than ignored, and this is the same trap
+# `_check_moved_keys` closes one door of: `extra="forbid"` would answer
+# a file that still carries it, but with a validation error that says a
+# key is not permitted and never says what happened to it. A deployment
+# meeting that would go looking for a typo.
+RETIRED_SECTIONS: dict[str, str] = {
+    "memory": (
+        "retired; remembered facts live in the database the "
+        f"{ENV_PREFIX}DB_* variables name, which this server migrates at every boot, "
+        "and every agent can remember without being configured to. Existing files "
+        "under the old directory are not read, not imported and not deleted by this "
+        "release: archiving or removing them is yours to do"
+    ),
+}
 
 # The database section's own environment spellings.
 #
@@ -349,7 +375,7 @@ def load_environment_file() -> None:
 
 
 def load_file_config(path: str | Path | None = None) -> FileConfig:
-    """The file half of the configuration: `server` and `memory`."""
+    """The file half of the configuration: `server`."""
     if path is None:
         env_path = os.environ.get(CONFIG_ENV_VAR)
         path = Path(env_path) if env_path else None
@@ -402,7 +428,7 @@ def compose_config(
     """
     problem: str | None = None
     try:
-        return Config(server=file_half.server, memory=file_half.memory, **domain)
+        return Config(server=file_half.server, **domain)
     except ValidationError as exc:
         problem = _format_validation_error(exc, source)
     raise ConfigError(problem)
@@ -443,7 +469,7 @@ def _check_config_file(path: Path) -> None:
     if data is not None and not isinstance(data, dict):
         raise ConfigError(
             f"invalid config in {path}: top level must be a mapping of "
-            f"server/memory, got {type(data).__name__}"
+            f"server, got {type(data).__name__}"
         )
 
     if isinstance(data, dict):
@@ -454,6 +480,7 @@ def _check_moved_keys(path: Path, data: dict) -> None:
     """A domain section left in the file, refused where the parsed top
     level is already in hand. Ignoring it silently would leave a
     deployment editing a section the server no longer reads."""
+    _check_retired_keys(path, data)
     moved = [key for key in DOMAIN_KEYS if key in data]
     if not moved:
         return
@@ -466,6 +493,32 @@ def _check_moved_keys(path: Path, data: dict) -> None:
         f"  Remove these sections from the file: the domain half of the "
         f"configuration lives in the database the {DATABASE_ENV_PREFIX}* variables "
         f"name. See {DOMAIN_REFERENCE}."
+    )
+
+
+def _check_retired_keys(path: Path, data: dict) -> None:
+    """A section that is gone rather than moved, refused with the
+    sentence that says so.
+
+    Its own arm and not a second entry in the table above, because the
+    two refusals answer different questions. A moved section is written
+    somewhere else and the refusal names the command that writes it; a
+    retired one is not written anywhere at all, and what its reader
+    needs is that the behavior it configured is now unconditional.
+
+    Value-free, like every refusal in this module: the section's name is
+    this module's own constant and what the operator wrote under it is
+    never quoted back. A directory is not a credential, but a value
+    pasted into the wrong key is exactly the case a rule with an
+    exception in it does not cover.
+    """
+    retired = [key for key in RETIRED_SECTIONS if key in data]
+    if not retired:
+        return
+    problems = "\n".join(f"  - {key}: {RETIRED_SECTIONS[key]}" for key in retired)
+    raise ConfigError(
+        f"invalid config in {path}:\n{problems}\n"
+        f"  Remove these sections from the file: they configure nothing any more."
     )
 
 
@@ -572,6 +625,7 @@ def _check_moved_environment() -> None:
     which is the hole this whole check exists to close. The variable is
     reported in the spelling it was written in, since that is what has
     to be found and unset."""
+    _check_retired_environment()
     moved = [
         (name, key)
         for key in DOMAIN_KEYS
@@ -591,6 +645,41 @@ def _check_moved_environment() -> None:
         f"  Unset these variables: the domain half of the configuration lives in "
         f"the database the {DATABASE_ENV_PREFIX}* variables name. "
         f"See {DOMAIN_REFERENCE}."
+    )
+
+
+def _check_retired_environment() -> None:
+    """The same refusal for a VINGA_ override of a retired section, and
+    for the same reason the moved one exists.
+
+    `VINGA_MEMORY__DIR` is a spelling that applied yesterday: the
+    environment source reads known fields and ignores every other
+    prefixed variable, `extra="forbid"` notwithstanding, so deleting the
+    field alone would leave that variable naming nothing, silently, on a
+    deployment that set it deliberately.
+
+    Matched without regard to case, because that is how the source this
+    replaces reads them, so `VINGA_memory__dir` is refused with the
+    spelling it was written in. The variable's NAME is reported and its
+    value never is: what a reader has to find and unset is the name, and
+    what lands in an environment variable wrongly is the one thing a
+    refusal must not repeat.
+    """
+    retired = [
+        (name, key)
+        for key in RETIRED_SECTIONS
+        for name in sorted(os.environ)
+        if name.upper() == f"{ENV_PREFIX}{key.upper()}"
+        or name.upper().startswith(f"{ENV_PREFIX}{key.upper()}__")
+    ]
+    if not retired:
+        return
+    problems = "\n".join(
+        f"  - {name}: {key} is {RETIRED_SECTIONS[key]}" for name, key in retired
+    )
+    raise ConfigError(
+        f"invalid configuration environment:\n{problems}\n"
+        f"  Unset these variables: they configure nothing any more."
     )
 
 

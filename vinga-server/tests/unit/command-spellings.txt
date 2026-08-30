@@ -878,16 +878,16 @@ docs/reference/conversations-schema.md:134  respell  vinga session purge
 docs/reference/domain-config.md:3  generated  vinga reference
 docs/reference/domain-config.md:22  generated  vinga export
 docs/reference/domain-config.md:79  generated  vinga reload
-docs/reference/domain-config.md:125  generated  vinga schema
-docs/reference/domain-config.md:143  generated  vinga provider set
-docs/reference/domain-config.md:149  generated  vinga provider secret set
-docs/reference/domain-config.md:156  generated  vinga schema provider
-docs/reference/domain-config.md:255  generated  vinga mcp-server set
-docs/reference/domain-config.md:269  generated  vinga agent preview
-docs/reference/domain-config.md:290  generated  vinga prompt-fragment set
-docs/reference/domain-config.md:295  generated  vinga agent preview
-docs/reference/domain-config.md:307  generated  vinga agent preview
-docs/reference/domain-config.md:324  generated  vinga agent set
+docs/reference/domain-config.md:126  generated  vinga schema
+docs/reference/domain-config.md:144  generated  vinga provider set
+docs/reference/domain-config.md:150  generated  vinga provider secret set
+docs/reference/domain-config.md:157  generated  vinga schema provider
+docs/reference/domain-config.md:256  generated  vinga mcp-server set
+docs/reference/domain-config.md:270  generated  vinga agent preview
+docs/reference/domain-config.md:291  generated  vinga prompt-fragment set
+docs/reference/domain-config.md:296  generated  vinga agent preview
+docs/reference/domain-config.md:308  generated  vinga agent preview
+docs/reference/domain-config.md:325  generated  vinga agent set
 docs/reference/domain-config.md:357  generated  vinga agent-defaults set
 docs/reference/domain-config.md:393  generated  vinga mcp-server status
 docs/reference/domain-config.md:399  generated  vinga mcp-server status
@@ -989,7 +989,7 @@ vinga-server/README.md:3114  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:48  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:55  respell  vinga-server config apply
 vinga-server/config.deploy.example.yaml:63  respell  vinga-server config ota-url
-vinga-server/config.deploy.example.yaml:177  respell  config apply
+vinga-server/config.deploy.example.yaml:170  respell  config apply
 vinga-server/config.example.yaml:17  respell  vinga-server config apply
 vinga-server/config.example.yaml:18  respell  vinga-server config default-agent set assistant
 vinga-server/config.example.yaml:19  respell  vinga-server config list
@@ -1056,10 +1056,10 @@ vinga-server/src/vinga_server/config/cli.py:2793  respell  config list
 vinga-server/src/vinga_server/config/cli.py:6743  respell  vinga provider
 vinga-server/src/vinga_server/config/cli.py:6743  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
-vinga-server/src/vinga_server/config/docgen.py:587  respell  config schema
-vinga-server/src/vinga_server/config/loader.py:76  respell  vinga simulator run
-vinga-server/src/vinga_server/config/models.py:1729  respell  vinga mcp-server status
-vinga-server/src/vinga_server/config/models.py:2316  respell  config schema
+vinga-server/src/vinga_server/config/docgen.py:588  respell  config schema
+vinga-server/src/vinga_server/config/loader.py:79  respell  vinga simulator run
+vinga-server/src/vinga_server/config/models.py:1717  respell  vinga mcp-server status
+vinga-server/src/vinga_server/config/models.py:2304  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:880  respell  vinga ota-url

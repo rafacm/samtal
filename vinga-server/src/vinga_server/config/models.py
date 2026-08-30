@@ -1,7 +1,7 @@
 """Pydantic models for the vinga-server configuration.
 
 The configuration has two halves. `FileConfig` is the half the YAML file
-holds, `server` and `memory`, with the VINGA_ environment overrides
+holds, `server`, with the VINGA_ environment overrides
 pydantic-settings gives it. The domain half (providers, mcp_servers,
 agent_defaults, agents, devices, default_agent) lives in the database
 and is written with `vinga-server config`. `Config` is the composition
@@ -1632,18 +1632,6 @@ class PromptFragmentConfig(BaseModel):
     )
 
 
-class MemoryConfig(BaseModel):
-    """Where the agents' remembered facts are kept.
-
-    The whole section is optional: without it there is no `remember`
-    tool and nothing is injected into any prompt.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    dir: Path
-
-
 class FillerConfig(BaseModel):
     """Masking reply latency with a pre-synthesized filled pause.
 
@@ -1931,9 +1919,9 @@ class AgentDefaults(BaseModel):
             "published name without the entry prefix. Unset inherits the "
             "agent_defaults list; naming a list replaces the inherited one rather "
             "than extending it, so an empty list opts an agent out of the tools its "
-            "siblings have. The builtin tools are outside this model: switch_agent "
-            "and remember appear under a structural condition (a device bound to "
-            "more than one agent, memory configured) rather than by grant."
+            "siblings have. The builtin tools are outside this model: remember is "
+            "offered to every agent, and switch_agent appears under a structural "
+            "condition (a device bound to more than one agent) rather than by grant."
         ),
     )
 
@@ -2560,11 +2548,14 @@ yaml_file_var: ContextVar[Path | None] = ContextVar("vinga_yaml_file", default=N
 class FileConfig(BaseSettings):
     """The half of the configuration the YAML file holds.
 
-    `server` and `memory` only: the domain half moved to the database,
-    and a file that still names it is refused by the loader with the
-    command that writes it instead. The VINGA_ environment overrides are
-    unchanged for what is left (VINGA_SERVER__PORT keeps working), which
-    is why this is still a settings model and `Config` is not.
+    `server` alone: the domain half moved to the database, and a file
+    that still names it is refused by the loader with the command that
+    writes it instead. `memory:` was here too until remembered facts
+    moved into the database as well (#314), and a file that still
+    carries it is refused the same way. The VINGA_ environment
+    overrides are unchanged for what is left (VINGA_SERVER__PORT keeps
+    working), which is why this is still a settings model and `Config`
+    is not.
     """
 
     model_config = SettingsConfigDict(
@@ -2590,7 +2581,6 @@ class FileConfig(BaseSettings):
         )
 
     server: ServerConfig = Field(default_factory=ServerConfig)
-    memory: MemoryConfig | None = None
 
 
 class Config(DomainConfig):
@@ -2605,8 +2595,8 @@ class Config(DomainConfig):
 
     A subclass rather than a second declaration of the domain half: the
     seven sections and their three field validators are `DomainConfig`'s,
-    and what a whole configuration adds is `server`, `memory`, the
-    accessors, and the model validator that judges the snapshot at boot.
+    and what a whole configuration adds is `server`, the accessors, and
+    the model validator that judges the snapshot at boot.
     A subclass declares its own fields after the ones it inherits, so the
     domain sections come first here and the file half last, which no
     caller reads: this model is composed by keyword and never rendered,
@@ -2614,7 +2604,6 @@ class Config(DomainConfig):
     """
 
     server: ServerConfig = Field(default_factory=ServerConfig)
-    memory: MemoryConfig | None = None
 
     @model_validator(mode="after")
     def _check_domain(self) -> "Config":
