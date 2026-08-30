@@ -147,9 +147,11 @@ The changed test is the deliverable; what verifies it:
   the hold reverted (the `connect` monkeypatch removed), nothing
   sets the event, the peer sits out its bounded wait while the
   client completes a normal close, and the case fails
-  deterministically with both sightings' exact assertion diff,
-  rather than reverting to a mostly green flake. The bite is
-  demonstrated once during implementation and recorded in the
+  deterministically as the named synchronization failure
+  (`peer_waited == [True]` fires first), rather than reverting to a
+  mostly green flake. Both sightings' exact verdict diff returns
+  only when the synchronization assertions are removed as well,
+  which is the second demonstration. Both are recorded in the
   implementation doc.
 - The peer's wait outcome and the wrapper's expiry are both
   asserted, so either side outliving its bound is a named
