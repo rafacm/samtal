@@ -283,15 +283,12 @@ async def _build_composition(
     # subscription is wired here because this is where both sides exist,
     # and it is a context manager so that a partial startup and a second
     # application in one process both detach.
+    #
+    # In front of the writer below and therefore unwound behind it: a
+    # deletion published while the writer is still draining has to reach
+    # the store that is going to refuse the write it would otherwise
+    # resurrect.
     stack.enter_context(erasures_announced_to(memory.threads_erased))
-    # The heal for what no transaction covers: state and held facts whose
-    # thread has no row in the record and has not been written to for a
-    # day. Pre-upgrade leftovers, threads that never landed a first turn,
-    # and deployments that record nothing at all. Contained inside the
-    # store, so a database that refuses it says so once and the boot
-    # carries on, and off the loop because it is a database round trip
-    # like any other.
-    await asyncio.to_thread(memory.sweep)
     conversations_section = config.server.conversations
     conversations = (
         None
@@ -318,6 +315,22 @@ async def _build_composition(
         open_conversations(database).dispose()
     else:
         stack.callback(conversations.stop)
+    # The heal for what no transaction covers: state and held facts whose
+    # thread has no row in the record and has not been written to for a
+    # day. Pre-upgrade leftovers, threads that never landed a first turn,
+    # and deployments that record nothing at all. Contained inside the
+    # store, so a database that refuses it says so once and the boot
+    # carries on, and off the loop because it is a database round trip
+    # like any other.
+    #
+    # Here rather than beside the open above, and the reason is the
+    # anti-join: what it asks is which of these threads the record has
+    # never heard of, so the record's schema has to exist before it can
+    # be asked. Whichever branch above ran has migrated it by now. Before
+    # the writer starts, so the sweep and the writer's own first
+    # retention pass do not reach for the same rows at once.
+    await asyncio.to_thread(memory.sweep)
+    if conversations is not None:
         # Started here rather than at the end of the build, in front of
         # everything a boot can still fail in: the stop above is
         # registered on the exit stack, so a failure after this point
