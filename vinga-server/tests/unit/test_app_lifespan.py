@@ -23,6 +23,7 @@ which is what keeps an operator's stderr to one line.
 """
 
 import asyncio
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ from tests.support.checkin import NORMALIZED, check_in, unbound_config
 from tests.support.configs import config_with_agent
 from tests.support.notices import CHECK_IN, boundaries
 from tests.support.problems import refused
+from tests.support.stores import CONVERSATIONS_MANIFEST
 from vinga_server import __version__
 from vinga_server.app import StartupFailed, create_app, startup_failure
 from vinga_server.build_info import revision
@@ -47,13 +49,14 @@ from vinga_server.config.api import ApiRuntime
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.conversations import ConversationStore
+from vinga_server.conversations.store import CONVERSATIONS_CHAIN
 from vinga_server.db import DOMAIN_CHAIN, read_engine, write_engine
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import APP_CHANNEL, CaptureDisabled
 from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
-from vinga_server.memory.store import MEMORY_CHAIN, MemoryStore
+from vinga_server.memory.store import MEMORY_CHAIN, MemoryScope, MemoryStore
 from vinga_server.onboarding.origin import onboarding_url
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
@@ -429,72 +432,187 @@ def test_a_boot_that_fails_after_the_memory_store_lets_go_of_it(
     assert closed == opened, "a refused boot left the memory store's pools behind"
 
 
-def teardown_order(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """The order the two stores are let go in, which is the whole of what
-    the composition reorder is for.
+@dataclass
+class Unwinding:
+    """What a boot's own two stores did on the way out.
 
-    Recorded rather than read off the source, because what decides it is
-    the order the callbacks were registered in and that is exactly the
-    kind of thing an edit reverses without meaning to.
+    `order` is which of them was let go first, recorded rather than read
+    off the source because what decides it is the order the callbacks
+    were registered in, which is exactly the kind of thing an edit
+    reverses without meaning to. `at_close` is what one thread still had
+    in memory at the instant the store was closed, which is the only
+    moment from which the question can be answered: rows read afterwards
+    cannot say whether they went before the close or would have gone at
+    all.
+
+    The order is not the property. What the composition owes is that a
+    retention pass reaches an open store, and the order is how it pays.
     """
-    order: list[str] = []
+
+    order: list[str] = field(default_factory=list)
+    at_close: list[tuple[list[tuple[str, str]], list[str]]] = field(
+        default_factory=list
+    )
+
+
+def unwinding(monkeypatch: pytest.MonkeyPatch, conversation: str) -> Unwinding:
+    """Watch one boot let go of its stores.
+
+    Only the boot's own memory store, which is what the capture of
+    `open_memory` is for: this file writes rows through stores of its
+    own, and a spy that answered for those too would report closes
+    nobody is asking about.
+    """
+    watched = Unwinding()
+    opened: list[MemoryStore] = []
+    opening = app_module.open_memory
     closing = MemoryStore.close
     stopping = ConversationStore.stop
 
+    def open_memory(settings: Any) -> MemoryStore:
+        store = opening(settings)
+        opened.append(store)
+        return store
+
     def close(self: MemoryStore) -> None:
-        order.append("memory")
+        if self in opened:
+            watched.order.append("memory")
+            watched.at_close.append((_state_of(conversation), _held_in(conversation)))
         closing(self)
 
     def stop(self: ConversationStore) -> None:
-        order.append("writer")
+        watched.order.append("writer")
         stopping(self)
 
+    monkeypatch.setattr(app_module, "open_memory", open_memory)
     monkeypatch.setattr(MemoryStore, "close", close)
     monkeypatch.setattr(ConversationStore, "stop", stop)
-    return order
+    return watched
 
 
-def test_the_writer_drains_before_the_memory_store_closes(
+def test_a_retention_pass_at_teardown_takes_memory_through_the_real_wiring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The order a teardown unwinds in, and the reason memory is opened
-    before the writer is constructed.
+    """Retention through the composition a deployment runs, on a thread
+    that becomes eligible only after the boot has finished.
 
-    The writer's drain runs retention, and retention deletes the memory
-    of every thread it prunes in its own transaction: a drain that ran
-    after memory had been let go would be a deletion made against a store
-    the process had already closed. Registering the memory close first is
-    what makes it unwind last.
+    The writer's own start-time pass has already run by then, so the pass
+    that can take this one is the pass on a close marker, which the drain
+    has to reach before it can stop. What is asserted is what the
+    composition owes: the thread's ledger and the facts it forgot are
+    gone by the time memory is closed, which is only true if the writer
+    was handed the purge and only possible if it drains first.
     """
-    order = teardown_order(monkeypatch)
+    thread = "4444444444444444cccccccccccccccc"
+    watched = unwinding(monkeypatch, thread)
 
-    app = served(recording_config())
-    with TestClient(app):
-        assert order == [], "something was let go of while the server was serving"
+    app = served(recording_config(DatabaseConfig().name))
+    with TestClient(app) as client:
+        assert watched.order == [], "something was let go of while serving"
+        _aged_thread(thread)
+        _wrote_state(thread, "scene", "the tavern")
+        _forgot_a_fact_in(thread)
+        assert _state_of(thread) == [("scene", "the tavern")]
+        # A marker for the drain to take, which is what runs retention: a
+        # stop on its own commits what is queued and prunes nothing.
+        recording = client.app.state.composition.conversations
+        assert recording is not None
+        recording.open_session("teardown", 100.0, dict(CONVERSATIONS_MANIFEST))
+        recording.close_session("teardown", duration_s=1.0, reason="client")
 
-    assert order == ["writer", "memory"]
+    assert watched.order == ["writer", "memory"]
+    assert watched.at_close == [([], [])], "the memory was there when the store closed"
+    assert (_state_of(thread), _held_in(thread)) == ([], [])
 
 
-def test_a_boot_that_fails_after_the_writer_starts_unwinds_in_the_same_order(
+def test_a_failed_startup_unwinds_with_memory_open_for_its_retention(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The same order on the other exit. A partial startup unwinds
-    through the same stack, so a refusal after the writer has started
-    stops it and only then closes the store its retention writes
-    through."""
-    order = teardown_order(monkeypatch)
+    """The same owing on the other exit.
+
+    A boot that refuses after the writer has started unwinds through the
+    same stack, and the writer's start-time retention pass has already
+    run by then: what this pins is that the pass ran through the real
+    wiring and against a store the unwind had not yet closed.
+    """
+    thread = "5555555555555555dddddddddddddddd"
+    _aged_thread(thread)
+    _wrote_state(thread, "scene", "the tavern")
+    _forgot_a_fact_in(thread)
+    watched = unwinding(monkeypatch, thread)
 
     async def refuse(*args: object, **kwargs: object) -> object:
         raise ProviderError(SENTENCE)
 
     monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
 
-    app = served(recording_config())
+    app = served(recording_config(DatabaseConfig().name))
     with pytest.raises(StartupFailed):
         with TestClient(app):
             pass
 
-    assert order == ["writer", "memory"]
+    assert watched.order == ["writer", "memory"]
+    assert watched.at_close == [([], [])], "the memory was there when the store closed"
+
+
+def _aged_thread(conversation: str, when: str = "2020-01-01T00:00:00+00:00") -> None:
+    """A thread the record knows and retention will take whole.
+
+    Written as a row rather than driven through a session, because what
+    it stands for is a conversation somebody had months ago: the age is
+    the whole of what makes it retention's, and no call can produce it.
+    """
+    engine = write_engine(DatabaseConfig(), CONVERSATIONS_CHAIN)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "insert into record.conversations "
+                    "(conversation, agent, device, created_at, last_active_at) "
+                    "values (:conversation, 'assistant', :device, :when, :when)"
+                ),
+                {"conversation": conversation, "device": NORMALIZED, "when": when},
+            )
+    finally:
+        engine.dispose()
+
+
+def _forgot_a_fact_in(conversation: str) -> None:
+    """One fact this conversation forgot, which is the other half of what
+    a thread's memory is: it is held for an undo that dies with the
+    thread."""
+    store = MemoryStore(
+        write_engine(DatabaseConfig(), MEMORY_CHAIN), read_engine(DatabaseConfig())
+    )
+    try:
+        held = asyncio.run(
+            store.add(MemoryScope.AGENT, "assistant", "a fact to bring back", agent="assistant")
+        )
+        asyncio.run(
+            store.forget(
+                MemoryScope.AGENT, "assistant", held, conversation, agent="assistant"
+            )
+        )
+    finally:
+        store.close()
+
+
+def _held_in(conversation: str) -> list[str]:
+    engine = read_engine(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return [
+                row[0]
+                for row in connection.execute(
+                    text(
+                        "select fact from memory.facts "
+                        "where forgotten_in = :conversation"
+                    ),
+                    {"conversation": conversation},
+                )
+            ]
+    finally:
+        engine.dispose()
 
 
 def _wrote_state(conversation: str, key: str, value: str) -> None:
