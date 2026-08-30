@@ -817,6 +817,41 @@ went. On a deployment that does not store conversation text a thread
 cannot be resumed at all, so every conversation there begins with an
 empty ledger and anything worth keeping has to be remembered instead.
 
+**What has accrued is an operator's to see, and to correct.** Nothing
+but this server reads the `memory` schema, so the surface is an
+addressed API under `/api/memory` rather than SQL, with `vinga memory`
+in front of it. Three questions, in the order they get asked:
+
+```bash
+vinga memory list agent                  # who is remembering anything, and how much
+vinga memory list agent poet             # what one of them holds, with each fact's number
+vinga memory list device aa:bb:cc:dd:ee:ff
+vinga memory list conversation <thread>  # what one conversation is currently keeping
+```
+
+Correcting one fact reads the corrected text from a file or from
+standard input and never from an argument, because what is being
+written is something somebody said in a room and arguments land in
+shell history and in the process list:
+
+```bash
+echo "the user is vegetarian" | vinga memory set agent poet 7
+vinga memory set agent poet 7 -f corrected.txt
+```
+
+And removing is `vinga memory delete`, which asks before it acts:
+`vinga memory delete agent poet 7` for one fact, `--all` for the whole
+of one memory, and `vinga memory delete conversation <thread>` reading
+the name of one ledger entry from standard input, or `--all` for the
+ledger. Every deletion through this door is permanent: the soft
+forgetting an agent does belongs to the conversation that spoke it, and
+this door is correction and audit rather than that flow.
+
+The listings answer owners nothing is configured under, which is the
+point of them rather than an oversight: renaming an agent orphans what
+it remembered and replacing a board orphans that board's notes, and
+`--all` is how those rows leave.
+
 No builtin is granted the way an MCP server is. One appears under a
 structural condition and the other nine are simply always there.
 `switch_agent`'s condition is the device's: it exists exactly when the
@@ -2533,8 +2568,8 @@ read-only session as the role
 provisions. It has `SELECT` on every table in the `record`
 schema, now and after the next migration, and nothing at all on the two
 schemas beside it: `domain`, where the stored secrets' ciphertexts
-live, and `memory`, whose read surface is being designed as an
-addressed API rather than as raw tables:
+live, and `memory`, whose read surface is the addressed API under
+[Tools](#tools) rather than raw tables:
 
 ```bash
 psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
