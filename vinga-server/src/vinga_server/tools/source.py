@@ -172,6 +172,8 @@ class BuiltinTools:
         tools.append(builtin.remember_tool())
         tools.append(builtin.update_memory_tool())
         tools.append(builtin.forget_tool())
+        tools.append(builtin.restore_memory_tool())
+        tools.append(builtin.recall_tool())
         tools.append(builtin.set_state_tool())
         tools.append(builtin.clear_state_tool())
         tools.append(builtin.new_conversation_tool())
@@ -199,6 +201,20 @@ class BuiltinTools:
         if claim.name == names.FORGET:
             return (
                 await builtin.forget(
+                    self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
+        if claim.name == names.RESTORE_MEMORY:
+            return (
+                await builtin.restore_memory(
+                    self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
+        if claim.name == names.RECALL:
+            return (
+                await builtin.recall(
                     self._memory, self._context(), agent, claim.arguments or {}
                 ),
                 False,

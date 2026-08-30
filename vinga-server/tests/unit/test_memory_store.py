@@ -56,8 +56,10 @@ from vinga_server.tools import builtin
 from vinga_server.tools.builtin import (
     MemoryContext,
     forget,
+    recall,
     remember,
     remember_tool,
+    restore_memory,
     update_memory,
 )
 
@@ -1526,6 +1528,89 @@ async def test_a_numbered_tool_asked_with_arguments_it_cannot_use_refuses(
 
     assert str(refused.value) == refusal
     assert _numbered("poet") == [(stored, "the user is vegetarian")]
+
+
+async def test_bringing_back_the_last_thing_forgotten_needs_no_number() -> None:
+    """The shape a person actually asks for, and the one the number
+    reaches. What comes back is answered with, because that is what the
+    agent says out loud."""
+    store = memory()
+    first = await store.add(MemoryScope.AGENT, "poet", "fact one", agent="poet")
+    second = await store.add(MemoryScope.AGENT, "poet", "fact two", agent="poet")
+    await forget(store, HERE, "poet", {"id": first})
+    await forget(store, HERE, "poet", {"id": second})
+
+    assert await restore_memory(store, HERE, "poet", {}) == "Brought back: fact two"
+    assert await restore_memory(store, HERE, "poet", {"id": first}) == (
+        "Brought back: fact one"
+    )
+    assert _held("poet") == []
+    assert _rows("poet") == ["fact one", "fact two"]
+
+
+async def test_bringing_back_reaches_the_device_and_refuses_another_conversation() -> None:
+    """Both edges of the undo at once: a note about the place is this
+    session's to bring back, and a fact forgotten somewhere else is not
+    this conversation's, which is the same sentence a number that names
+    nothing gets."""
+    store = memory()
+    theirs = await store.add(
+        MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet"
+    )
+    await store.forget(MemoryScope.DEVICE, "aa:bb", theirs, OTHER_THREAD, agent="poet")
+
+    with pytest.raises(ValueError) as elsewhere:
+        await restore_memory(store, HERE, "poet", {"id": theirs})
+    assert str(elsewhere.value) == store_module.NO_FACT_TO_RESTORE
+
+    await store.restore(MemoryScope.DEVICE, "aa:bb", OTHER_THREAD, agent="poet")
+    await forget(store, HERE, "poet", {"id": theirs})
+    assert await restore_memory(store, HERE, "poet", {}) == (
+        "Brought back: the kettle is loud"
+    )
+    assert _rows("aa:bb", scope="device") == ["the kettle is loud"]
+
+
+async def test_looking_something_up_answers_both_memories_with_their_numbers() -> None:
+    """What the injected block leaves out, and the numbers it never
+    shows: this is how the model reaches either."""
+    store = memory()
+    mine = await store.add(MemoryScope.AGENT, "poet", "the user likes cheese", agent="poet")
+    theirs = await store.add(
+        MemoryScope.DEVICE, "aa:bb", "the CHEESE drawer sticks", agent="poet"
+    )
+
+    found = await recall(store, HERE, "poet", {"query": "cheese"})
+
+    assert found.splitlines() == [
+        f"- [{theirs}] the CHEESE drawer sticks",
+        f"- [{mine}] the user likes cheese",
+    ]
+    # Nothing matching is an answer rather than a refusal: the model
+    # asked a question and there is nothing there.
+    assert await recall(store, HERE, "poet", {"query": "sourdough"}) == (
+        builtin.NOTHING_MATCHED
+    )
+
+
+@pytest.mark.parametrize(
+    ("call", "arguments", "refusal"),
+    [
+        (restore_memory, {"id": "seven"}, builtin.RESTORE_TAKES_A_NUMBER),
+        (recall, {}, builtin.RECALL_NEEDS_A_QUERY),
+        (recall, {"query": "  "}, builtin.RECALL_NEEDS_A_QUERY),
+        (recall, {"query": 7}, builtin.RECALL_NEEDS_A_QUERY),
+    ],
+)
+async def test_the_undo_and_the_lookup_refuse_arguments_they_cannot_use(
+    call: object, arguments: dict[str, object], refusal: str
+) -> None:
+    store = memory()
+
+    with pytest.raises(ValueError) as refused:
+        await call(store, HERE, "poet", arguments)  # type: ignore[operator]
+
+    assert str(refused.value) == refusal
 
 
 async def test_remembered_facts_reach_the_model_through_the_prompt() -> None:

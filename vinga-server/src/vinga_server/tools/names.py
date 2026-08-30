@@ -4,9 +4,9 @@ Three sources of tools reach the same list, and the model sees one flat
 set of names. Rather than detect collisions when the list is merged and
 then have to invent a tie-break, the namespace is structural:
 
-- builtins are bare (`switch_agent`, `remember`, `update_memory`,
-  `forget`, `set_state`, `clear_state`, `new_conversation`,
-  `resume_conversation`);
+- builtins are bare (`switch_agent`, the memory family of `remember`,
+  `update_memory`, `forget`, `restore_memory` and `recall`, `set_state`,
+  `clear_state`, `new_conversation`, `resume_conversation`);
 - the device's tools keep the firmware's `self.` prefix, with the dots
   sanitized away (`self_audio_speaker_set_volume`);
 - an MCP server's tools carry their configuration entry name and a
@@ -42,6 +42,12 @@ REMEMBER = "remember"
 # word a user says and the pair it belongs to is `remember`.
 UPDATE_MEMORY = "update_memory"
 FORGET = "forget"
+# The undo, and the lookup that makes the numbers reachable at all. Both
+# qualified with `memory` where the bare word would be ambiguous:
+# `restore` alone says nothing about what is restored, and `recall` is
+# what a person says about remembering.
+RESTORE_MEMORY = "restore_memory"
+RECALL = "recall"
 # The two the conversation's own ledger is written with. Bare like the
 # rest, and named here for the same reason: what an entry may not be
 # called is decided by this tuple.
@@ -59,6 +65,8 @@ BUILTIN_TOOL_NAMES = (
     REMEMBER,
     UPDATE_MEMORY,
     FORGET,
+    RESTORE_MEMORY,
+    RECALL,
     SET_STATE,
     CLEAR_STATE,
     NEW_CONVERSATION,
