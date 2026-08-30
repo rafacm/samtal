@@ -144,3 +144,22 @@ repository's own compose file with the committed defaults.
 - Not verified here: nothing on hardware, and nothing in the image lane,
   which is CI's. M1 changes one unit test and adds no board or device
   procedure.
+
+### PR review round
+
+External review of the PR diff at c53f8cc2: backend codex (codex-cli
+0.151.0), model gpt-5.6-sol, read-only sandbox, 2026-08-30, runtime
+3m25s, posted on PR #355 by the run itself. Verdict: mergeable after
+the listed fix. One finding.
+
+1. **P3: the plan promises the wrong deterministic failure.** The
+   plan's Tests bullet said reverting the hold reproduces both
+   sightings' exact assertion diff, but the committed case fails
+   first at `peer_waited == [True]`; the original diff appears only
+   when the synchronization assertions are removed as well, exactly
+   as the bite demonstration above records.
+
+   *Resolution*: adopted. The plan's bullet now describes the named
+   synchronization failure as the reverted hold's outcome and
+   reserves the verdict diff for the second demonstration; the
+   assertion ordering in the test is kept as is.
