@@ -576,11 +576,18 @@ Named by role, homes confirmed against the authority taxonomy:
 - [ ] **M2: conversation state end to end.** The state tools, the
   state block and the three-block rendering (device block present
   and empty), `MemoryContext` plumbing, `read_for_prompt` on the
-  reply path, the lifecycle coupling (erasure purge inside the
-  window, `Pruned.threads`, the purge callable, the boot sweep),
-  `ThreadErasure`'s new counts and the CLI erasure row, the events'
-  scope field, concepts and README updates this milestone
-  falsifies, changelog. Design footprint: the coupling is ids
+  reply path, the lifecycle coupling (the atomic purge inside the
+  erasure and prune transactions, `Pruned.threads`, the purge
+  callable and the `erased()` subscription, the boot sweep, the
+  session-close purge), the composition reorder in `app.py`
+  (memory opened before the conversation writer is constructed and
+  started, so the writer holds its purge seam from its first prune,
+  and exit callbacks registered so the writer drains before memory
+  closes) with startup-failure and shutdown-drain tests that force
+  a retention purge during teardown, the erasure counts on both
+  response models and the CLI erasure rows, the events' scope field
+  and `memory_cleanup_failed`, concepts and README updates this
+  milestone falsifies, changelog. Design footprint: the coupling is ids
   handed where they are computed plus one callable seam; no module
   learns another's SQL. One behavior change alone in review: agents
   gain a ledger.
@@ -720,6 +727,12 @@ resolution.
    and a teardown retention purge would call a closed store. M2
    must name the composition reorder and the startup-failure and
    shutdown-drain tests.
+
+   *Resolution*: adopted; M2 now names the reorder (memory opened
+   before the conversation writer is constructed and started, exit
+   callbacks registered so the writer drains before memory closes)
+   and both tests, including the teardown retention purge the
+   finding describes.
 
 8. **P1: the operator grammar places content and potential secrets
    in argv and URLs.** Corrected fact text as a CLI positional
