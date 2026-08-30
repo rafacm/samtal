@@ -35,6 +35,7 @@ import contextlib
 import datetime as dt
 import threading
 from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -79,6 +80,14 @@ MAX_LINES = 200
 # because the whole of it is injected rather than searched.
 DEVICE_BYTES = 2048
 DEVICE_LINES = 30
+
+# What an agent's block in the prompt holds: the newest forty lines
+# inside four kilobytes, which is a small fraction of what the scope
+# stores. Newest first because a fact worth keeping tends to get said
+# again, and the rest is reachable through the lookup, which searches
+# the core too.
+CORE_BYTES = 4096
+CORE_LINES = 40
 
 # What one conversation's ledger keeps. Fifty entries inside four
 # kilobytes, and a write that would leave it past either is refused
@@ -185,6 +194,34 @@ STATE_ENTRY_TOO_LONG = (
 MORE_MATCHED = (
     "More was remembered than fits here. Ask for something narrower to see the rest"
 )
+
+
+@dataclass(frozen=True)
+class PromptMemory:
+    """What one reply's prompt is assembled from, all three scopes at
+    once and each already rendered.
+
+    A value rather than three calls, because the reply path pays for one
+    off-loop hop per round and three would cost three; and rendered
+    rather than raw, because the shapes behind these blocks are this
+    module's business and the assembly's business is the text.
+
+    Fields in the order the blocks are meant to be read, which is also
+    their precedence: what this conversation is currently doing, what
+    the agent knows, what the place knows. Each is the empty string
+    where the scope holds nothing, and where it could not be read.
+    """
+
+    state: str
+    agent: str
+    device: str
+
+
+# What a prompt read answers when nothing could be read at all. A named
+# constant rather than three empty strings at the call site: a reply
+# assembled over an unreadable database has to be the reply assembled
+# over an empty one.
+NOTHING_REMEMBERED = PromptMemory(state="", agent="", device="")
 
 
 class _Refused(Exception):
@@ -529,6 +566,39 @@ class MemoryStore:
             return int(landed)
 
         return self._written(agent, scope, work)
+
+    def read_for_prompt(
+        self, agent: str, device: str, conversation: str
+    ) -> PromptMemory:
+        """Everything this reply's prompt needs to know, in one round
+        trip.
+
+        One connection for all three scopes, which is the whole reason
+        this exists beside `read`: the reply path takes exactly one
+        off-loop hop per round, and three reads would take three. The
+        blocks come back rendered and in reading order, and what the
+        assembly does with them is its own business.
+
+        Contained scope by scope in what it costs a reply: a database
+        this server cannot read means the agent remembers nothing this
+        round and the reply happens, and every scope that was lost says
+        so, so an empty block is never silence about a failure.
+
+        The agent's block is the core rather than the whole of the
+        scope, because the whole of it stopped fitting in a prompt when
+        the storage cap grew past it; what is not injected is what the
+        lookup is for.
+        """
+        return self._read(
+            agent,
+            tuple(MemoryScope),
+            lambda connection: PromptMemory(
+                state=_ledger_rendered(_ledger(connection, conversation)),
+                agent=_core(_active(connection, MemoryScope.AGENT, agent)),
+                device=_rendered(_active(connection, MemoryScope.DEVICE, device)),
+            ),
+            NOTHING_REMEMBERED,
+        )
 
     def recall(self, agent: str, device: str, query: str) -> str:
         """Every active fact this agent can reach whose words contain
@@ -954,6 +1024,20 @@ def _over_the_cap(
     return [row_id for row_id, _ in stored if row_id not in surviving]
 
 
+def _core(stored: Sequence[tuple[int, str]]) -> str:
+    """The part of one agent's scope that is injected: the newest lines
+    that fit, rendered in the order they were remembered.
+
+    Newest by which are kept and oldest-first in how they read, which is
+    not a contradiction: what falls out of the block is what was said
+    longest ago, and what remains is read in the order it was said.
+    """
+    kept = list(stored[-CORE_LINES:])
+    while len(kept) > 1 and len(_rendered(kept).encode("utf-8")) > CORE_BYTES:
+        kept.pop(0)
+    return _rendered(kept)
+
+
 def _ledger(connection: Connection, conversation: str) -> list[tuple[str, str]]:
     """One conversation's ledger, by key.
 
@@ -1084,6 +1168,8 @@ def open_memory(settings: DatabaseConfig) -> MemoryStore:
 
 __all__ = [
     "BUSY",
+    "CORE_BYTES",
+    "CORE_LINES",
     "DEVICE_BYTES",
     "DEVICE_LINES",
     "MAX_BYTES",
@@ -1091,6 +1177,7 @@ __all__ = [
     "MEMORY_CHAIN",
     "MORE_MATCHED",
     "NOTHING_TO_LOOK_FOR",
+    "NOTHING_REMEMBERED",
     "NOTHING_TO_REMEMBER",
     "NOTHING_TO_SET",
     "NO_FACT_TO_FORGET",
@@ -1108,6 +1195,7 @@ __all__ = [
     "UNWRITABLE",
     "MemoryScope",
     "MemoryStore",
+    "PromptMemory",
     "StoreClosed",
     "open_memory",
 ]

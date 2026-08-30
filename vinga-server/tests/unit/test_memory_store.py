@@ -24,7 +24,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
-from tests.support.events import both_formats, only
+from tests.support.events import both_formats, events, only
 from tests.support.stores import (
     STORED,
     a_planted_credential,
@@ -730,6 +730,114 @@ async def test_clearing_answers_how_much_it_took() -> None:
     assert await store.clear_state(THREAD, agent="poet") == 1
     assert _state(THREAD) == []
     assert _state(OTHER_THREAD) == [("one", "elsewhere")]
+
+
+# The prompt's own read
+#
+# One call, one connection, three rendered blocks. What the reply path
+# needs of memory in a round is exactly this, and the number of round
+# trips it costs is the reason the call exists at all.
+
+
+async def test_the_prompt_read_answers_all_three_scopes() -> None:
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.add(MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet")
+    await store.set_state(THREAD, "turn", "white to move", agent="poet")
+    # Another agent, another device and another thread, none of which
+    # this reply may see.
+    await store.add(MemoryScope.AGENT, "tutor", "the user is learning Spanish", agent="tutor")
+    await store.add(MemoryScope.DEVICE, "cc:dd", "the door creaks", agent="poet")
+    await store.set_state(OTHER_THREAD, "turn", "black to move", agent="poet")
+
+    read = store.read_for_prompt("poet", "aa:bb", THREAD)
+
+    assert read.state == "- turn: white to move"
+    assert read.agent == "- the user is vegetarian"
+    assert read.device == "- the kettle is loud"
+
+
+async def test_the_prompt_read_of_an_empty_memory_is_three_empty_blocks() -> None:
+    store = memory()
+
+    assert store.read_for_prompt("poet", "aa:bb", THREAD) == store_module.NOTHING_REMEMBERED
+
+
+async def test_the_prompt_read_takes_one_connection() -> None:
+    """The property the call exists for. Three reads would be three
+    round trips off the loop, and the reply path pays for one per
+    round.
+
+    Counted at the engine rather than reasoned about, through a store
+    built with the same public constructor the opener uses.
+    """
+    from sqlalchemy import event as sqlalchemy_event
+
+    from vinga_server.db import read_engine, write_engine
+
+    reader = read_engine(DatabaseConfig())
+    checkouts: list[int] = []
+    sqlalchemy_event.listen(reader, "checkout", lambda *_: checkouts.append(1))
+    store = MemoryStore(write_engine(DatabaseConfig(), MEMORY_CHAIN), reader)
+    try:
+        await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+        await store.set_state(THREAD, "turn", "white to move", agent="poet")
+        checkouts.clear()
+
+        read = store.read_for_prompt("poet", "aa:bb", THREAD)
+    finally:
+        store.close()
+
+    assert read.agent == "- the user is vegetarian"
+    assert len(checkouts) == 1
+
+
+async def test_the_injected_core_is_the_newest_facts_and_the_rest_is_looked_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The boundary from both sides. What falls out of the block is
+    still stored and still reachable by the lookup, and what is inside
+    the block is reachable by the lookup too, with the number it is
+    addressed by, which is the only way the model can correct it."""
+    monkeypatch.setattr(store_module, "CORE_LINES", 2)
+    store = memory()
+    oldest = await store.add(MemoryScope.AGENT, "poet", "a cheese fact 0", agent="poet")
+    middle = await store.add(MemoryScope.AGENT, "poet", "a cheese fact 1", agent="poet")
+    newest = await store.add(MemoryScope.AGENT, "poet", "a cheese fact 2", agent="poet")
+
+    read = store.read_for_prompt("poet", "aa:bb", THREAD)
+
+    assert read.agent.splitlines() == ["- a cheese fact 1", "- a cheese fact 2"]
+    # Beyond the core and still remembered, with the block showing no
+    # ids and the lookup showing all of them.
+    assert store.recall("poet", "aa:bb", "cheese").splitlines() == [
+        f"- [{newest}] a cheese fact 2",
+        f"- [{middle}] a cheese fact 1",
+        f"- [{oldest}] a cheese fact 0",
+    ]
+    # And the whole scope is what `read` still answers, uncapped by the
+    # core, which is what #314's callers are promised.
+    assert len(store.read("poet").splitlines()) == 3
+
+
+def test_a_prompt_read_that_fails_loses_every_scope_and_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A statement that fails poisons the transaction the other two
+    would have run in, so all three are lost together. Every one of them
+    is reported, because a block that rendered empty with nothing said
+    about it would be indistinguishable from a scope with nothing in
+    it."""
+    store = memory_that_cannot_read()
+
+    with caplog.at_level("WARNING"):
+        assert store.read_for_prompt("poet", "aa:bb", THREAD) == store_module.NOTHING_REMEMBERED
+
+    reported = events(caplog, "memory_unreadable")
+    assert {record.scope for record in reported} == {"conversation", "agent", "device"}
+    assert {record.agent for record in reported} == {"poet"}
+    assert {record.error for record in reported} == {"OperationalError"}
+    assert all(record.exc_info is None for record in reported)
 
 
 # The cap invariant, across every mutation
