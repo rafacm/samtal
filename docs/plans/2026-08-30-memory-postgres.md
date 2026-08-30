@@ -333,3 +333,81 @@ surface, its API reference is the document that earns generating.
   documentation footprint, changelog. Design footprint: the memory
   package deepens to own storage entirely; four surfaces shed
   `MemoryStore | None`.
+
+## Plan review round
+
+External review of commit dfc480d3: backend codex (codex-cli
+0.151.0), model gpt-5.6-sol, sandbox read-only, 2026-08-30, runtime
+~7m. Verdict as received: ready after the P1/P2 amendments.
+Findings condensed but faithful; each is amended below with its
+resolution.
+
+1. **P1: existing least-privilege deployments cannot create the new
+   schema.** The plan calls the chain an ordinary forward extension
+   and has M1 open it at boot, but `deploy/postgres-init.sql` runs
+   only when a data directory initializes and deliberately gives the
+   runtime role no database-level `CREATE`; `upgrade_to_head`
+   attempts `CREATE SCHEMA` when the schema is absent, and the
+   provisioning suite explicitly models a restricted runtime role.
+   Define the upgrade choreography for an existing two-schema
+   deployment: the administrative rerun of the updated provisioning
+   file before deploying M1, a fixed actionable startup refusal, and
+   an integration test that provisions the old shape, preserves
+   rows, upgrades as administrator, and boots all three chains as
+   the restricted role; extend the schema-owner and restricted-role
+   assertions, not only the `vinga_ro` denial.
+
+2. **P1: the proposed read-refusal test exercises a lock that reads
+   never request.** Reads use `read_engine` without the chain
+   listener, so holding the advisory lock cannot make `read` fail.
+   Use a genuine read failure; reserve the held lock for the
+   write-busy test; add the inverse assertion that `read` succeeds
+   while another connection holds `MEMORY_CHAIN`.
+
+3. **P1: the transactional rollback test fails before the insert.**
+   The write engine takes the advisory lock on `begin`, so a
+   transaction under the held-lock harness never reaches its
+   insert. Force a deterministic failure after insertion and during
+   pruning (a test-only raising trigger), then verify through an
+   independent connection that the insert and all pruning rolled
+   back, leaving the exact pre-call rendering and count.
+
+4. **P2: the concurrent-writer test can pass without
+   serialization.** Plain concurrent inserts below the pruning
+   boundary preserve every fact even with the lock listener absent.
+   Prefill at the line and byte boundary, run two concurrent writes
+   through separately opened stores, and assert the exact final
+   survivor set, count, rendering and byte bound, arranged so a
+   missing chain lock produces a wrong result.
+
+5. **P2: retired environment configuration would be silently
+   ignored.** `VINGA_MEMORY__DIR` is a valid spelling today, and
+   once the field is deleted pydantic-settings ignores unknown
+   prefixed variables even under `extra="forbid"`, which is why
+   `_check_moved_environment` exists. Refuse `VINGA_MEMORY` and
+   every case-insensitive `VINGA_MEMORY__...` spelling with the
+   same value-free retirement sentence, with tests that the name is
+   reported and the value never is.
+
+6. **P2: the milestone split has no permanent owner for the chain
+   opener.** M1 must declare and open the chain while `store.py` is
+   assigned to M2, forcing a wrong module, a forwarding opener, or
+   composition-root knowledge that relocates in M2. Give M1 a
+   permanent `memory/store.py` holding `MEMORY_CHAIN`, engine
+   ownership, `open_memory` and disposal, behaviorally dormant
+   until M2; no temporary pass-through, no interface change between
+   milestones.
+
+7. **P2: the hard-cutover documentation is not concrete enough for
+   the reset criterion.** Require explicit README and changelog
+   language: existing `memory.dir` files remain untouched, this
+   release never imports them, Postgres memory starts empty, and
+   operators archive or delete the files themselves. Update the
+   full Memory section of `docs/concepts.md`, which twice claims
+   memory is configured through the configuration reference.
+
+8. **P3: M1 leaves current two-chain design claims false.** The
+   product promise says CI migrates a fresh database to both chain
+   heads; the database module contract says two stores and one
+   database; the autogen entry point says two chains. Add every
+   current-count statement to M1's footprint.
