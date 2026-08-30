@@ -103,14 +103,22 @@ events = ServerEvents(__name__)
 # rather than one per return type.
 T = TypeVar("T")
 
-# What keeps injection cheap: whichever trips first wins, and an insert
+# What an agent's scope holds: whichever trips first wins, and an insert
 # that overflows drops the oldest facts.
 #
+# Sized for a memory rather than for a prompt, which is what the two
+# tiers below buy. The file store kept two hundred lines in eight
+# kilobytes because every one of them was injected into every reply, so
+# the storage cap was a context budget wearing another name; now the
+# block is the core and the rest is reached by looking it up, so what
+# these two bound is how much an agent may accumulate before the oldest
+# of it starts falling off. A thousand facts is years of an ordinary
+# conversation.
+#
 # Module-level and read at call time, which is what the two cap suites
-# monkeypatch. The same two numbers and the same two names the file
-# store enforced, because the storage moved and the promise did not.
-MAX_BYTES = 8192
-MAX_LINES = 200
+# monkeypatch.
+MAX_BYTES = 65536
+MAX_LINES = 1000
 
 # What a device keeps, which is smaller because a device accumulates the
 # few notes a place has rather than a person's whole history, and
