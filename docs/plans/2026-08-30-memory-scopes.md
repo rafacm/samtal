@@ -645,7 +645,7 @@ Named by role, homes confirmed against the authority taxonomy:
   vocabulary. Documentation footprint: the changelog (including the
   events' new field) and the README
   upgrade section's stop-then-start sentence; nothing else, stated.
-- [ ] **M2: conversation state end to end.** The state tools, the
+- [x] **[M2: conversation state end to end](2026-08-30-memory-scopes-implementation.md#m2-conversation-state-end-to-end)** (PR TBD). The state tools, the
   state block and the three-block rendering (device block present
   and empty), `MemoryContext` plumbing, `read_for_prompt` on the
   reply path, the lifecycle coupling (the atomic purge inside the
