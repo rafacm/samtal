@@ -244,7 +244,7 @@ async def test_the_memory_read_happens_off_the_event_loop(
     real = MemoryStore.read_for_prompt
 
     def read(
-        self: MemoryStore, agent: str, device: str | None, conversation: str
+        self: MemoryStore, agent: str, device: str | None, conversation: str | None
     ) -> PromptMemory:
         reads.append(threading.get_ident())
         return real(self, agent, device, conversation)
@@ -256,6 +256,37 @@ async def test_the_memory_read_happens_off_the_event_loop(
 
     assert len(reads) == 1, "the round's memory was not read exactly once"
     assert all(where != threading.get_ident() for where in reads)
+
+
+async def test_a_lookup_happens_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`recall` is the other synchronous database read a reply can make,
+    and the only one a model decides to make: it runs in a worker thread
+    for the same reason the prompt's read does, and the thread it ran on
+    is what says so.
+
+    A lookup on the loop would stop every other conversation in this
+    process for the length of a query, which is exactly the failure a
+    tool nobody predicted the timing of should not be able to cause.
+    """
+    store = lane_memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user likes cheese", agent="poet")
+    lookups: list[int] = []
+    real = MemoryStore.recall
+
+    def looked_up(self: MemoryStore, agent: str, device: str, query: str) -> str:
+        lookups.append(threading.get_ident())
+        return real(self, agent, device, query)
+
+    monkeypatch.setattr(MemoryStore, "recall", looked_up)
+    script = ScriptedLlm([[call("recall", query="cheese")], "You like cheese."])
+    session = session_with(CountingServers(), {"poet": script}, memory=store)
+
+    assert await run_reply(session, "what do you know?") == ["You like cheese."]
+
+    assert len(lookups) == 1
+    assert all(where != threading.get_ident() for where in lookups)
 
 
 async def test_an_agent_that_remembers_nothing_gets_no_memory_block() -> None:

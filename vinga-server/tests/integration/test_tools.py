@@ -328,6 +328,8 @@ DUE_BUILTINS: set[str] = {
     "remember",
     "update_memory",
     "forget",
+    "restore_memory",
+    "recall",
     "set_state",
     "clear_state",
     "new_conversation",

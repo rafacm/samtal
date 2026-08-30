@@ -1,26 +1,34 @@
 """The tools the server implements itself.
 
-Six of them, all bare-named because the namespace rules in `names`
-reserve those names. Four are executed here: `remember`, `set_state` and
-`clear_state`, against the memory store, and the search half of
-`resume_conversation`, against whatever the runtime injected as its way
-of reading stored threads. The other two are defined here and executed
-by the session, because what they do is end the tool loop rather than
-produce a result the model reads: `switch_agent` hands the conversation
-to another agent, and `new_conversation` and the selection half of
-`resume_conversation` move it to another thread.
+Ten of them, all bare-named because the namespace rules in `names`
+reserve those names. Eight are executed here: the memory family
+(`remember`, `update_memory`, `forget`, `restore_memory` and `recall`)
+and the ledger's two (`set_state`, `clear_state`), against the memory
+store, and the search half of `resume_conversation`, against whatever
+the runtime injected as its way of reading stored threads. The other two
+are defined here and executed by the session, because what they do is
+end the tool loop rather than produce a result the model reads:
+`switch_agent` hands the conversation to another agent, and
+`new_conversation` and the selection half of `resume_conversation` move
+it to another thread.
 
-What `remember` and the two state tools write is injected by
-`runtime.prompt`, which is where the whole system prompt is assembled:
-this module defines and runs the tools, and how their output reaches the
-model is the runtime's.
+What the memory tools write is injected by `runtime.prompt`, which is
+where the whole system prompt is assembled: this module defines and runs
+the tools, and how their output reaches the model is the runtime's. The
+injected blocks carry no numbers, which is why `recall` answers with
+them: it is how the model reaches both what the prompt left out and the
+number anything it wants to change is addressed by.
 
 The tools that write memory need to know which memory they are writing,
 which is what `MemoryContext` is: the session's memory address as a
 value, asked for at the moment a call runs rather than kept from when
 the source was built, because a reply can move a session to another
-thread. The two state tools read the thread out of it, and `remember`
-reads the device, which is what a fact about the place is kept under.
+thread. The device is what a fact about the place is kept under and
+which memories a number may reach; the thread is what a ledger entry
+belongs to and which conversation an undo is bounded by. Neither is ever
+read out of a call's arguments, because a model that could name one
+would be writing into another household's notes or another
+conversation's ledger.
 
 The sentences a selection answers with also live here, all of them, and
 that is deliberate rather than tidy. They are one closed vocabulary,
@@ -31,6 +39,7 @@ them is a fixed sentence with nothing in it that a room said: what the
 model is told is what happened and what to do about it.
 """
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -213,6 +222,70 @@ def forget_tool() -> ToolDef:
                 },
             },
             "required": ["id"],
+        },
+    )
+
+
+def restore_memory_tool() -> ToolDef:
+    """Undo a removal, which is what makes the removal safe to make.
+
+    The number is optional because the shape a person actually asks for
+    is "no, put that back": what the tool does with no number is the last
+    thing this conversation forgot.
+    """
+    return ToolDef(
+        name=names.RESTORE_MEMORY,
+        description=(
+            "Bring back something you forgot in this conversation. Called with no "
+            "number, it brings back the last thing you forgot; with the number of a "
+            "fact you removed, that one. Only what was forgotten in this conversation "
+            "can come back, and nothing erased permanently can."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": (
+                        "The number of the fact to bring back. Leave it out for the "
+                        "last thing you forgot."
+                    ),
+                }
+            },
+        },
+    )
+
+
+def recall_tool() -> ToolDef:
+    """Look through everything remembered, which is the other half of
+    what the injected block leaves out.
+
+    The prompt carries the newest facts and no numbers at all, so this is
+    both how the model reaches what was not injected and how it learns
+    the number of anything it wants to correct or remove. The description
+    says so, because a model that does not know that has no way to use
+    the two numbered tools beside it.
+    """
+    return ToolDef(
+        name=names.RECALL,
+        description=(
+            "Look up what you remember about the user and about this place. It "
+            "answers the facts whose words contain what you ask for, newest first, "
+            "each with the number update_memory and forget need. Use it when the user "
+            "asks what you know, and whenever you need the number of a fact."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "A word or two to look for, matched anywhere in a "
+                        "remembered fact."
+                    ),
+                }
+            },
+            "required": ["query"],
         },
     )
 
@@ -530,6 +603,23 @@ FORGET_NEEDS_A_NUMBER = (
     'forget needs the "id" of the fact to remove, which recall answers with'
 )
 
+RESTORE_TAKES_A_NUMBER = (
+    'restore_memory takes the "id" of a fact you forgot, or nothing at all for the '
+    "last thing you forgot in this conversation"
+)
+
+RECALL_NEEDS_A_QUERY = (
+    'recall needs a "query": a word or two to look for in what you remember'
+)
+
+# What a lookup that found nothing answers with. Not a refusal: the model
+# asked a question and this is the answer, so it says what to do next
+# rather than what went wrong.
+NOTHING_MATCHED = (
+    "nothing you remember matches that. Try a different word, or tell the user you do "
+    "not know"
+)
+
 
 async def remember(
     store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
@@ -599,6 +689,46 @@ async def forget(
         ),
     )
     return f"Forgot [{fact_id}]: {removed}"
+
+
+async def restore_memory(
+    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+) -> str:
+    """Execute `restore_memory`, answering with what came back.
+
+    With no number this is the last thing forgotten, asked of each memory
+    the session can reach in turn: the agent's own first, then the
+    device's. A conversation that forgot one of each therefore brings the
+    agent's back first, and the answer says which fact it was, so the
+    next ask reaches the other.
+    """
+    named = arguments.get("id")
+    fact_id = None if named is None else _numbered(named, RESTORE_TAKES_A_NUMBER)
+    brought = await _wherever_it_is(
+        _owners(context, agent),
+        lambda scope, owner: store.restore(
+            scope, owner, _conversation_of(context), fact_id, agent=agent
+        ),
+    )
+    return f"Brought back: {brought}"
+
+
+async def recall(
+    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+) -> str:
+    """Execute `recall` over both the memories this session can reach.
+
+    The lookup is a database read and the caller is the event loop every
+    live conversation shares, so it goes to a worker thread exactly as
+    the prompt's own read does. Nothing matching is an ordinary answer
+    rather than a refusal: the model asked a question and the answer is
+    that there is nothing.
+    """
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError(RECALL_NEEDS_A_QUERY)
+    found = await asyncio.to_thread(store.recall, agent, _device_of(context), query)
+    return found or NOTHING_MATCHED
 
 
 def _owners(context: MemoryContext, agent: str) -> tuple[tuple[MemoryScope, str], ...]:
