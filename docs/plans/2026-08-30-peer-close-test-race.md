@@ -98,10 +98,12 @@ The hold is honest about what the test claims: the case's subject is
 "when the peer's close is the one this side read, its code is looked
 up in the closed set and its reason is never relayed", so making the
 peer's close the one that is read is the test finally saying what it
-always meant. The other race outcome (this side's close completes
-first and the verdict is the normal-close sentence) is the ordinary
-turn's, already pinned by `test_one_turn_reaches_the_end_of_the_reply`
-against `CLOSE_NAMES[1000]`.
+always meant. The normal-close verdict itself stays pinned by
+`test_one_turn_reaches_the_end_of_the_reply` against
+`CLOSE_NAMES[1000]`; that case cannot say which side initiated its
+1000 (the support closes the connection when a script returns, and
+both sides close normally), and this plan claims nothing more from
+it than the verdict.
 
 Two facts verified against the installed library (websockets 16.1.1)
 rather than assumed: `Connection` defines no `__slots__`, so an
@@ -248,3 +250,6 @@ condensed but faithful; resolutions appended per amendment.
    returns; both sides use 1000, so the assertion cannot identify
    the initiator. Describe that test as pinning the normal-close
    verdict only.
+
+   *Resolution*: adopted. The plan now claims only the verdict from
+   the ordinary turn and says why the initiator is unknowable there.
