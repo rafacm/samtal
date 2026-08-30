@@ -26,6 +26,7 @@ same seam, which is the only thing a real sleep would have added.
 
 import json
 import logging
+import threading
 import time
 from collections.abc import Iterator
 
@@ -725,6 +726,7 @@ def test_a_peer_close_reason_is_read_and_never_relayed(
     unpaced,
     identity,
     said,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -733,18 +735,68 @@ def test_a_peer_close_reason_is_read_and_never_relayed(
     The code is looked up in a closed set and reported in this side's own
     words; the reason is arbitrary far-side prose and is dropped. A close
     code outside the set is reported as outside it, without the number.
+
+    The two closes race, and this case is about one side of that race.
+    Once `tts stop` has landed the client leaves the turn and closes
+    normally, and whichever close is processed first decides the code:
+    this side's own 1000 is an honest verdict too, but it is a different
+    case. So the peer holds its 4001 until this side is standing at its
+    own close, and this side's close waits for the peer's frame to have
+    been read before it goes. Both waits are bounded and both bounds are
+    asserted, so a runner slow enough to outlive one is a named
+    synchronization failure rather than the race quietly back.
     """
+    # One bound for both sides, and the one the mid-utterance case below
+    # already polls `close_code` under.
+    bound = 10.0
+    at_the_close = threading.Event()
+    peer_waited: list[bool] = []
+    expired: list[str] = []
+
     def script(connection, recorded: Recorded) -> None:
         greet(connection, recorded)
         read_until_listen_stop(connection, recorded)
         connection.send(tts_message(SESSION, "start"))
         connection.send(tts_message(SESSION, "stop"))
+        peer_waited.append(at_the_close.wait(timeout=bound))
         connection.close(code=4001, reason=CLOSE_REASON)
 
+    real = conversation.connect
+
+    def holding(*arguments, **named):
+        socket = real(*arguments, **named)
+        closing = socket.close
+
+        def close_after_the_peers(*arguments: object, **named: object) -> None:
+            # Entering here IS this side reaching its close, which is
+            # what the peer is waiting to hear before it sends 4001.
+            at_the_close.set()
+            deadline = time.monotonic() + bound
+            while socket.close_code is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            if socket.close_code is None:
+                expired.append("the peer's close was never read")
+            # Unconditional: the socket is given back whatever the wait
+            # decided, so cleanup never rides on an assertion.
+            closing(*arguments, **named)
+
+        monkeypatch.setattr(socket, "close", close_after_the_peers)
+        return socket
+
+    monkeypatch.setattr(conversation, "connect", holding)
+
     with caplog.at_level(0):
-        with peer(script) as (url, _):
+        with peer(script) as (url, recorded):
             reply, _ = held(url, identity, said)
 
+    # Both bounds, asserted before the verdict they exist to decide: a
+    # runner that outlived either one has to say so by name, or the
+    # verdict below would be the old race passing or failing quietly.
+    # The wait for the script is the longer one on purpose, so what it
+    # reports is the peer's outcome rather than a second race with it.
+    assert recorded.finished.wait(timeout=bound * 2)
+    assert peer_waited == [True], "the peer never saw this side reach its own close"
+    assert expired == []
     assert reply.closed == conversation.UNKNOWN_CLOSE
     assert "4001" not in reply.closed
     captured = capsys.readouterr()
