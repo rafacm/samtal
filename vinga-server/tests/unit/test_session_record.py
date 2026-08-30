@@ -53,7 +53,7 @@ from vinga_server.conversations import schema
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.session import DeviceSession
-from vinga_server.memory.store import MemoryStore
+from vinga_server.memory.store import MemoryScope, MemoryStore
 from vinga_server.providers import (
     AsrProvider,
     AsrResult,
@@ -718,9 +718,12 @@ class BlockingMemory(MemoryStore):
         super().__init__(cast(Any, None), cast(Any, None))
         self.running = asyncio.Event()
 
-    async def remember(self, agent: str, fact: str) -> None:
+    async def add(
+        self, scope: MemoryScope, owner: str, fact: str, *, agent: str
+    ) -> int:
         self.running.set()
         await asyncio.sleep(30)
+        raise AssertionError("unreachable")
 
 
 async def test_a_call_cancelled_while_it_ran_is_recorded_unexecuted() -> None:

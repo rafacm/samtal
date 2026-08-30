@@ -33,7 +33,7 @@ from sqlalchemy import text
 
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import read_engine, write_engine
-from vinga_server.memory.store import MEMORY_CHAIN, open_memory
+from vinga_server.memory.store import MEMORY_CHAIN, MemoryScope, open_memory
 
 # The revision a deployment carrying remembered facts is stamped at, and
 # the whole of what this release upgrades from.
@@ -174,7 +174,11 @@ def test_identity_continues_past_the_facts_the_upgrade_carried(
     try:
         import asyncio
 
-        asyncio.run(store.remember("poet", "the user took up the cello"))
+        asyncio.run(
+            store.add(
+                MemoryScope.AGENT, "poet", "the user took up the cello", agent="poet"
+            )
+        )
     finally:
         store.close()
 

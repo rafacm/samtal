@@ -52,7 +52,8 @@ from vinga_server.memory.store import (
     open_memory,
 )
 from vinga_server.runtime import prompt
-from vinga_server.tools.builtin import remember, remember_tool
+from vinga_server.tools import builtin
+from vinga_server.tools.builtin import MemoryContext, remember, remember_tool
 
 
 def _connection() -> psycopg.Connection:
@@ -74,6 +75,23 @@ def _rows(owner: str, scope: str = "agent") -> list[str]:
             row[0]
             for row in holder.execute(
                 "select fact from memory.facts where scope = %s and owner = %s "
+                "and forgotten_at is null order by id",
+                (scope, owner),
+            )
+        ]
+    finally:
+        holder.close()
+
+
+def _numbered(owner: str, scope: str = "agent") -> list[tuple[int, str]]:
+    """One owner's active facts with the numbers they are addressed by,
+    which is what a confirmation quotes back and what a lookup shows."""
+    holder = _connection()
+    try:
+        return [
+            (row[0], row[1])
+            for row in holder.execute(
+                "select id, fact from memory.facts where scope = %s and owner = %s "
                 "and forgotten_at is null order by id",
                 (scope, owner),
             )
@@ -236,8 +254,8 @@ async def _closing(store: MemoryStore, within_s: float = 5.0) -> bool:
 
 async def test_a_remembered_fact_is_read_back_for_that_agent() -> None:
     store = memory()
-    await store.remember("poet", "the user is vegetarian")
-    await store.remember("poet", "the user's dog is called Bosse")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.add(MemoryScope.AGENT, "poet", "the user's dog is called Bosse", agent="poet")
 
     assert injected(store) == "- the user is vegetarian\n- the user's dog is called Bosse"
     # And another agent's memory is its own, not this one.
@@ -250,7 +268,7 @@ async def test_memory_is_keyed_by_agent_not_by_device() -> None:
     kitchen = memory()
     bedroom = open_memory(DatabaseConfig())
     try:
-        await kitchen.remember("poet", "the user is vegetarian")
+        await kitchen.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
         assert "vegetarian" in injected(bedroom)
     finally:
         bedroom.close()
@@ -260,7 +278,8 @@ async def test_an_agent_name_that_is_not_a_filename_is_just_a_name() -> None:
     """A name that had to be sanitized into a filename is a column value
     now, and the store keeps it as the configuration spelled it."""
     store = memory()
-    await store.remember("../poet in the kitchen", "a fact")
+    named = "../poet in the kitchen"
+    await store.add(MemoryScope.AGENT, named, "a fact", agent=named)
 
     assert injected(store, "../poet in the kitchen") == "- a fact"
     assert injected(store, "___poet_in_the_kitchen") == ""
@@ -268,21 +287,21 @@ async def test_an_agent_name_that_is_not_a_filename_is_just_a_name() -> None:
 
 async def test_a_fact_is_stored_as_one_line() -> None:
     store = memory()
-    await store.remember("poet", "  a fact\nspread over  lines  ")
+    await store.add(MemoryScope.AGENT, "poet", "  a fact\nspread over  lines  ", agent="poet")
     assert injected(store) == "- a fact spread over lines"
 
 
 async def test_remembering_nothing_is_refused() -> None:
     store = memory()
     with pytest.raises(ValueError):
-        await store.remember("poet", "   ")
+        await store.add(MemoryScope.AGENT, "poet", "   ", agent="poet")
 
 
 async def test_the_line_cap_drops_the_oldest_facts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(store_module, "MAX_LINES", 3)
     store = memory()
     for index in range(5):
-        await store.remember("poet", f"fact {index}")
+        await store.add(MemoryScope.AGENT, "poet", f"fact {index}", agent="poet")
     assert injected(store).splitlines() == ["- fact 2", "- fact 3", "- fact 4"]
 
 
@@ -290,7 +309,7 @@ async def test_the_byte_cap_drops_the_oldest_facts(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(store_module, "MAX_BYTES", 60)
     store = memory()
     for index in range(6):
-        await store.remember("poet", f"a fact numbered {index}")
+        await store.add(MemoryScope.AGENT, "poet", f"a fact numbered {index}", agent="poet")
     lines = injected(store).splitlines()
     assert lines[-1] == "- a fact numbered 5"
     assert len(injected(store).encode("utf-8")) <= 60
@@ -329,29 +348,6 @@ async def test_a_device_fact_is_not_an_agent_fact() -> None:
     assert _rows("poet") == ["the user is vegetarian"]
     assert _rows("poet", scope="device") == ["the kettle is loud"]
     assert injected(store) == "- the user is vegetarian"
-
-
-async def test_remembering_a_fact_over_the_byte_cap_still_keeps_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The released edge, kept. The prune has never gone below one fact,
-    so a single fact bigger than the whole cap is stored and read back,
-    and #314's deployments see exactly what they saw.
-
-    `add` refuses that fact, which is the rule this issue is bringing
-    in; `remember` is the sentence a shipped tool speaks, and it starts
-    refusing in the milestone whose changelog says so.
-    """
-    monkeypatch.setattr(store_module, "MAX_BYTES", 40)
-    store = memory()
-    await store.remember("poet", "x" * 41)
-
-    assert _rows("poet") == ["x" * 41]
-    assert injected(store) == "- " + "x" * 41
-    with pytest.raises(ValueError) as refusal:
-        await store.add(MemoryScope.AGENT, "poet", "y" * 41, agent="poet")
-    assert str(refusal.value) == store_module.TOO_LONG
-    assert _rows("poet") == ["x" * 41]
 
 
 async def test_a_fact_cannot_belong_to_a_conversation(
@@ -444,6 +440,12 @@ async def test_each_scope_is_pruned_against_its_own_cap(
 
 THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
 OTHER_THREAD = "0123456789abcdef0123456789abcdef"
+
+# Where a tool call is happening, as the session answers it: this board
+# and this thread. What the executors read out of it is the owner a
+# device fact is kept under and the conversation an undo belongs to,
+# neither of which a model may name for itself.
+HERE = MemoryContext(device="aa:bb", conversation=THREAD)
 
 
 async def test_a_correction_keeps_the_id_and_replaces_the_words() -> None:
@@ -734,17 +736,20 @@ async def test_an_injected_core_over_its_bound_is_empty_rather_than_over_it(
     exists to prevent. The fact is still stored and still found."""
     monkeypatch.setattr(store_module, "CORE_BYTES", 40)
     store = memory()
-    long_one = await store.remember("poet", "a cheese fact " + "y" * 200)
+    long_one = await store.add(
+        MemoryScope.AGENT, "poet", "a cheese fact " + "y" * 200, agent="poet"
+    )
 
     read = store.read_for_prompt("poet", "aa:bb", THREAD)
 
     assert read.agent == ""
-    assert long_one is None
     assert len(_rows("poet")) == 1
-    assert "cheese" in store.recall("poet", "aa:bb", "cheese")
+    # Out of the block and still addressable, which is what makes the
+    # empty block a bound rather than a loss.
+    assert f"- [{long_one}] a cheese fact" in store.recall("poet", "aa:bb", "cheese")
     # And a fact that fits is injected as it always was, so the empty
     # block is the bound working rather than the block being broken.
-    await store.remember("poet", "a short one")
+    await store.add(MemoryScope.AGENT, "poet", "a short one", agent="poet")
     assert store.read_for_prompt("poet", "aa:bb", THREAD).agent == "- a short one"
 
 
@@ -1311,7 +1316,12 @@ async def test_concurrent_appends_keep_every_fact() -> None:
     # writes go through one advisory lock rather than one lock per
     # process.
     store = memory()
-    await asyncio.gather(*(store.remember("poet", f"fact {index}") for index in range(20)))
+    await asyncio.gather(
+        *(
+            store.add(MemoryScope.AGENT, "poet", f"fact {index}", agent="poet")
+            for index in range(20)
+        )
+    )
     assert len(injected(store).splitlines()) == 20
 
 
@@ -1321,7 +1331,7 @@ async def test_a_fact_outlives_the_store_that_wrote_it() -> None:
     opened afterwards reads it."""
     first = open_memory(DatabaseConfig())
     try:
-        await first.remember("poet", "the user is vegetarian")
+        await first.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     finally:
         first.close()
 
@@ -1332,22 +1342,87 @@ async def test_a_fact_outlives_the_store_that_wrote_it() -> None:
         second.close()
 
 
-async def test_the_remember_tool_confirms_what_it_stored() -> None:
+async def test_the_remember_tool_confirms_what_it_stored_and_its_number() -> None:
+    """The number is in the confirmation because it is nowhere else: the
+    injected block shows none, so a fact remembered a moment ago would
+    otherwise have to be looked up before it could be corrected."""
     store = memory()
-    answer = await remember(store, "poet", {"text": "the user is vegetarian"})
-    assert answer == "Remembered: the user is vegetarian"
+
+    answer = await remember(store, HERE, "poet", {"text": "the user is vegetarian"})
+
+    ((fact_id, _),) = _numbered("poet")
+    assert answer == f"Remembered [{fact_id}]: the user is vegetarian"
     assert "vegetarian" in injected(store)
 
 
-async def test_the_remember_tool_refuses_a_call_without_text() -> None:
-    with pytest.raises(ValueError, match="text"):
-        await remember(memory(), "poet", {"fact": "wrong key"})
+async def test_the_remember_tool_keeps_a_device_fact_for_the_device() -> None:
+    """The scope the model names decides which memory the fact lands in,
+    and the owner comes off the session rather than out of the arguments:
+    a model that could name a device would be writing into another
+    household's notes."""
+    store = memory()
+
+    answer = await remember(
+        store, HERE, "poet", {"text": "the kettle is loud", "scope": "device"}
+    )
+
+    ((fact_id, _),) = _numbered("aa:bb", scope="device")
+    assert answer == f"Remembered [{fact_id}]: the kettle is loud"
+    assert _rows("poet") == []
+    assert _rows("aa:bb", scope="device") == ["the kettle is loud"]
 
 
-def test_the_tool_asks_for_one_short_fact() -> None:
+@pytest.mark.parametrize(
+    ("arguments", "refusal"),
+    [
+        ({"fact": "wrong key"}, builtin.REMEMBER_NEEDS_TEXT),
+        ({"text": "   "}, builtin.REMEMBER_NEEDS_TEXT),
+        ({"text": "a fact", "scope": "conversation"}, builtin.UNKNOWN_SCOPE),
+        ({"text": "a fact", "scope": 7}, builtin.UNKNOWN_SCOPE),
+    ],
+)
+async def test_the_remember_tool_refuses_a_call_it_cannot_act_on(
+    arguments: dict[str, object], refusal: str
+) -> None:
+    """The ValueError shape a builtin's bad arguments take, by equality
+    against the module's own sentences. A scope no fact can carry is
+    turned away here rather than at the store, which is where the model
+    can be told what it may have meant."""
+    store = memory()
+
+    with pytest.raises(ValueError) as refused:
+        await remember(store, HERE, "poet", arguments)
+
+    assert str(refused.value) == refusal
+    assert _rows("poet") == []
+
+
+async def test_the_remember_tool_refuses_one_fact_too_long_to_keep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal that #314 did not make, on the door a model speaks
+    through. The prune never goes below one fact, so an oversized one
+    used to be stored and left its scope over the cap for as long as it
+    lived; the byte cap is a promise about the whole scope, so a fact
+    that cannot fit inside it is refused wherever it arrives."""
+    monkeypatch.setattr(store_module, "MAX_BYTES", 40)
+    store = memory()
+
+    with pytest.raises(ValueError) as refusal:
+        await remember(store, HERE, "poet", {"text": "x" * 41})
+
+    assert str(refusal.value) == store_module.TOO_LONG
+    assert _rows("poet") == []
+
+
+def test_the_tool_asks_for_one_short_fact_and_whose_it_is() -> None:
     tool = remember_tool()
     assert tool.name == "remember"
     assert tool.input_schema["required"] == ["text"]
+    # The enum is the fact scopes and not the vocabulary: a conversation
+    # is not something a fact can belong to, so it is not something the
+    # model can be shown.
+    assert tool.input_schema["properties"]["scope"]["enum"] == ["agent", "device"]
 
 
 async def test_remembered_facts_reach_the_model_through_the_prompt() -> None:
@@ -1359,7 +1434,7 @@ async def test_remembered_facts_reach_the_model_through_the_prompt() -> None:
     half = prompt.know_how("POET")
     assert prompt.with_scopes(half, store.read_for_prompt("poet", None, THREAD)).text == "POET"
 
-    await store.remember("poet", "the user is vegetarian")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     await store.set_state(THREAD, "scene", "the tavern", agent="poet")
     assembled = prompt.with_scopes(
         half, store.read_for_prompt("poet", None, THREAD)
@@ -1401,7 +1476,7 @@ async def test_a_prune_that_fails_takes_the_insert_with_it(
     monkeypatch.setattr(store_module, "MAX_LINES", 3)
     store = memory()
     for index in range(3):
-        await store.remember("poet", f"fact {index}")
+        await store.add(MemoryScope.AGENT, "poet", f"fact {index}", agent="poet")
     before = _rows("poet")
 
     holder = _connection()
@@ -1417,7 +1492,7 @@ async def test_a_prune_that_fails_takes_the_insert_with_it(
         holder.commit()
 
         with pytest.raises(ConfigError) as refusal:
-            await store.remember("poet", "fact 3")
+            await store.add(MemoryScope.AGENT, "poet", "fact 3", agent="poet")
     finally:
         holder.execute("drop trigger if exists refuse_delete on memory.facts")
         holder.execute("drop function if exists memory.refuse_delete()")
@@ -1460,16 +1535,20 @@ async def test_two_writers_at_the_cap_cannot_lose_each_others_fact(
     monkeypatch.setattr(store_module, "MAX_BYTES", len(b"- fact 3\n- fact 4\n- fact 5"))
     filling = memory()
     for index in range(3):
-        await filling.remember("poet", f"fact {index}")
+        await filling.add(MemoryScope.AGENT, "poet", f"fact {index}", agent="poet")
 
     first = open_memory(DatabaseConfig())
     second = open_memory(DatabaseConfig())
     try:
         with _the_prune_gate_held():
-            parked = asyncio.create_task(first.remember("poet", GATED_FACT))
+            parked = asyncio.create_task(
+                first.add(MemoryScope.AGENT, "poet", GATED_FACT, agent="poet")
+            )
             assert await _waiting_on_a_lock(1), "the first writer never reached the gate"
 
-            behind = asyncio.create_task(second.remember("poet", "fact 4"))
+            behind = asyncio.create_task(
+                second.add(MemoryScope.AGENT, "poet", "fact 4", agent="poet")
+            )
             # The second writer parked too, wherever the arrangement
             # leaves it, so the gate is released against two decided
             # transactions rather than against a stopwatch.
@@ -1526,11 +1605,13 @@ async def test_a_close_waits_for_a_write_still_inside_its_connection(
     """
     monkeypatch.setattr(db_module, "LOCK_TIMEOUT_MS", 30_000)
     store = open_memory(DatabaseConfig())
-    await store.remember("poet", "the user is vegetarian")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
 
     with contextlib.ExitStack() as gate:
         gate.enter_context(the_lock_held(MEMORY_CHAIN))
-        write = asyncio.create_task(store.remember("poet", "a second fact"))
+        write = asyncio.create_task(
+            store.add(MemoryScope.AGENT, "poet", "a second fact", agent="poet")
+        )
         assert await _waiting_on_a_lock(1), "the write never reached the gate"
 
         close = asyncio.create_task(asyncio.to_thread(store.close))
@@ -1559,7 +1640,7 @@ async def test_a_call_arriving_during_a_close_is_refused_admission(
     than anything a driver said.
     """
     store = open_memory(DatabaseConfig())
-    await store.remember("poet", "the user is vegetarian")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     assert injected(store) == "- the user is vegetarian"
 
     store.close()
@@ -1567,7 +1648,7 @@ async def test_a_call_arriving_during_a_close_is_refused_admission(
     with caplog.at_level("WARNING"):
         assert injected(store) == ""
         with pytest.raises(ConfigError) as refusal:
-            await store.remember("poet", "a second fact")
+            await store.add(MemoryScope.AGENT, "poet", "a second fact", agent="poet")
 
     assert str(refusal.value) == store_module.UNWRITABLE
     assert only(caplog, "memory_unreadable").error == "StoreClosed"
@@ -1607,7 +1688,7 @@ def test_a_read_answers_while_another_connection_holds_the_chain_lock(
     """The inverse of the write case below, and the property the second
     engine is bought with: reads never request the chain's advisory
     lock, so a write in flight cannot make one wait, let alone fail."""
-    asyncio.run(memory().remember("poet", "the user is vegetarian"))
+    asyncio.run(memory().add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"))
 
     with holding_the_write_lock(monkeypatch, MEMORY_CHAIN):
         # Opened under the shortened timeout, so a read that ever did
@@ -1633,7 +1714,9 @@ async def test_a_write_that_waits_out_the_lock_is_refused_retryably(
             with the_lock_held(MEMORY_CHAIN):
                 with caplog.at_level("WARNING"):
                     with pytest.raises(DatabaseBusyError) as refusal:
-                        await store.remember("poet", "the user is vegetarian")
+                        await store.add(
+                            MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+                        )
         finally:
             store.close()
 
@@ -1651,7 +1734,7 @@ async def test_a_write_that_cannot_reach_its_database_is_refused(
 
     with caplog.at_level("WARNING"):
         with pytest.raises(ConfigError) as refusal:
-            await store.remember("poet", "the user is vegetarian")
+            await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
 
     assert str(refusal.value) == store_module.UNWRITABLE
     assert not isinstance(refusal.value, DatabaseBusyError)
@@ -1697,7 +1780,7 @@ async def test_nothing_of_a_connection_reaches_a_surface_a_model_or_an_operator_
             assert store.sweep() == store_module.NOTHING_PURGED
             assert store.purge_threads([THREAD]) == store_module.NOTHING_PURGED
             with pytest.raises(ConfigError) as writing:
-                await store.remember("poet", "the user is vegetarian")
+                await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
             for call in (
                 lambda: store.add(
                     MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet"

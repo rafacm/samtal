@@ -44,7 +44,7 @@ from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
-from vinga_server.memory.store import MemoryStore
+from vinga_server.memory.store import MemoryScope, MemoryStore
 from vinga_server.providers import ToolCall, Turn
 from vinga_server.tools import builtin
 from vinga_server.tools.builtin import switch_agent_tool
@@ -140,8 +140,11 @@ class _HangingStore(MemoryStore):
     def __init__(self) -> None:
         super().__init__(cast(Any, None), cast(Any, None))
 
-    async def remember(self, agent: str, fact: str) -> None:
+    async def add(
+        self, scope: MemoryScope, owner: str, fact: str, *, agent: str
+    ) -> int:
         await asyncio.sleep(30)
+        raise AssertionError("unreachable")
 
 
 async def test_the_round_cap_ends_the_reply_in_speech() -> None:
@@ -360,7 +363,7 @@ async def test_a_builtin_asked_with_arguments_it_cannot_use_comes_back_as_an_err
 
 async def test_a_remembered_fact_is_in_the_next_replys_prompt() -> None:
     store = lane_memory()
-    await store.remember("poet", "the user is vegetarian")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     script = ScriptedLlm(["Noted."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
     await run_reply(session, "what do you know about me?")
