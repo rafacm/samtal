@@ -534,7 +534,8 @@ rather than extending it, so `mcp: []` is how an agent opts out of tools
 its siblings have. Each server's tools are offered under its entry name
 (`home__turn_on_light`), which is why an entry name has to be a plain
 `[A-Za-z0-9_-]+` name and cannot be `self` or a builtin's name
-(`switch_agent`, `remember`, `set_state`, `clear_state`,
+(`switch_agent`, `remember`, `update_memory`, `forget`,
+`restore_memory`, `recall`, `set_state`, `clear_state`,
 `new_conversation`, `resume_conversation`). Both transports the
 specification defines are supported:
 
@@ -720,7 +721,9 @@ dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
 restrict tool names to `[A-Za-z0-9_-]`.
 
 **Builtins** are `switch_agent`, offered when the device is bound to
-more than one agent; and `remember`, `set_state`, `clear_state`,
+more than one agent; and the memory family (`remember`,
+`update_memory`, `forget`, `restore_memory`, `recall`), the
+conversation ledger's `set_state` and `clear_state`, and
 `new_conversation` and `resume_conversation`, always offered.
 
 A successful `switch_agent` ends the current agent's reply: the new
@@ -745,18 +748,55 @@ thread, and the third argument, `start_from`, is the user's answer to
 it; it is honoured only for the conversation the tool actually asked
 about, so a model cannot consent to a recap on the user's behalf.
 
-`remember` keeps one fact for the agent that was told it. The facts
-live in the `memory` schema of the database this server already keeps
-its other two stores in, one row per fact, injected into that agent's
-system prompt on every reply and capped at 8 KiB or 200 lines with the
-oldest dropped first. The insert and the pruning happen in one
-transaction under the schema's own writer lock, so two conversations
-talking to the same agent at once cannot lose each other's fact and no
-reply ever reads a memory that is over its cap. There is nothing to
-configure: the schema is migrated at every boot the way the record's
-is, and an agent that has been told nothing simply gets no memory block.
-Memory is keyed by agent and not by device, because an agent is one
-entity across rooms.
+`remember` keeps one fact, and says which memory it belongs in. Left
+alone it is the agent's own, keyed by the agent and not by the device,
+because an agent is one entity across rooms: what the kitchen told it
+holds in the bedroom. Called with `scope: device` it is the board's,
+shared by every agent bound to that board, which is where the room, the
+household and the hardware's own quirks belong; what is true of a person
+stays with the agent. The scope is steered by the tool's description
+rather than enforced, so an assistant that files something in the wrong
+place has written a true fact you can move, and the two memories are
+separate in every direction: neither is read into the other's block.
+
+The facts live in the `memory` schema of the database this server
+already keeps its other two stores in, one row per fact. An agent's
+scope holds up to 1000 facts in 64 KiB and a device's up to 30 in 2 KiB,
+oldest dropped first, and one fact too long to fit inside its own
+scope's budget is refused rather than stored. The insert and the pruning
+happen in one transaction under the schema's own writer lock, so two
+conversations talking to the same agent at once cannot lose each other's
+fact and no reply ever reads a memory that is over its cap. There is
+nothing to configure: the schema is migrated at every boot the way the
+record's is, and an agent that has been told nothing gets no memory
+block.
+
+**The prompt carries the newest of an agent's facts, not all of them.**
+A scope of a thousand facts does not fit in front of a small local
+model, so the block is the newest 40 lines within 4 KiB and everything
+else is reached with `recall`. A device's notes and the conversation's
+ledger are small enough to inject whole.
+
+`recall` looks the facts up: a case-insensitive match on the words
+themselves over everything the agent and its device hold, injected or
+not, newest first, bounded at 20 lines within 2 KiB with a fixed
+sentence when more matched than fits. It is also where the numbers come
+from. Every remembered fact has one, `remember` answers with it, the
+injected block never shows one, and the number is what the two tools
+that change a fact address:
+
+- `update_memory` replaces one fact's words, keeping its number;
+- `forget` removes one and answers with the words it removed, which the
+  assistant is asked to say out loud so you can ask for it back;
+  `restore_memory` brings back the last thing forgotten in the
+  conversation, or a named one. A removal is held rather than erased
+  until that conversation ends, and `permanently: true` erases outright
+  with nothing to bring back.
+
+An assistant reaches its own facts and its device's, and nothing else:
+every numbered operation is bounded by ownership in the query itself, so
+a number belonging to another agent is answered exactly as a number
+belonging to nobody, in one sentence that confirms neither.
 
 `set_state` and `clear_state` keep the other kind: a small ledger of
 what is currently true in the conversation happening now, under names
@@ -778,18 +818,19 @@ cannot be resumed at all, so every conversation there begins with an
 empty ledger and anything worth keeping has to be remembered instead.
 
 No builtin is granted the way an MCP server is. One appears under a
-structural condition and the other five are simply always there.
+structural condition and the other nine are simply always there.
 `switch_agent`'s condition is the device's: it exists exactly when the
 board is bound to more than one agent, and withholding it from one of
 them would strand a conversation on whichever agent has no way back,
-which is the receptionist handoff the tool was written for. The three
+which is the receptionist handoff the tool was written for. The seven
 memory tools have no condition: every server keeps remembered facts and
 every conversation can keep a ledger, and the injection into the system
 prompt is unconditional, so an agent with `remember` withheld would
-recall for ever and never learn, and one with the state tools withheld
-would be read a ledger it had no way to write. Whether a
-particular agent should be allowed to remember at all is genuinely
-per-agent policy, and it is
+recall for ever and never learn, one with the state tools withheld
+would be read a ledger it had no way to write, and one with the numbered
+three withheld could not correct or take back anything it had been told.
+Whether a particular agent should be allowed to remember at all is
+genuinely per-agent policy, and it is
 [#83](https://github.com/rafacm/vinga/issues/83)'s to decide. The two
 conversation tools have no condition either, for a reason of their own:
 a tool that is simply absent is a tool a model invents, so they are
@@ -921,6 +962,9 @@ It shows the agent's own memory and no other scope, and that is the
 same honesty: what a conversation is keeping and what is known about a
 device belong to a session, and a preview that invented a device to
 show its notes would be a second assembler pretending to be the first.
+The block it shows is the one a reply gets, which is the newest of the
+agent's facts rather than all of them; the rest are there, and `recall`
+is what reaches them.
 
 Over the API it is `GET /api/runtime/agents/{name}/prompt`, and it is a
 read of the running server rather than of the database: the agents this
@@ -1906,16 +1950,21 @@ promise stops the server from coming up instead of quietly shipping
 audio to a vendor.
 
 **Memory is stored on the host and read out to the model.** What an
-agent remembers and what a conversation is keeping never leave this
-deployment as storage: they are rows in the database it already owns,
-they travel in the same `pg_dump` as everything else, and no other
-server is told about them. But both are injected into the system prompt
-on every reply, which makes them prompt content: they follow the active
-LLM provider's egress like the transcript and the persona do, so an
-agent on a cloud model sends what it remembered along with what was just
-said. `server.local_only` is the guard, and it is the same guard: a
-provider that sends session data off the host cannot be booted under it,
-and memory rides the boundary that draws.
+agent remembers, what a device's notes hold and what a conversation is
+keeping never leave this deployment as storage: they are rows in the
+database it already owns, they travel in the same `pg_dump` as
+everything else, and no other server is told about them. But they are
+injected into the system prompt on every reply, and `recall` answers a
+model with more of them on demand, which makes them prompt content: they
+follow the active LLM provider's egress like the transcript and the
+persona do, so an agent on a cloud model sends what it remembered along
+with what was just said. The device scope is worth stating on its own: a
+note about the room or the household is shared by every agent bound to
+that board, so it reaches every one of their providers rather than only
+the provider of the agent that was told it. `server.local_only` is the
+guard, and it is the same guard: a provider that sends session data off
+the host cannot be booted under it, and memory rides the boundary that
+draws.
 
 ## Listening and barge-in
 
