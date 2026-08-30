@@ -166,14 +166,25 @@ class Pruned:
     operator reading the event wants to know which of them fired. Only
     two of these reach the event; the rest are what the suites assert
     the ruleset by.
+
+    `threads` is the one field that is not a count, and it is here for
+    the reason it is on `Erased`: a thread retention took is a thread
+    whose memory goes in the same transaction, and it is one a live
+    writer may still be about to write to. The count is its length,
+    because two structures that must agree are one structure with a bug
+    pending.
     """
 
-    conversations: int = 0
+    threads: tuple[str, ...] = ()
     milestones: int = 0
     tool_invocations: int = 0
     turns: int = 0
     events: int = 0
     sessions: int = 0
+
+    @property
+    def conversations(self) -> int:
+        return len(self.threads)
 
     def anything(self) -> bool:
         return bool(self.conversations or self.sessions)
@@ -998,14 +1009,26 @@ def prune(connection: Any, cutoff: str) -> Pruned:
     both sides are written by `isoformat` at the same offset, which
     they are: the cutoff and every column here come from the writer's
     one clock.
+
+    What rule 1 took is answered by name and not only counted, because
+    a pruned thread is owed two more things its caller does inside this
+    same transaction and after it: its memory goes with it, and the
+    writer is told the id is gone.
     """
-    doomed = select(conversations.c.conversation).where(
-        conversations.c.last_active_at < cutoff
+    # Read as names rather than left as a subquery, which it used to be:
+    # the last statement of the rule deletes the rows the subquery reads,
+    # a list of ids is what makes the invocation delete a single
+    # statement instead of one per turn, and the caller needs the names
+    # themselves. What retention took is what a live writer must stop
+    # writing to and what a memory purge is addressed by, and neither of
+    # those can be recovered from a count.
+    doomed = tuple(
+        connection.execute(
+            select(conversations.c.conversation).where(
+                conversations.c.last_active_at < cutoff
+            )
+        ).scalars()
     )
-    # Read once rather than as a correlated subquery per table: the last
-    # statement of the rule deletes the rows the subquery reads, and a
-    # list of ids is also what makes the invocation delete a single
-    # statement instead of one per turn.
     dying_turns = select(turns.c.id).where(turns.c.conversation.in_(doomed))
     milestones = connection.execute(
         delete(conversation_milestones).where(
@@ -1018,9 +1041,9 @@ def prune(connection: Any, cutoff: str) -> Pruned:
     dead_turns = connection.execute(
         delete(turns).where(turns.c.conversation.in_(doomed))
     ).rowcount
-    threads = connection.execute(
-        delete(conversations).where(conversations.c.last_active_at < cutoff)
-    ).rowcount
+    connection.execute(
+        delete(conversations).where(conversations.c.conversation.in_(doomed))
+    )
 
     old_sessions: list[ColumnElement[bool]] = [sessions.c.started_at < cutoff]
     aged = select(sessions.c.session).where(*old_sessions)
@@ -1035,7 +1058,7 @@ def prune(connection: Any, cutoff: str) -> Pruned:
     ).rowcount
 
     return Pruned(
-        conversations=threads,
+        threads=doomed,
         milestones=milestones,
         tool_invocations=invocations,
         turns=dead_turns,
