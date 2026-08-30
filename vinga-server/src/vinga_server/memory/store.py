@@ -9,15 +9,20 @@ failures are classified rather than quoted. A caller asks for a store
 and disposes it; it never learns which schema, which lock key, which
 isolation level, or what a psycopg failure looks like.
 
-Nothing here reads or writes a row yet, and that is deliberate rather
-than unfinished. The storage move (#314) lands the chain first so that
-each milestone leaves a releasable `main`: what ships now is an empty,
-migrated, unread schema, which is exactly the state the conversation
-record already ships in when recording is off. `read(agent)` and
-`remember(agent, fact)` arrive with the cutover, on this store and this
-class, with the caps applied inside the write transaction; until then
-the file-backed store in `tools/memory.py` is still the one the
-composition builds, and nothing forwards between the two.
+What a caller does get is two sentences: `read(agent)`, the facts as
+the prompt injects them, and `remember(agent, fact)`, one fact kept.
+Memory is keyed by agent and not by agent and device, because an agent
+is one entity across rooms: "remember I am vegetarian", said in the
+kitchen, holds in the bedroom. Telling people apart on a shared device
+is the voiceprint problem, and keying by device would fragment memory
+without solving it.
+
+There is no recall tool. For memory small enough to inject, injection
+is the standard shape: it costs no lookup latency (a recall round trip
+is spoken silence) and does not depend on a small local model choosing
+to call it. The caps below are what keep that true, and are why this
+becomes a two-tier store, a small injected core plus a search tool,
+once memory outgrows the prompt.
 
 The chain is declared here rather than beside `db.open_at`, for the
 reason the conversation store's is: which schema a store lives in is a
@@ -25,13 +30,61 @@ fact of that store, and the schema name is read off the metadata that
 declares it.
 """
 
+import asyncio
+import contextlib
+import datetime as dt
+import threading
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine, delete, select
 
+from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.db import StoreChain, advisory_key, open_at, read_engine
+from vinga_server.db import StoreChain, advisory_key, is_busy, open_at, read_engine
+from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import MemoryUnreadable, MemoryUnwritable
+from vinga_server.events.values import ClassName, Identifier
 from vinga_server.memory import schema
+
+events = ServerEvents(__name__)
+
+# What keeps injection cheap: whichever trips first wins, and an insert
+# that overflows drops the oldest facts.
+#
+# Module-level and read at call time, which is what the two cap suites
+# monkeypatch. The same two numbers and the same two names the file
+# store enforced, because the storage moved and the promise did not.
+MAX_BYTES = 8192
+MAX_LINES = 200
+
+# What a write that the database refused answers with, as fixed
+# sentences carrying no value at all.
+#
+# These are the one class of failure in this module a model reads out
+# loud: a raise from `remember` becomes the tool result the reply is
+# built on, so a psycopg message here would put the DSN it tried, and
+# therefore the password in its authority, in front of a model and into
+# the conversation record. The class of the failure travels on the
+# event instead, where an operator reads it.
+UNWRITABLE = (
+    "this fact could not be stored: the database this server keeps memory in "
+    "refused the write, and nothing was remembered. Nothing of the failure is "
+    "repeated here, because a database error quotes the connection it tried and a "
+    "connection carries a password"
+)
+
+BUSY = (
+    "this fact could not be stored: another connection was writing to memory for "
+    "longer than the lock timeout allows, and nothing was remembered. Nothing was "
+    "changed, and the same fact may simply be offered again"
+)
+
+# How long a close waits for the calls already inside a connection.
+#
+# Generous next to a read of at most two hundred short rows, and short
+# next to a shutdown a person is watching. Its reason is in `close`.
+QUIET_TIMEOUT_S = 5.0
 
 # This store's own chain: the schema its table and its Alembic version
 # table live in, its migrations, and the advisory key its writers
@@ -61,24 +114,199 @@ class MemoryStore:
     every `begin`, so two writers through independent connections
     serialize whole; the read engine takes nothing, is repeatable-read
     and read-only, and therefore answers while another connection holds
-    the chain lock. That is what preserves the file store's property
-    that reading is cheap and never waits.
+    the chain lock. That is what keeps reading cheap and unblocking on
+    the path that builds a system prompt, which is the property the file
+    store had for free and a single engine would have spent.
     """
 
     def __init__(self, engine: Engine, reader: Engine) -> None:
         self._engine = engine
         self._reader = reader
+        # How many calls are inside a connection right now, and how the
+        # closing waits for them. Both halves of `read` and `remember`
+        # run in a worker thread while the close runs on the loop, so
+        # this counter is touched from two threads and guarded.
+        self._quiet = threading.Condition()
+        self._in_flight = 0
 
     def close(self) -> None:
-        """Let go of both connection pools.
+        """Let go of both connection pools, once the calls holding a
+        connection have finished with it.
 
         Registered on the application's exit stack the moment the store
         is opened, so a boot that fails later unwinds through it. Safe
         to call twice: disposing a disposed engine replaces a pool that
         has no connections in it.
+
+        The wait is not politeness. Disposing an engine closes the
+        connections sitting in its pool and replaces the pool; a
+        connection checked out at that moment is returned to the pool
+        that was replaced, which nothing owns any more and which closes
+        nothing when it is collected. The reply path reads memory from a
+        worker thread, and a shutdown that gives up on a reply still in
+        flight (the drain is bounded) is exactly when that happens. So
+        the close waits for the calls it can see, bounded by
+        `QUIET_TIMEOUT_S` because a store that will not go quiet must
+        not hold a shutdown open, and disposes either way.
         """
+        with self._quiet:
+            self._quiet.wait_for(lambda: self._in_flight == 0, timeout=QUIET_TIMEOUT_S)
         self._engine.dispose()
         self._reader.dispose()
+
+    @contextlib.contextmanager
+    def _connected(self) -> Iterator[None]:
+        """One call holding a connection, counted so the close can wait
+        for it."""
+        with self._quiet:
+            self._in_flight += 1
+        try:
+            yield
+        finally:
+            with self._quiet:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._quiet.notify_all()
+
+    def read(self, agent: str) -> str:
+        """This agent's facts, or an empty string when it has none.
+
+        Rendered as the prompt injects it: one `- fact` line per row, in
+        insertion order, with no trailing newline. Read per reply rather
+        than cached, so a fact remembered in one session is known to a
+        concurrent one on its next reply.
+
+        Synchronous, and on the read engine, which is the whole of why
+        the store holds two. Reads take no advisory lock, so this
+        answers while another connection is midway through a `remember`
+        and can never wait out a lock timeout on the path that builds a
+        system prompt.
+
+        Nothing about a database that cannot be read reaches the caller.
+        This is on the path that builds a system prompt, so a raised
+        exception would leave as a traceback under "reply failed", and a
+        psycopg failure quotes the DSN it tried, which carries a
+        password in its authority. A database this server cannot read
+        means this agent remembers nothing this round, and the reply
+        happens. What is logged is the class of the failure and never
+        the message, which is the rule the MCP layer's reason tokens and
+        the thread reads already follow.
+        """
+        try:
+            with self._connected(), self._reader.connect() as connection:
+                return _rendered(_stored(connection, agent))
+        except Exception as exc:  # noqa: BLE001 - the whole point of the seam
+            failure = exc
+            events.emit(
+                lambda: MemoryUnreadable(
+                    agent=Identifier(agent), error=ClassName.of(failure)
+                )
+            )
+            return ""
+
+    async def remember(self, agent: str, fact: str) -> None:
+        """Keep one fact, normalized to a line and capped.
+
+        The refusal for an empty fact is a caller's mistake rather than
+        a storage failure, so it is a `ValueError` with the sentence it
+        has always had and no event: the tool layer above turns a bad
+        argument into something the model rephrases.
+
+        Everything else happens in one transaction on the write engine,
+        which takes the chain's advisory lock before it reads. That is
+        what makes the read-count-prune arithmetic below correct across
+        processes without a word about isolation levels, and what the
+        per-agent `asyncio.Lock` of the file era was a single-process
+        approximation of. The transaction runs in a worker thread
+        because the driver is blocking and the caller is the event loop
+        every live conversation shares.
+        """
+        text = " ".join(fact.split())
+        if not text:
+            raise ValueError("there is nothing to remember")
+        await asyncio.to_thread(self._store, agent, text)
+
+    def _store(self, agent: str, fact: str) -> None:
+        """The insert and the pruning, in one transaction.
+
+        One transaction and not two, which is the durability the file
+        store could not offer: no reader ever sees an over-cap state,
+        and a failure between the insert and the prune leaves the store
+        exactly as it was rather than over its cap forever.
+
+        The refusal is built inside the handler and raised after it,
+        cause severed, the way every boundary in this project raises: an
+        exception raised while another is being handled keeps that one
+        on `__context__`, and here that one holds the connection string
+        it tried.
+        """
+        problem: Exception | None = None
+        try:
+            with self._connected(), self._engine.begin() as connection:
+                connection.execute(
+                    schema.facts.insert().values(
+                        agent=agent, at=_utc_now().isoformat(), fact=fact
+                    )
+                )
+                doomed = _over_the_cap(_stored(connection, agent))
+                if doomed:
+                    connection.execute(
+                        delete(schema.facts).where(schema.facts.c.id.in_(doomed))
+                    )
+        except Exception as exc:  # noqa: BLE001 - classified, never quoted
+            failure = exc
+            events.emit(
+                lambda: MemoryUnwritable(
+                    agent=Identifier(agent), error=ClassName.of(failure)
+                )
+            )
+            # By class and never by message, through the one classifier
+            # `db` owns: a contended write is retryable and says so, and
+            # everything else is the general refusal.
+            problem = DatabaseBusyError(BUSY) if is_busy(exc) else StorageError(UNWRITABLE)
+        if problem is not None:
+            raise problem
+
+
+def _stored(connection: Connection, agent: str) -> list[tuple[int, str]]:
+    """One agent's facts, oldest first, each already a rendered line.
+
+    `ORDER BY id` is the file's line order, and the index the schema
+    declares is on exactly this pair. Rendered here rather than at the
+    two call sites because the byte cap is applied to the rendering, so
+    the line is what both the reader and the prune have to be counting.
+    """
+    rows = connection.execute(
+        select(schema.facts.c.id, schema.facts.c.fact)
+        .where(schema.facts.c.agent == agent)
+        .order_by(schema.facts.c.id)
+    ).all()
+    return [(row_id, f"- {fact}") for row_id, fact in rows]
+
+
+def _over_the_cap(stored: Sequence[tuple[int, str]]) -> list[int]:
+    """Which rows no longer fit, by id. The oldest go first: a fact
+    worth keeping tends to get said again, and the alternative (refusing
+    to remember anything more) is worse to hear.
+
+    The same algorithm the file store applied to lines, on the same two
+    constants read at call time: keep the newest `MAX_LINES`, then drop
+    the oldest while the rendered block is over `MAX_BYTES`, never below
+    one fact.
+    """
+    kept = list(stored[-MAX_LINES:])
+    while len(kept) > 1 and len(_rendered(kept).encode("utf-8")) > MAX_BYTES:
+        kept.pop(0)
+    surviving = {row_id for row_id, _ in kept}
+    return [row_id for row_id, _ in stored if row_id not in surviving]
+
+
+def _rendered(stored: Sequence[tuple[int, str]]) -> str:
+    return "\n".join(line for _, line in stored)
+
+
+def _utc_now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
 
 
 def open_memory(settings: DatabaseConfig) -> MemoryStore:
@@ -86,9 +314,9 @@ def open_memory(settings: DatabaseConfig) -> MemoryStore:
 
     Always, and not behind any switch. The schema is migrated at every
     boot the way the record schema is, because migrating creates an
-    empty table and an empty table is not a memory; a deployment that
-    stored nothing has nothing in it and reads exactly as an empty file
-    read.
+    empty table and an empty table is not a memory; an agent that has
+    been told nothing reads as the empty string and gets no block in its
+    prompt, exactly as an empty file rendered.
 
     Every failure is a `ConfigError` carrying one of the fixed sentences
     `db` owns, including the one for a role that may not create the
@@ -111,7 +339,11 @@ def open_memory(settings: DatabaseConfig) -> MemoryStore:
 
 
 __all__ = [
+    "BUSY",
+    "MAX_BYTES",
+    "MAX_LINES",
     "MEMORY_CHAIN",
+    "UNWRITABLE",
     "MemoryStore",
     "open_memory",
 ]

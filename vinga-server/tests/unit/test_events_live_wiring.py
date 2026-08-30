@@ -28,6 +28,7 @@ from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with_agent, wo
 from tests.support.providers import built_world
 from tests.support.sessions import attached_taps
 from tests.support.sockets import LoopingSocket
+from tests.support.stores import memory as lane_memory
 from tests.support.wire import device_headers, handshake
 from vinga_server.config import Config
 from vinga_server.device.session import DeviceSession
@@ -61,7 +62,7 @@ def session_watched_by(
     over."""
     settings = config if config is not None else config_with_agent()
     generations = world(settings, providers=built_world(settings))
-    factory = bespoke_runtime_factory(generations, McpServers({}), None, None)
+    factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory(), None)
     return DeviceSession(
         cast(Any, websocket), generations, factory, live=hub
     )

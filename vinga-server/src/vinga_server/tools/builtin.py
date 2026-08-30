@@ -26,9 +26,9 @@ model is told is what happened and what to do about it.
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from vinga_server.memory import MemoryStore
 from vinga_server.providers import ToolDef
 from vinga_server.tools import names
-from vinga_server.tools.memory import MemoryStore
 
 if TYPE_CHECKING:
     # Named for the annotation alone, so that saying what a candidate
@@ -70,8 +70,9 @@ def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
 
 
 def remember_tool() -> ToolDef:
-    """Keep one fact about the user across conversations. Offered only
-    when a memory directory is configured."""
+    """Keep one fact about the user across conversations. Offered to
+    every agent: remembered facts live in a schema this server migrates
+    at every boot, so there is no deployment without a store (#314)."""
     return ToolDef(
         name=names.REMEMBER,
         description=(

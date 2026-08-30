@@ -46,13 +46,12 @@ from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
-from vinga_server.memory import open_memory
+from vinga_server.memory import MemoryStore, open_memory
 from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpConfigError, McpServers
-from vinga_server.tools.memory import MemoryStore
 
 events = ServerEvents(__name__)
 
@@ -230,13 +229,6 @@ async def _build_composition(
     # unset secret is still a boot failure here, exactly as it was; being
     # unreachable is still not one.
     mcp_servers = McpServers.build(config, secrets)
-    # Absent memory configuration means no remember tool and no
-    # injection; the directory itself is created on the first write.
-    # Built before the API's runtime rather than beside the runtime
-    # below, because the API's prompt read reports what a session would
-    # be sent and memory is part of that.
-    memory_section = config.memory
-    memory = None if memory_section is None else MemoryStore(memory_section.dir)
     # Built here so a bad provider configuration (unknown type, bad option,
     # missing extra, agent without a full pipeline) fails the boot rather
     # than the first conversation. The MCP servers are built above, for
@@ -295,18 +287,18 @@ async def _build_composition(
         conversations.start()
     # What an agent was asked to remember, in a schema of its own beside
     # the record's (#314). Opened here, which is what migrates it, and
-    # consumed by nothing yet: what this milestone ships is the chain,
-    # empty and current, and the store that reads and writes it arrives
-    # with the cutover. The disposal is registered in the same breath,
-    # so a boot that fails after this point unwinds through the stack
-    # rather than leaving a pool nobody owns.
+    # before the API's runtime below, because the API's prompt read
+    # reports what a session would be sent and memory is part of that.
+    # The disposal is registered in the same breath, so a boot that
+    # fails after this point unwinds through the stack rather than
+    # leaving a pool nobody owns.
     #
-    # Unconditionally, and not behind the `memory:` section the
-    # file-backed store still reads above: migrating creates an empty
-    # table, an empty table is not a memory, and a deployment that
-    # stores nothing has nothing in it.
-    memory_store = open_memory(database)
-    stack.callback(memory_store.close)
+    # Unconditionally, and behind no section at all: migrating creates
+    # an empty table, an empty table is not a memory, and an agent that
+    # has been told nothing reads as the empty string and gets no block
+    # in its prompt.
+    memory = open_memory(database)
+    stack.callback(memory.close)
     # The filled pauses, in each agent's own voice. Synthesized here
     # rather than beside the providers because synthesis is async, and
     # before the generation below because they are part of the world it
@@ -853,7 +845,7 @@ def _runtime_identity(server: ServerConfig) -> RuntimeInfo:
 
 
 def _prompt_preview(
-    generations: Generations, servers: McpServers, memory: MemoryStore | None
+    generations: Generations, servers: McpServers, memory: MemoryStore
 ) -> Callable[[str], Awaitable[prompt.Assembled | None]]:
     """What the configuration API's prompt read calls.
 
@@ -871,9 +863,9 @@ def _prompt_preview(
     An agent this server is not serving answers None rather than
     raising, so the route decides what a missing one means. The guidance is read
     on the loop that owns the managers, before any await; the memory
-    read is filesystem I/O and goes to a worker thread, which is what
-    keeps an inspection request off the loop every live conversation is
-    on.
+    read is a database round trip and goes to a worker thread, which is
+    what keeps an inspection request off the loop every live
+    conversation is on.
     """
 
     async def assemble(agent: str) -> prompt.Assembled | None:
@@ -885,8 +877,6 @@ def _prompt_preview(
             config.fragments_for_agent(agent),
             servers.guidance_for_agent(agent),
         )
-        if memory is None:
-            return half
         return prompt.with_memory(half, await asyncio.to_thread(memory.read, agent))
 
     return assemble

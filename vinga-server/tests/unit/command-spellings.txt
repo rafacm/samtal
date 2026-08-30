@@ -1044,7 +1044,7 @@ vinga-server/examples/vad-silero.yaml:5  respell  vinga provider set vad silero
 vinga-server/pyproject.toml:84  respell  vinga simulator run
 vinga-server/pyproject.toml:165  respell  config cli-reference
 vinga-server/pyproject.toml:181  respell  vinga simulator run
-vinga-server/src/vinga_server/app.py:820  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/app.py:812  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
 vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
@@ -1257,8 +1257,8 @@ vinga-server/tests/unit/test_device_endpoint.py:4  respell  vinga simulator
 vinga-server/tests/unit/test_docker_entrypoint.py:128  respell  config provider show llm claude
 vinga-server/tests/unit/test_event_docs.py:340  respell  vinga-server config reload
 vinga-server/tests/unit/test_mcp_status_reflection.py:16  respell  config mcp-server status
-vinga-server/tests/unit/test_mcp_status_reflection.py:112  respell  vinga-server config mcp-server status
-vinga-server/tests/unit/test_mcp_status_reflection.py:169  respell  vinga-server config agent preview assistant
+vinga-server/tests/unit/test_mcp_status_reflection.py:113  respell  vinga-server config mcp-server status
+vinga-server/tests/unit/test_mcp_status_reflection.py:170  respell  vinga-server config agent preview assistant
 vinga-server/tests/unit/test_onboarding_banner.py:81  respell  vinga-server config ota-url
 vinga-server/tests/unit/test_server_event_pins.py:293  respell  vinga-server config ota-url
 vinga-server/tests/unit/test_simulator_conversation.py:1  respell  vinga simulator run

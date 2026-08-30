@@ -53,6 +53,7 @@ from vinga_server.conversations import schema
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.session import DeviceSession
+from vinga_server.memory import MemoryStore
 from vinga_server.providers import (
     AsrProvider,
     AsrResult,
@@ -69,7 +70,6 @@ from vinga_server.providers import (
 from vinga_server.runtime import turns
 from vinga_server.runtime.turns import tool_source
 from vinga_server.tools.mcp import McpServers
-from vinga_server.tools.memory import MemoryStore
 
 # One frame of silence, which the mock ASR answers with the configured
 # transcript: 640 bytes at 16 kHz, which is the 0.02 s the record
@@ -536,7 +536,7 @@ async def test_a_thread_id_is_a_minted_token_and_not_the_session_id() -> None:
 # Every call the model issued, whatever became of it
 
 
-async def test_every_source_is_classified_and_positioned(tmp_path: Path) -> None:
+async def test_every_source_is_classified_and_positioned() -> None:
     """One round holding a call from every branch there is, recorded at
     the position the model issued it at rather than the order the loop
     happened to finish them in."""
@@ -557,7 +557,7 @@ async def test_every_source_is_classified_and_positioned(tmp_path: Path) -> None
         ]
     )
     session, spy, _ = recording_session(
-        scripts={"poet": script}, memory=MemoryStore(tmp_path), mcp_servers=servers
+        scripts={"poet": script}, mcp_servers=servers
     )
     # White-box: a device's own tools arrive from a discovery run the
     # edge starts over the wire after the hello, and this session has no
@@ -713,7 +713,9 @@ class BlockingMemory(MemoryStore):
     with a tool call demonstrably still in flight."""
 
     def __init__(self) -> None:
-        super().__init__(Path("/nonexistent"))
+        # No engines, and it needs none: the write is replaced whole,
+        # so nothing here reaches a connection.
+        super().__init__(cast(Any, None), cast(Any, None))
         self.running = asyncio.Event()
 
     async def remember(self, agent: str, fact: str) -> None:

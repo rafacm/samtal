@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import sys
-from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,14 +31,15 @@ from tests.support.events import events
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
 from tests.support.sessions import call, history, run_reply, session_for, talking
+from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.memory import MemoryStore
 from vinga_server.providers import ToolCall, Turn
 from vinga_server.tools.builtin import switch_agent_tool
 from vinga_server.tools.mcp import McpServers
-from vinga_server.tools.memory import MemoryStore
 
 
 async def test_a_reply_with_no_tool_calls_is_one_round() -> None:
@@ -122,10 +123,13 @@ async def test_a_tool_that_never_answers_becomes_a_timeout_result(
 
 class _HangingStore(MemoryStore):
     """A store whose writes never finish, so the loop's per-call timeout
-    is the only thing that can end the reply."""
+    is the only thing that can end the reply.
+
+    No engines, and it needs none: the write is replaced whole, so
+    nothing here reaches a connection."""
 
     def __init__(self) -> None:
-        super().__init__(Path("/nonexistent"))
+        super().__init__(cast(Any, None), cast(Any, None))
 
     async def remember(self, agent: str, fact: str) -> None:
         await asyncio.sleep(30)
@@ -168,17 +172,19 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
 
     # Both offers whole, so the conditional tool is the entire
     # difference between them: the device bound to one agent has nowhere
-    # to switch and no memory configured, and is offered only the two
-    # that are always offered. Those two are unconditional on purpose:
-    # what a server that cannot resume anything answers with is a
-    # sentence the agent reads out, and a tool that is simply absent is
-    # a tool a model invents (#190).
+    # to switch, and is offered only the three that are always offered.
+    # Those three are unconditional on purpose: what a server that
+    # cannot resume anything answers with is a sentence the agent reads
+    # out, a tool that is simply absent is a tool a model invents
+    # (#190), and there is no deployment without a memory store (#314).
     assert [tool.name for tool in alone.seen[0][1]] == [
+        "remember",
         "new_conversation",
         "resume_conversation",
     ]
     assert [tool.name for tool in paired.seen[0][1]] == [
         "switch_agent",
+        "remember",
         "new_conversation",
         "resume_conversation",
     ]
@@ -296,10 +302,8 @@ async def test_two_switches_in_one_round_honour_the_first_and_refuse_the_rest() 
     assert talking(session) == "tutor"
 
 
-async def test_remembering_is_offered_and_executed_when_memory_is_configured(
-    tmp_path: Path,
-) -> None:
-    store = MemoryStore(tmp_path)
+async def test_remembering_is_offered_and_executed() -> None:
+    store = lane_memory()
     script = ScriptedLlm(
         [[call("remember", text="the user is vegetarian")], "I will keep that in mind."]
     )
@@ -319,15 +323,13 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
     assert not result.is_error
 
 
-async def test_a_builtin_asked_with_arguments_it_cannot_use_comes_back_as_an_error(
-    tmp_path: Path,
-) -> None:
+async def test_a_builtin_asked_with_arguments_it_cannot_use_comes_back_as_an_error() -> None:
     """The refusal as the model receives it, which is the shape any
     builtin's bad arguments take: an error result it reads and can call
     again from, rather than an ended reply. `remember` is offered here
     and its argument validation refuses before the store is touched, so
     what is under test is the loop's rendering rather than any store."""
-    store = MemoryStore(tmp_path)
+    store = lane_memory()
     script = ScriptedLlm([[call("remember", text=None)], "Let me put that another way."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
     await run_reply(session, "remember nothing in particular")
@@ -340,8 +342,8 @@ async def test_a_builtin_asked_with_arguments_it_cannot_use_comes_back_as_an_err
     assert store.read("poet") == ""
 
 
-async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path)
+async def test_a_remembered_fact_is_in_the_next_replys_prompt() -> None:
+    store = lane_memory()
     await store.remember("poet", "the user is vegetarian")
     script = ScriptedLlm(["Noted."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
@@ -355,7 +357,7 @@ async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) ->
 async def test_malformed_arguments_come_back_as_an_error_result() -> None:
     broken = ToolCall(id="c1", name="remember", malformed_arguments="{text: oops")
     script = ScriptedLlm([[broken], "Let me try that again."])
-    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    session = session_for(base_config(), POET_MAC, {"poet": script})
     assert await run_reply(session, "remember this") == ["Let me try that again."]
 
     (result,) = [
@@ -381,7 +383,7 @@ async def refuse_malformed(
     arguments = f'{{"text": "{ARGUMENT_SENTINEL}"'
     broken = ToolCall(id="c1", name=name, malformed_arguments=arguments)
     script = ScriptedLlm([[broken], "Let me try that again."])
-    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    session = session_for(base_config(), POET_MAC, {"poet": script})
     with caplog.at_level("DEBUG"):
         await run_reply(session, "do it")
     (line,) = [record for record in caplog.records if "unparseable" in record.getMessage()]

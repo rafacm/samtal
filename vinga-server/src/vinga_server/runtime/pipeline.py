@@ -84,6 +84,7 @@ from vinga_server.events.values import (
 )
 from vinga_server.filler import FillerClips
 from vinga_server.generation import Generation, Generations
+from vinga_server.memory import MemoryStore
 from vinga_server.providers import (
     AgentProviders,
     AsrResult,
@@ -106,7 +107,6 @@ from vinga_server.runtime.turntaking import TurnTaking
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
 from vinga_server.tools.mcp import McpServers
-from vinga_server.tools.memory import MemoryStore
 from vinga_server.tools.source import BuiltinTools, DeviceTools, McpTools, ToolSource
 
 # How many times one reply may stream, call tools, and stream again.
@@ -454,7 +454,7 @@ class PipelineRuntime:
         events: SessionEvents,
         agent_providers: Mapping[str, AgentProviders],
         mcp_servers: McpServers,
-        memory: MemoryStore | None,
+        memory: MemoryStore,
         fillers: Mapping[str, FillerClips],
         agents: Sequence[str],
         recorder: TurnRecorder | None = None,
@@ -2107,14 +2107,14 @@ class PipelineRuntime:
         concurrent one on its next reply, which is a contract that
         predates this split.
 
-        The read itself is filesystem I/O and runs in a worker thread
-        rather than on the loop every live conversation shares. It is
+        The read itself is a database round trip and runs in a worker
+        thread rather than on the loop every live conversation shares,
+        exactly as the file read before it did. It takes no advisory
+        lock, so it never waits on a `remember` in flight. It is
         resolved before the request is built, which is what lets the
         assembler stay a pure function of the text it is handed.
         """
         assert self._know_how is not None and self._agent is not None
-        if self._memory is None:
-            return self._know_how.text
         facts = await asyncio.to_thread(self._memory.read, self._agent)
         return prompt.with_memory(self._know_how, facts).text
 
@@ -2254,7 +2254,7 @@ class PipelineRuntime:
 def bespoke_runtime_factory(
     generations: Generations,
     mcp_servers: McpServers,
-    memory: MemoryStore | None,
+    memory: MemoryStore,
     conversations: TurnStore | None = None,
     threads: resumption.ThreadReads | None = None,
 ) -> RuntimeFactory:

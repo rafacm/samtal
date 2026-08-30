@@ -196,7 +196,7 @@ def test_the_rule_leaves_a_test_shaped_name_alone() -> None:
     export, for being called something that starts with `test_`."""
     planted = ast.parse(
         "from tests.support.configs import test_data as data\n"
-        "from tests.support.stores import corrupt as test_corrupt\n"
+        "from tests.support.stores import tone as test_tone\n"
         "from vendor import test_helper as helper\n"
         "from vinga_server.config import test_only_flag\n"
     )

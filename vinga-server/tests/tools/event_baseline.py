@@ -4,7 +4,7 @@ A driver inventory, and nothing more than that. "Baseline" was once a
 committed capture of what these paths produced, kept so a conversion
 could show the file did not move; that file is gone (#241), and with it
 the regeneration command and the byte comparison it fed. What is left is
-the machinery: eighty-one drivers, one per emit path, and the two
+the machinery: eighty-four drivers, one per emit path, and the two
 functions that run them and reduce what they produced to the dimensions
 a consumer sees (`driven()` and `captured()`). Nothing here is written
 to disk, and there is nothing to regenerate.
@@ -23,7 +23,7 @@ declares is constructible, and therefore directly drivable, so the suite
 holds every one of them to being produced by some driver's run, and a
 declaration nothing can produce fails the lane. Beside it, the smaller
 claim these drivers can give themselves: one driver per identity,
-eighty-one of them, and every record a driver keeps is the event that
+eighty-four of them, and every record a driver keeps is the event that
 driver names.
 
 There used to be a static walk here instead, reading the scoped modules
@@ -140,9 +140,11 @@ from tests.support.stores import (
     StoredThreads,
     a_backlog,
     a_candidate,
-    corrupt,
+    memory_that_cannot_read,
+    memory_that_cannot_write,
     tone,
 )
+from tests.support.stores import memory as lane_memory
 from tests.support.stores import store as capture_store
 from tests.support.tools_mcp import Applying as McpApplying
 from tests.support.tools_mcp import config_granting as mcp_granting
@@ -168,7 +170,7 @@ from vinga_server.build_info import CONTAINER_ENV
 from vinga_server.capture import CaptureStore, SessionCapture
 from vinga_server.config import Config
 from vinga_server.config.api import build_api
-from vinga_server.config.loader import StorageError
+from vinga_server.config.loader import ConfigError, StorageError
 from vinga_server.config.models import DatabaseConfig, ProviderConfig
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations import threads
@@ -185,7 +187,6 @@ from vinga_server.providers.openai_asr import OpenAiAsr
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.mcp.reload import ReloadInProgressError
-from vinga_server.tools.memory import MemoryStore
 
 # The channels this harness covers: what a record has to ride to be
 # captured at all.
@@ -458,7 +459,7 @@ async def turned_away(
 ) -> None:
     """One connection that never becomes a session."""
     generations = world(config, providers=built_world(config))
-    factory = bespoke_runtime_factory(generations, McpServers({}), None)
+    factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory())
     session = DeviceSession(
         cast(Any, TurnedAwaySocket(device_id)),
         generations,
@@ -667,9 +668,7 @@ async def drive_replied(_: Path) -> None:
 async def drive_tool_call(directory: Path) -> None:
     builtin = ScriptedLlm([[call("remember", text="I like tea")], "Noted."])
     await run_reply(
-        session_for(
-            base_config(), POET_MAC, {"poet": builtin}, memory=MemoryStore(directory)
-        ),
+        session_for(base_config(), POET_MAC, {"poet": builtin}),
         "remember that I like tea",
     )
     invented = ScriptedLlm([[call("nothing_publishes_this")], "I could not do that."])
@@ -1581,10 +1580,18 @@ async def drive_mcp_reload_applied(_: Path) -> None:
         await servers.stop_all()
 
 
-def drive_memory_unreadable(directory: Path) -> None:
-    memories = MemoryStore(directory)
-    corrupt(memories, "poet")
-    assert memories.read("poet") == ""
+def drive_memory_unreadable(_: Path) -> None:
+    assert memory_that_cannot_read().read("poet") == ""
+
+
+async def drive_memory_unwritable(_: Path) -> None:
+    """The write half, which fails for a reason a read cannot: the read
+    engine is the one pointed at nothing here, and its mirror is the
+    store whose writer is."""
+    try:
+        await memory_that_cannot_write().remember("poet", "the user is vegetarian")
+    except ConfigError:
+        pass
 
 
 def drive_auth_rejected(directory: Path) -> None:
@@ -1649,7 +1656,7 @@ REGISTRY = "vinga_server.registry"
 MANAGER = "vinga_server.tools.mcp.manager"
 MCP_REGISTRY = "vinga_server.tools.mcp.registry"
 RELOAD = "vinga_server.tools.mcp.reload"
-MEMORY = "vinga_server.tools.memory"
+MEMORY = "vinga_server.memory.store"
 WS = "vinga_server.ws"
 
 SERVER_DRIVERS: tuple[Driver, ...] = (
@@ -1745,6 +1752,7 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     Driver((RELOAD, "_refused", 1), drive_mcp_reload_refused, "mcp_reload"),
     Driver((RELOAD, "_apply", 1), drive_mcp_reload_applied, "mcp_reload"),
     Driver((MEMORY, "MemoryStore.read", 1), drive_memory_unreadable, "memory_unreadable"),
+    Driver((MEMORY, "MemoryStore._store", 1), drive_memory_unwritable, "memory_unwritable"),
     Driver((WS, "conversation", 1), drive_auth_rejected, "auth_rejected"),
     Driver((WS, "conversation", 2), drive_session_rejected_at_capacity, "session_rejected"),
 )
@@ -1817,7 +1825,7 @@ class Run:
     while each driver ran, and the half of it that driver owns.
 
     `said` is filtered by nothing, which is what a claim about anything
-    OTHER than the eighty-one typed paths has to be made from. It holds
+    OTHER than the eighty-four typed paths has to be made from. It holds
     two populations `kept` does not: the neighbouring paths a driver
     crosses on its way to its own decision, three times as many records
     as the drivers keep, and the untyped records, which carry no `event`

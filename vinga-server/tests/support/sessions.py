@@ -44,16 +44,17 @@ from tests.support.configs import DEVICE_MAC, POET_MAC, base_config, world
 from tests.support.events import only
 from tests.support.providers import ScriptedLlm, Unreachable, built_world
 from tests.support.sockets import LoopingSocket, RecordingSocket
+from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
 from vinga_server.conversations.store import Half
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generations
+from vinga_server.memory import MemoryStore
 from vinga_server.providers import ProviderWorld, ToolCall, Turn
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
-from vinga_server.tools.memory import MemoryStore
 
 # --- building one -----------------------------------------------------
 
@@ -148,7 +149,13 @@ def device_session(
     `fillers` are the clips that world holds, since a session binds them
     off its generation rather than being handed them: a suite that wants
     a masked session says which clips the world has, and a suite that
-    hands its own holder in has already said."""
+    hands its own holder in has already said.
+
+    `memory` is the one collaborator with a default rather than an
+    absence, because there is no deployment without a memory store
+    (#314). None means the lane's own, which is empty unless the test
+    put something in it; a suite that wants a store which cannot reach
+    its database hands one in."""
     if generations is None:
         generations = world(
             config,
@@ -158,7 +165,7 @@ def device_session(
     factory = bespoke_runtime_factory(
         generations,
         mcp_servers if mcp_servers is not None else McpServers({}),
-        memory,
+        memory if memory is not None else lane_memory(),
         conversations,
         threads,
     )
@@ -314,7 +321,7 @@ def served(
     opens and closes."""
     generations = world(config, providers=built_world(config))
     factory = bespoke_runtime_factory(
-        generations, McpServers({}), None, conversations
+        generations, McpServers({}), lane_memory(), conversations
     )
     return DeviceSession(
         cast(Any, websocket), generations, factory, conversations=conversations

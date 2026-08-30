@@ -36,6 +36,7 @@ from tests.support.providers import built_world
 from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
 from tests.support.sessions import Gate, attached_taps, drive_reply, open_session, until
 from tests.support.sockets import LoopingSocket
+from tests.support.stores import memory as lane_memory
 from tests.support.wire import connect, say_something, send_pcm, sentences, shake_hands, speech_pcm
 from vinga_server.app import create_app
 from vinga_server.audio.opus import OpusEncoder
@@ -638,7 +639,7 @@ def _guarded(tmp_path: Path, store: ConversationStore) -> tuple[Any, Any]:
     config = recording_config(tmp_path)
     captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
     generations = world(config, providers=built_world(config))
-    factory = bespoke_runtime_factory(generations, McpServers({}), None, store)
+    factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory(), store)
     websocket = LoopingSocket()
     session = DeviceSession(
         cast(Any, websocket), generations, factory, captures, conversations=store

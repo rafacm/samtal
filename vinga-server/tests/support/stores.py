@@ -1,14 +1,14 @@
 """What a suite writes into a store, and how it reads one back.
 
 Two places keep what a conversation produced: the capture directory and
-the conversation record's schema, with an agent's memory file beside
-them. What belongs here is the scaffolding around all three: the
+the conversation record's schema, with the memory schema beside them.
+What belongs here is the scaffolding around all three: the
 manifest each kind of session is opened with, a store built where a
 test can reach it, the audio a channel is filled with, a read through a
 second engine, the second writer four suites need in order to prove the
 retryable refusal, the thread store a session resumes through written
-down as two dictionaries, and the way a memory file is made unreadable
-on purpose.
+down as two dictionaries, and the memory stores whose two engines are
+pointed at a database that is not there on purpose.
 
 Nothing here asserts and nothing here drives a session. A helper returns
 a store, a payload or a list of rows, and the suite says what it expects.
@@ -39,8 +39,14 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import threads
 from vinga_server.conversations.records import StoredTurn
 from vinga_server.conversations.store import open_conversations
-from vinga_server.db import DOMAIN_CHAIN, StoreChain, connection_url
-from vinga_server.tools.memory import MemoryStore
+from vinga_server.db import (
+    DOMAIN_CHAIN,
+    StoreChain,
+    connection_url,
+    read_engine,
+    write_engine,
+)
+from vinga_server.memory import MEMORY_CHAIN, MemoryStore, open_memory
 
 # --- a second writer, holding the lock ---------------------------------
 
@@ -323,18 +329,82 @@ def body(entry: BaseModel) -> str:
     return str(config_store._to_row(descriptor, entry)["body"])
 
 
-# --- an agent's memory file, made unreadable --------------------------
+# --- agent memory, reachable and unreachable --------------------------
 
 
 # Not a real credential, and shaped so a substring check for it cannot
-# match by accident. Written into the corrupt file, where a handler that
-# logged the file or the exception's message would carry it out.
+# match by accident. Planted in the database password and in the whole
+# connection URL, which is where a psycopg failure would quote it: the
+# driver's message names the DSN it tried, and a DSN carries a password
+# in its authority and can carry another in its query.
 STORED = "sk-test-3d7f10ba-never-a-real-credential"
 
-CORRUPT = f"- {STORED}\n- \xff\xfe not utf-8 at all\n".encode("latin-1")
+# A port on loopback nothing listens on, which is the cheapest genuine
+# connection failure there is: the kernel refuses it immediately, so a
+# suite about a database that is not there does not wait out a timeout.
+NO_BACKEND_PORT = 1
 
 
-def corrupt(store: MemoryStore, agent: str) -> None:
-    path = store.path_for(agent)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(CORRUPT)
+# The lane's own store, opened once per worker process.
+#
+# Through `open_memory`, migration and all, rather than by handing
+# `MemoryStore` two engines: what a suite drives should be what a
+# deployment runs. Once, because that call is an Alembic round trip and
+# every session this lane builds asks for a store; the truncation
+# between tests empties the table underneath it, which is what a store
+# holding nothing but two pools does not notice.
+_LANE_MEMORY: MemoryStore | None = None
+
+
+def memory() -> MemoryStore:
+    """The lane's memory store, opened the way a boot opens it."""
+    global _LANE_MEMORY
+    if _LANE_MEMORY is None:
+        _LANE_MEMORY = open_memory(DatabaseConfig())
+    return _LANE_MEMORY
+
+
+def nowhere() -> DatabaseConfig:
+    """Settings naming a backend that is not there."""
+    return DatabaseConfig(port=NO_BACKEND_PORT)
+
+
+def memory_that_cannot_read() -> MemoryStore:
+    """A store whose reads fail and whose writes do not.
+
+    The two engines are the whole difference between the two failure
+    paths, so a suite that wants one of them without the other builds
+    the store through its own constructor rather than reaching into an
+    opened one. Reads take no advisory lock, so a held lock could never
+    make one fail; this is the genuine failure that can.
+    """
+    return MemoryStore(
+        write_engine(DatabaseConfig(), MEMORY_CHAIN), read_engine(nowhere())
+    )
+
+
+def memory_that_cannot_write() -> MemoryStore:
+    """The mirror: writes fail on a backend that is not there, reads
+    answer from the lane's own database."""
+    return MemoryStore(
+        write_engine(nowhere(), MEMORY_CHAIN), read_engine(DatabaseConfig())
+    )
+
+
+@contextlib.contextmanager
+def a_planted_credential(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Every door onto the database pointed at nothing, with a
+    credential-shaped value in the password and in the URL.
+
+    Both variables, because they are the two places a connection's
+    secret lives and `VINGA_DB_URL` overrides the other four at once. A
+    store opened inside this fails at every call, which is what a
+    no-leak sentinel wants: the failure is the thing that would carry
+    the value out.
+    """
+    monkeypatch.setenv(db_module.PASSWORD_ENV, STORED)
+    monkeypatch.setenv(
+        db_module.URL_ENV,
+        f"postgresql+psycopg://vinga:{STORED}@127.0.0.1:{NO_BACKEND_PORT}/vinga",
+    )
+    yield

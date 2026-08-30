@@ -29,10 +29,10 @@ from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import RuntimeFactory
 from vinga_server.events.live import LiveEvents
 from vinga_server.generation import Generations
+from vinga_server.memory import MemoryStore
 from vinga_server.onboarding import PendingDevices
 from vinga_server.registry import SessionRegistry
 from vinga_server.tools.mcp import McpServers
-from vinga_server.tools.memory import MemoryStore
 
 
 @dataclass
@@ -53,9 +53,11 @@ class Composition:
 
     Every optional field means the same thing it meant as an attribute:
     None is a deployment that did not ask for the thing. `device_auth` is
-    None with device authentication off, `memory` without a memory
-    section, `conversations` unless recording is on, `capture` unless
-    capture is configured and enabled.
+    None with device authentication off, `conversations` unless
+    recording is on, `capture` unless capture is configured and enabled.
+    `memory` is not among them: remembered facts live in a schema this
+    server migrates at every boot (#314), so there is always a store,
+    and an agent that has been told nothing reads as empty.
 
     Two fields say where configuration comes from, and the split is the
     point (#191). `server` is the file half: the port, the limits, the
@@ -76,7 +78,7 @@ class Composition:
     bindings: DeviceBindings
     pending: PendingDevices
     mcp_servers: McpServers
-    memory: MemoryStore | None
+    memory: MemoryStore
     sessions: SessionRegistry
     conversations: ConversationStore | None
     runtime_factory: RuntimeFactory
