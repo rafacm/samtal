@@ -28,3 +28,11 @@ for remembered facts is #83's deliberate design (addressed by scope,
 over the API) and granting the raw tables early would freeze a contract
 #83 is about to reshape.
 """
+
+from vinga_server.memory.store import MEMORY_CHAIN, MemoryStore, open_memory
+
+__all__ = [
+    "MEMORY_CHAIN",
+    "MemoryStore",
+    "open_memory",
+]

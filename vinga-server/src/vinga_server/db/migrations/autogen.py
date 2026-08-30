@@ -3,6 +3,7 @@ and a database at head.
 
     uv run python -m vinga_server.db.migrations.autogen "what changed"
     uv run python -m vinga_server.db.migrations.autogen --conversations "what changed"
+    uv run python -m vinga_server.db.migrations.autogen --memory "what changed"
 
 Alembic's autogenerate needs three things this project deliberately
 does not have lying around: an `alembic.ini` naming a script location, a
@@ -15,10 +16,10 @@ here instead: a scratch database on the configured instance, brought to
 head through the packaged chain, compared against that chain's metadata,
 and dropped. Nothing an operator runs, and nothing the server imports.
 
-Both chains, because there are two and only one of them used to have an
-entry point here. Which one is an argument rather than two commands: the
-work is identical and the chain is the only thing that differs, which is
-what `StoreChain` is.
+Every chain, because there are three of them and only one used to have
+an entry point here. Which one is an argument rather than three
+commands: the work is identical and the chain is the only thing that
+differs, which is what `StoreChain` is.
 
 Creating a database needs `CREATEDB`, which the runtime connection
 contract deliberately does not ask for: this runs on a development or
@@ -146,21 +147,42 @@ def _dsn(url: URL) -> str:
     return url.set(drivername="postgresql").render_as_string(hide_password=False)
 
 
+def _conversations_chain() -> StoreChain:
+    """The conversation record's chain, imported at the moment it is
+    asked for rather than at module scope: this module lives inside the
+    domain chain's own directory, and each sibling store imports `db` to
+    declare its chain."""
+    from vinga_server.conversations.store import CONVERSATIONS_CHAIN
+
+    return CONVERSATIONS_CHAIN
+
+
+def _memory_chain() -> StoreChain:
+    """Agent memory's chain, imported for the reason above."""
+    from vinga_server.memory.store import MEMORY_CHAIN
+
+    return MEMORY_CHAIN
+
+
+# The flag each of the other two chains is named by. The domain chain
+# has none because it is what the command does with no flag at all,
+# which is the shape it had when it was the only chain there was.
+SELECTORS = {
+    "--conversations": _conversations_chain,
+    "--memory": _memory_chain,
+}
+
+
 def main(argv: list[str]) -> int:
     chain = DOMAIN_CHAIN
     arguments = list(argv)
-    if arguments and arguments[0] == "--conversations":
-        # Imported here rather than at module scope: this module lives
-        # inside the domain chain's own directory, and the conversations
-        # store imports `db` to declare its chain.
-        from vinga_server.conversations.store import CONVERSATIONS_CHAIN
-
-        chain = CONVERSATIONS_CHAIN
+    if arguments and arguments[0] in SELECTORS:
+        chain = SELECTORS[arguments[0]]()
         arguments = arguments[1:]
     if len(arguments) != 1 or not arguments[0].strip():
         print(
             "usage: python -m vinga_server.db.migrations.autogen "
-            '[--conversations] "what changed"',
+            '[--conversations|--memory] "what changed"',
             file=sys.stderr,
         )
         return 2
