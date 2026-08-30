@@ -7,6 +7,30 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-30
 
+### Added
+
+- **A schema for what an agent was asked to remember** (#314). The
+  database gains a third schema, `memory`, with one table, `facts`, and
+  a migration chain of its own whose baseline is `2001_agent_memory`.
+  The server migrates it at every boot the way it migrates the
+  conversation record, and nothing reads or writes a row yet: remembered
+  facts still live in the files under `memory.dir`, and the store that
+  moves them into the database arrives in the next change. What lands
+  here is the storage the move needs, empty and current, so that this
+  release is one an existing deployment can take on its own.
+  **Rerun [`deploy/postgres-init.sql`](deploy/postgres-init.sql)
+  administratively before deploying this version.** The file now
+  creates three schemas rather than two, and on the least-privilege
+  contract the deployment documentation states, the server role
+  deliberately may not create a schema for itself; a server started
+  before the rerun refuses with a fixed sentence naming the rerun and
+  repeating no part of the connection. Nothing already stored is
+  touched: the two existing schemas keep every row and the new one
+  starts empty. The read-only `vinga_ro` role is granted nothing on it,
+  with the same explicit revoke the `domain` schema carries, because the
+  operator read surface for remembered facts is being designed as an
+  addressed API rather than as raw tables.
+
 ### Fixed
 
 - **The simulator's peer-close unit test no longer races the client's

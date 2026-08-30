@@ -93,8 +93,8 @@ creates or touches is upgradeable by every later image: a migration
 that cannot upgrade in place is a bug, not a decision. Until a beta
 is declared, upgrades are best-effort forward-only, which the CI
 wheel-migration step exercises whenever the server workflow runs, by
-taking a fresh database from the shipped artifact to the head of both
-chains, and migration history is never rewritten as a cleanup: a
+taking a fresh database from the shipped artifact to the head of every
+chain, and migration history is never rewritten as a cleanup: a
 squash or a prune is a compatibility decision requiring a record that
 supersedes the standing one, a statement of which databases become
 unsupported, and a tested reset path.
@@ -102,9 +102,14 @@ unsupported, and a tested reset path.
 Where "forward" starts is a fact an operator needs, so the promise
 states it rather than leaving it to be inferred:
 
-- **In-place upgrades begin at the two current baselines**,
-  `3001_postgres_domain` for the domain configuration and
-  `1002_conversation_threads` for the conversation record. That is
+- **In-place upgrades begin at the three current baselines**,
+  `3001_postgres_domain` for the domain configuration,
+  `1002_conversation_threads` for the conversation record, and
+  `2001_agent_memory` for what an agent was asked to remember, added
+  by [the 2026-08-30 storage move](../plans/2026-08-30-memory-postgres.md)
+  and a forward extension rather than a priced exit: nothing existing
+  is re-cut, and a deployment that has never had the schema meets it
+  as an empty one. That is
   where "forward" starts today: a database stamped at or after them
   is what a later image is built to upgrade, best-effort, through the
   reviewed migration every schema change arrives as. Before a beta

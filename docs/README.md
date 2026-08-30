@@ -117,10 +117,11 @@ records link it.
   under [Device guides](#device-guides) below.
 - [**deploy/postgres-init.sql**](../deploy/postgres-init.sql): the one
   thing a deployment runs against its own Postgres before the server
-  does. It creates the two schemas the server owns, `domain` and
-  `record`, and the read-only role the conversation record is
-  read through, and its header says what the executor needs and why
-  the file is safe to run again after a reset. The `docker-compose.yml`
+  does. It creates the three schemas the server owns, `domain`,
+  `record` and `memory`, and the read-only role the conversation record
+  is read through, and its header says what the executor needs and why
+  the file is safe to run again after a reset or after a release that
+  adds a schema. The `docker-compose.yml`
   at the repository root runs the same file against the database it
   starts, whether that is the development one alone or the pair a trial
   runs.
