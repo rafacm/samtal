@@ -282,3 +282,207 @@ the sentence begins "the vinga database". A substring hunt for a
 credential is only as good as the credential, which is why every
 refusal in this project is compared for equality against the constant
 that declares it, and why the chain is asserted empty beside it.
+
+## M2: the store cutover
+
+PR TBD.
+
+### What landed
+
+Four commits: the cutover, the configuration retirement, the
+regenerated event reference, the documents.
+
+- **The cutover, in one commit, because the pieces interlock.** An
+  emitter's channel is checked against its variant's declaration at
+  emit time (`events._construct`), so `MEMORY_CHANNEL` becoming
+  `vinga_server.memory.store` and the module that emits on it cannot
+  land in separate commits without a red lane in between. That commit
+  therefore carries `read` and `remember`, the catalog change, the
+  caller rewiring, the deletion of `tools/memory.py` and the suites
+  that moved with them.
+- **`memory/store.py` deepened in place.** `read(agent)` is
+  synchronous, renders `"- {fact}"` lines joined by newline with no
+  trailing newline, orders by id, and answers `""` for an agent with
+  nothing stored or for a database it could not reach. `remember`
+  normalizes to one line, refuses an empty fact with the sentence it
+  has always had, and hands one transaction to a worker thread: the
+  insert, then the read of the agent's rows, then the delete of
+  whatever `_over_the_cap` says no longer fits. `MAX_LINES` and
+  `MAX_BYTES` stayed module-level and are read at call time, which is
+  what lets the two cap suites keep their monkeypatch shape against
+  the same names.
+- **Containment, split by path.** `read` emits `memory_unreadable` with
+  the class name and returns `""`; `remember` emits the new
+  `memory_unwritable`, builds `DatabaseBusyError(BUSY)` or
+  `StorageError(UNWRITABLE)` inside the `except` arm by asking
+  `db.is_busy` and nothing else, and raises it after the arm so no
+  chain carries the failure that quoted the DSN. The split matters
+  because the two are read by different readers: a failed read is
+  contained and the reply happens, while a failed write becomes the
+  tool result the model reads out loud.
+- **Four surfaces shed the Optional.** `Composition.memory`,
+  `bespoke_runtime_factory`, `PipelineRuntime._system_prompt` and
+  `_prompt_preview` all take a `MemoryStore`; `BuiltinTools` stops
+  deciding whether to offer `remember`. `app.py` hands the store
+  `open_memory` already returned to the composition instead of only
+  disposing it, and the file-store construction goes.
+- **The configuration retirement.** `MemoryConfig`, the `memory` field
+  on `FileConfig` and `Config`, the package export and every
+  recombination site (`loader.compose_config`, `boot`, the integration
+  conftest, `tests/support/configs.py`). A file that still carries
+  `memory:` refuses through `_check_retired_keys`, and
+  `_check_moved_environment` gained `_check_retired_environment` for
+  `VINGA_MEMORY` and every case-insensitive `VINGA_MEMORY__...`
+  spelling. Both name the section or the variable and never the value,
+  and both say the same thing: it is retired, the facts are in the
+  database, and the old files are the operator's own.
+- **The generated pages, through their generators.**
+  `docs/reference/domain-config.md` from `docgen.py`'s file-half prose
+  and the agent entity note in `entities.py` (rows under the old name,
+  not a file on disk) plus the `mcp` field description, which had
+  called `remember` conditional; `docs/reference/events.md` from the
+  catalog; `docs/reference/api-openapi.json`, which moved only because
+  it embeds the same field description.
+- **The documents.** The server README's builtins row and memory
+  paragraph, the inverted backup sentence, the capture-budget sentence,
+  the three rename-orphan sentences, and the cutover paragraph in the
+  upgrade section; `docs/concepts.md`'s Memory section whole;
+  `config.example.yaml` and `config.deploy.example.yaml`;
+  `architecture-overview.puml` and its two renders; `CHANGELOG.md`
+  under Changed and Removed.
+
+### The retired pins, one by one
+
+Named here because each was a promise this project made and is no
+longer making, and a reader who goes looking for one deserves to find
+out where it went rather than that it vanished.
+
+- **`test_an_agent_name_that_is_not_a_filename_still_gets_a_file`.**
+  Filename sanitization retired with filenames: an agent name is a
+  column value now. Replaced by
+  `test_an_agent_name_that_is_not_a_filename_is_just_a_name`, which
+  asserts the store keeps the name as the configuration spelled it and
+  that the sanitized spelling addresses nothing.
+- **The lazy directory** (the second half of
+  `test_a_remembered_fact_lands_in_the_agents_own_file`, which asserted
+  the directory was created on first write). There is no directory. The
+  first half survives as
+  `test_a_remembered_fact_is_read_back_for_that_agent`.
+- **The tmp-file rename.** Nothing asserted it directly; what it bought,
+  a reader never seeing half a write, is now the write transaction, and
+  `test_a_prune_that_fails_takes_the_insert_with_it` is the stronger
+  claim in its place.
+- **`test_a_file_that_will_not_decode_reads_as_no_memory`,
+  `test_nothing_of_an_unreadable_file_reaches_any_log_record` and
+  `test_remembering_over_an_unreadable_file_leaves_a_readable_one`,**
+  with the `CORRUPT` byte fixture and the `corrupt()` helper behind
+  them. Undecodable bytes are not a failure mode a table has. The first
+  two translated onto a database that is not there and kept every
+  assertion; the third has no counterpart, because there is no
+  half-readable state to write over.
+- **`test_a_session_without_memory_reads_nothing_at_all`** and
+  **`test_remembering_is_offered_and_executed_when_memory_is_configured`'s
+  negative half** (the `memory=None` no-tool case in
+  `test_session_tools.py`, and the `DUE_BUILTINS` set in
+  `tests/integration/test_tools.py` that excluded `remember` for want
+  of a section). No such configuration exists. The first became
+  `test_an_agent_that_remembers_nothing_gets_no_memory_block`, which
+  pins the same absence of a block from the other side; the second
+  became `remember` being in `DUE_BUILTINS` unconditionally.
+- **`test_memory_is_optional_and_takes_a_directory` and
+  `test_a_memory_section_without_a_directory_is_an_error`.** The model
+  they pinned is gone. What replaces them is the other direction: four
+  new cases in `test_config.py` proving the section and every spelling
+  of its environment override are refused, that the refusal says
+  retired rather than moved, that it carries the not-read,
+  not-imported, not-deleted sentence, and that the value reaches no
+  surface or exception chain.
+- **The example-file `memory:` mentions**, and the
+  `test_the_example_configuration_mentions_every_server_field`
+  docstring's aside that the file holds `memory:` beside `server:`.
+
+### Deviations from the plan
+
+Four, one of them a design addition the lane forced.
+
+- **`close()` waits for the calls already inside a connection.** The
+  plan has `close` dispose both engines, which is what M1 shipped. With
+  a reply path that reads memory from a worker thread, that is a race
+  the unit lane found within an hour: disposing an engine closes the
+  connections in its pool and replaces the pool, and a connection
+  checked out at that moment is returned to the pool that was replaced,
+  which owns nothing and closes nothing when it is collected. pytest
+  turns the resulting `ResourceWarning` into a failure, in whichever
+  test happened to trigger the collection. So `MemoryStore` counts the
+  calls that hold a connection and `close` waits for the count to reach
+  zero, bounded by `QUIET_TIMEOUT_S = 5.0` because a store that will
+  not go quiet must not hold a shutdown open. The shutdown drain is
+  bounded too, which is exactly why a reply can still be reading when
+  the store is closed.
+- **The event baseline had nothing to regenerate.** The plan asks for
+  the baseline to regenerate as its own commit with the regeneration
+  command in the message. The committed capture retired with #241:
+  what is left is a driver inventory and a live pin table, both hand
+  written. So the drivers and the pins moved in the cutover commit
+  (`drive_memory_unreadable` now drives a store whose reader points at
+  nothing, `drive_memory_unwritable` is new, and the count went from
+  eighty-three to eighty-four), and the separate regeneration commit is
+  the one the events reference really does have:
+  `uv run vinga-server events reference`.
+- **The README's event index needed a row by hand.** No generator
+  writes it, and `test_event_docs.py` holds every declared event to
+  having one, so `memory_unwritable` was added there in the
+  regeneration commit beside the generated page.
+- **The architecture diagram gained a database rather than moving a
+  box.** The plan says the memory side-store moves into the database.
+  The overview had no database in it at all, the conversation record
+  and the domain configuration included, so "into the database" meant
+  drawing one: a Postgres node with the three schemas and the arrows
+  that reach each, with the capture left in the server box as the one
+  side-store that really is files. Larger than the plan's sentence, and
+  the only honest reading of it.
+
+### Discoveries
+
+- **The channel check is what makes this milestone atomic.** A variant
+  declares its channel and `events._construct` refuses an emission
+  whose emitter is on another one, which is a good rule that also means
+  a module move and its catalog entry are one commit or a red lane. The
+  plan's "atomic cutover" turned out to be enforced rather than
+  stylistic.
+- **A lane store opened once per process is worth the cache.**
+  `open_memory` is an Alembic round trip, and every session the unit
+  lane builds now wants a store. `tests/support/stores.memory()` opens
+  one per worker process and hands it out; the per-test truncation
+  empties the table underneath it, which a store holding two pools does
+  not notice.
+- **The two failure paths needed two fixtures, not one.** Review
+  finding 2 says a held lock cannot make a read fail, which is right,
+  and the mirror is also true: a genuinely failing backend cannot make
+  a *write* fail in a way that proves the lock. So
+  `memory_that_cannot_read` and `memory_that_cannot_write` build a
+  store through `MemoryStore`'s own constructor with one engine pointed
+  at a port nothing listens on, and the held lock is reserved for the
+  busy case. The public constructor is what makes that a caller's
+  arrangement rather than a reach-in.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean (it checks `src/vinga_server/events`, which the
+  catalog change touches).
+- `uv run pytest tests/unit -q`: green.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: green, which is
+  the shape CI runs.
+- `uv run pytest tests/integration -q`: green, against the compose
+  Postgres already listening on 127.0.0.1:5432.
+- The generated-document drift checks, each through its own generator:
+  the domain reference, the event reference and the OpenAPI document
+  regenerate to the committed bytes, and the command-spellings census
+  was regenerated in every commit whose line numbers moved.
+- Not verified here, and stated rather than claimed: the `image` job and
+  the CI service containers, which this branch cannot run.
+- No device checkpoint: what a board sends and is sent is unchanged.
+  The one user-visible difference is that `remember` is now offered in
+  deployments that had no `memory:` section, which is the behavior
+  change the changelog announces.
