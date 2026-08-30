@@ -255,6 +255,12 @@ NOT_A_FACT_SCOPE = (
     "different thing to write and a different thing to read back. Nothing was changed"
 )
 
+NOT_STORABLE = (
+    "this cannot be kept as it is written: what is stored here is text, and text here "
+    "may hold no NUL character and has to be Unicode a database can encode. Nothing "
+    "was changed, and nothing of what was sent is repeated back; say it in other words"
+)
+
 NOTHING_TO_LOOK_FOR = "there is nothing to look for"
 
 # What a write addressed to a thread that has been deleted answers with.
@@ -708,6 +714,8 @@ class MemoryStore:
         text = _one_line(fact)
         if not text:
             raise ValueError(NOTHING_TO_REMEMBER)
+        if not storable(text):
+            raise ValueError(NOT_STORABLE)
         if _oversized(text, scope):
             raise ValueError(TOO_LONG)
         return await asyncio.to_thread(self._add, agent, scope, owner, text)
@@ -879,6 +887,8 @@ class MemoryStore:
         wanted = _one_line(query)
         if not wanted:
             raise ValueError(NOTHING_TO_LOOK_FOR)
+        if not storable(wanted):
+            raise ValueError(NOT_STORABLE)
         return self._read(
             agent,
             (MemoryScope.AGENT, MemoryScope.DEVICE),
@@ -906,6 +916,8 @@ class MemoryStore:
         corrected = _one_line(text)
         if not corrected:
             raise ValueError(NOTHING_TO_REMEMBER)
+        if not storable(corrected):
+            raise ValueError(NOT_STORABLE)
         if _oversized(corrected, scope):
             raise ValueError(TOO_LONG)
         await asyncio.to_thread(self._update, agent, scope, owner, fact_id, corrected)
@@ -1027,6 +1039,8 @@ class MemoryStore:
         said = _one_line(value)
         if not named or not said:
             raise ValueError(NOTHING_TO_SET)
+        if not storable(named) or not storable(said):
+            raise ValueError(NOT_STORABLE)
         if len(_entry(named, said).encode("utf-8")) > STATE_BYTES:
             raise ValueError(STATE_ENTRY_TOO_LONG)
         await asyncio.to_thread(self._set_state, agent, conversation, named, said)
@@ -1081,6 +1095,8 @@ class MemoryStore:
         Clearing what is already clear is what the caller asked for, and
         the count is what says whether anything was.
         """
+        if key is not None and not storable(key):
+            raise ValueError(NOT_STORABLE)
         return await asyncio.to_thread(self._clear_state, agent, conversation, key)
 
     def _clear_state(self, agent: str, conversation: str, key: str | None) -> int:
@@ -1425,6 +1441,8 @@ def correct(
     corrected = _one_line(text)
     if not corrected:
         raise ConfigError(NOTHING_TO_REMEMBER)
+    if not storable(corrected):
+        raise ConfigError(NOT_STORABLE)
     if _oversized(corrected, scope):
         raise ConfigError(TOO_LONG)
     found = connection.execute(
@@ -1598,6 +1616,36 @@ def _one_line(text: str) -> str:
     arrived as. The rendering is per line, so a value carrying a newline
     would be two entries in every block that shows it."""
     return " ".join(text.split())
+
+
+def storable(text: str) -> bool:
+    """Whether this text is text this store's database can hold.
+
+    Two things it cannot, and both arrive as a perfectly ordinary JSON
+    string or path segment. A NUL character is not storable in a
+    Postgres `text` column at all, and a lone surrogate is not Unicode
+    that can be encoded, so neither can even be bound as a parameter.
+    Left to the driver, each is a caller's mistake answered as a
+    database that could not be written, which is the shape this module
+    already refused once for a scope no fact can carry.
+
+    Public, and a predicate rather than a refusal, for the reason
+    `_oversized` is both: the doors that ask it raise different things.
+    A model's write leaves as the `ValueError` the tool layer rephrases;
+    an operator's leaves as the refusal the API answers a 422 with; and
+    the operator surface asks it of an address as well as of a body,
+    where what is wrong is not what is stored but what was addressed.
+
+    Asked of the normalized text, which is what would be bound, and
+    before any connection, because it needs none.
+    """
+    if "\x00" in text:
+        return False
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _oversized(text: str, scope: MemoryScope) -> bool:
@@ -1973,6 +2021,7 @@ __all__ = [
     "NOTHING_REMEMBERED",
     "NOTHING_TO_REMEMBER",
     "NOT_A_FACT_SCOPE",
+    "NOT_STORABLE",
     "NOTHING_TO_SET",
     "NO_FACT_TO_FORGET",
     "NO_FACT_TO_RESTORE",
@@ -2005,4 +2054,5 @@ __all__ = [
     "open_memory",
     "owners",
     "purge",
+    "storable",
 ]

@@ -358,6 +358,91 @@ async def test_a_device_fact_is_not_an_agent_fact() -> None:
     assert injected(store) == "- the user is vegetarian"
 
 
+# The two things a JSON string may be and a database cannot hold, both
+# written rather than pasted: a source file carrying either is one
+# editors and terminals disagree about.
+NUL = "a" + chr(0) + "b"
+
+SURROGATE = "a" + chr(0xD800) + "b"
+
+
+async def test_text_a_database_cannot_hold_is_refused_before_a_connection(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A NUL character cannot live in a `text` column and a lone
+    surrogate is not Unicode a driver can encode, so neither can even be
+    bound as a parameter.
+
+    Refused before a connection for the reason a conversation scope is:
+    reaching the driver would arrive here as a database failure, and a
+    caller's mistake would be reported to an operator as a healthy
+    database refusing a write. Every door that takes text asks, which is
+    what makes this a rule of the store rather than of one sentence.
+    """
+    store = memory()
+    kept = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.set_state(THREAD, "scene", "a forest", agent="poet")
+
+    with caplog.at_level("WARNING"):
+        for unstorable in (NUL, SURROGATE):
+            for call in (
+                lambda text=unstorable: store.add(
+                    MemoryScope.AGENT, "poet", text, agent="poet"
+                ),
+                lambda text=unstorable: store.update(
+                    MemoryScope.AGENT, "poet", kept, text, agent="poet"
+                ),
+                lambda text=unstorable: store.set_state(
+                    THREAD, text, "a forest", agent="poet"
+                ),
+                lambda text=unstorable: store.set_state(
+                    THREAD, "scene", text, agent="poet"
+                ),
+                lambda text=unstorable: store.clear_state(
+                    THREAD, text, agent="poet"
+                ),
+                lambda text=unstorable: store.recall("poet", "aa:bb", text),
+            ):
+                with pytest.raises(ValueError) as refusal:
+                    await call()
+                assert str(refusal.value) == store_module.NOT_STORABLE
+
+    # Nothing moved, and nobody was told the database refused anything.
+    assert _rows("poet") == ["the user is vegetarian"]
+    assert _state(THREAD) == [("scene", "a forest")]
+    assert events(caplog, "memory_unwritable") == []
+    assert events(caplog, "memory_unreadable") == []
+    # And nothing of what was refused reached a log, in either format.
+    assert NUL not in both_formats(caplog)
+    assert SURROGATE not in both_formats(caplog)
+
+
+async def test_the_operators_correction_refuses_it_at_its_own_door() -> None:
+    """The rule is the store's rather than one door's.
+
+    The API asks it of a body before it opens a transaction, so this
+    would never be reached through that door; it is here because
+    `correct` is a sentence of this module and every caller of it is
+    entitled to the same refusal, and because a rule only one caller
+    enforces is a rule the next caller will not.
+    """
+    from vinga_server.db import write_engine
+
+    store = memory()
+    kept = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            with pytest.raises(ConfigError) as refusal:
+                store_module.correct(connection, MemoryScope.AGENT, "poet", kept, NUL)
+    finally:
+        engine.dispose()
+
+    assert str(refusal.value) == store_module.NOT_STORABLE
+    assert _rows("poet") == ["the user is vegetarian"]
+
+
 async def test_a_fact_cannot_belong_to_a_conversation(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

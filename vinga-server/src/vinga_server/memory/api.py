@@ -97,7 +97,7 @@ from vinga_server.conversations.store import erasure_order
 from vinga_server.db import is_busy, read_engine, write_engine
 from vinga_server.memory import store
 from vinga_server.memory.scopes import MemoryScope
-from vinga_server.memory.store import MEMORY_CHAIN
+from vinga_server.memory.store import MEMORY_CHAIN, NOT_STORABLE, storable
 
 if TYPE_CHECKING:
     # The name only, for the annotations below: the configuration API
@@ -137,6 +137,21 @@ _OWNER_CURSOR_REFUSED = (
 _NOT_A_FACT_NUMBER = (
     "a fact is addressed by the number the facts listing answers with, as a whole "
     "number. What was sent is not quoted back"
+)
+
+# What an address this database cannot even be asked about is told.
+#
+# A name, a thread id or a cursor is a path segment or a query argument,
+# and both can carry a NUL character or a lone surrogate in a perfectly
+# ordinary request. Neither can be bound as a parameter at all, so left
+# alone each is a caller's mistake answered as a server that could not
+# read its own database. What is wrong here is what was addressed rather
+# than what would be stored, which is why this is its own sentence and
+# not the store's.
+_NOT_ADDRESSABLE = (
+    "the name in this request is not one anything here can be stored under: a name may "
+    "hold no NUL character and has to be Unicode a database can encode. What was sent "
+    "is not quoted back"
 )
 
 _NOT_A_MAC = (
@@ -511,7 +526,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         refusal, which is also the answer for a name nothing is
         configured under.
         """
-        return _facts(reader, MemoryScope.AGENT, name, limit, cursor)
+        return _facts(reader, MemoryScope.AGENT, _addressable(name), limit, cursor)
 
     @api.get(
         "/memory/devices/{mac}/facts",
@@ -562,7 +577,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         would make that undo answer with something nobody said; erasing
         it below is the door that reaches it.
         """
-        return _corrected(writer, MemoryScope.AGENT, name, id, body)
+        return _corrected(writer, MemoryScope.AGENT, _addressable(name), id, body)
 
     @api.put(
         "/memory/devices/{mac}/facts/{id}",
@@ -591,7 +606,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         audit rather than that flow. What is removed is gone at the next
         reply's prompt.
         """
-        return _erased(writer, MemoryScope.AGENT, name, id)
+        return _erased(writer, MemoryScope.AGENT, _addressable(name), id)
 
     @api.delete(
         "/memory/devices/{mac}/facts/{id}",
@@ -615,7 +630,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         is the verb for an orphan the listings turned up: a renamed
         agent's rows have no other way out.
         """
-        return _cleared(writer, MemoryScope.AGENT, name)
+        return _cleared(writer, MemoryScope.AGENT, _addressable(name))
 
     @api.delete(
         "/memory/devices/{mac}/facts",
@@ -643,7 +658,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         A thread that is keeping nothing answers an empty list, which is
         also the answer for a thread that never existed.
         """
-        return {"items": store.ledger_of(reader, conversation)}
+        return {"items": store.ledger_of(reader, _addressable(conversation))}
 
     @api.delete(
         "/memory/conversations/{conversation}/state",
@@ -674,9 +689,10 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         rows this request took.
         """
         key = _key(body)
+        named = _addressable(conversation)
         with erasure_order():
             taken = _written(
-                writer, lambda connection: _cleared_state(connection, conversation, key)
+                writer, lambda connection: _cleared_state(connection, named, key)
             )
         return {"state": taken}
 
@@ -826,7 +842,7 @@ def _owner_cursor(value: str | None) -> str | None:
         return None
     if not value or len(value) > _OWNER_LENGTH:
         raise ConfigError(_OWNER_CURSOR_REFUSED)
-    return value
+    return _addressable(value)
 
 
 def _mac(value: str) -> str:
@@ -881,6 +897,29 @@ def _sole(body: object, key: str, expectation: str) -> str:
     value = body[key]
     if not isinstance(value, str) or not value:
         raise ConfigError(expectation)
+    # And what is stored here is text a database can hold, which a
+    # perfectly ordinary JSON string is not obliged to be. Asked before
+    # a transaction is opened, because it needs no connection; the store
+    # asks it again of its own doors, which is the rule having one home
+    # and two doors reaching it rather than two rules.
+    if not storable(value):
+        raise ConfigError(NOT_STORABLE)
+    return value
+
+
+def _addressable(value: str) -> str:
+    """One name out of a path or a query, or the refusal saying what a
+    name has to be.
+
+    The same rule as the bodies', asked of the other half of a request.
+    An owner, a thread id and a cursor are all bound into statements,
+    and one that cannot be bound would leave as a database failure.
+    """
+    problem: ConfigError | None = None
+    if not storable(value):
+        problem = ConfigError(_NOT_ADDRESSABLE)
+    if problem is not None:
+        raise problem
     return value
 
 
