@@ -1751,8 +1751,8 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     ),
     Driver((RELOAD, "_refused", 1), drive_mcp_reload_refused, "mcp_reload"),
     Driver((RELOAD, "_apply", 1), drive_mcp_reload_applied, "mcp_reload"),
-    Driver((MEMORY, "MemoryStore.read", 1), drive_memory_unreadable, "memory_unreadable"),
-    Driver((MEMORY, "MemoryStore._store", 1), drive_memory_unwritable, "memory_unwritable"),
+    Driver((MEMORY, "MemoryStore._read", 1), drive_memory_unreadable, "memory_unreadable"),
+    Driver((MEMORY, "MemoryStore._written", 1), drive_memory_unwritable, "memory_unwritable"),
     Driver((WS, "conversation", 1), drive_auth_rejected, "auth_rejected"),
     Driver((WS, "conversation", 2), drive_session_rejected_at_capacity, "session_rejected"),
 )

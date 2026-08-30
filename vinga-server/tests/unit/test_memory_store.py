@@ -40,7 +40,12 @@ from vinga_server.config.loader import ConfigError, DatabaseBusyError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import advisory_key, connection_url
 from vinga_server.memory import store as store_module
-from vinga_server.memory.store import MEMORY_CHAIN, MemoryStore, open_memory
+from vinga_server.memory.store import (
+    MEMORY_CHAIN,
+    MemoryScope,
+    MemoryStore,
+    open_memory,
+)
 from vinga_server.runtime import prompt
 from vinga_server.tools.builtin import remember, remember_tool
 
@@ -56,15 +61,16 @@ def _connection() -> psycopg.Connection:
     return psycopg.connect(url.render_as_string(hide_password=False))
 
 
-def _rows(agent: str) -> list[str]:
+def _rows(owner: str, scope: str = "agent") -> list[str]:
+    """One owner's active facts within one scope, oldest first."""
     holder = _connection()
     try:
         return [
             row[0]
             for row in holder.execute(
-                "select fact from memory.facts where scope = 'agent' and owner = %s "
+                "select fact from memory.facts where scope = %s and owner = %s "
                 "and forgotten_at is null order by id",
-                (agent,),
+                (scope, owner),
             )
         ]
     finally:
@@ -238,6 +244,87 @@ async def test_the_byte_cap_drops_the_oldest_facts(monkeypatch: pytest.MonkeyPat
     lines = store.read("poet").splitlines()
     assert lines[-1] == "- a fact numbered 5"
     assert len(store.read("poet").encode("utf-8")) <= 60
+
+
+# Scopes, and the caps each of them is held to
+#
+# One store, two kinds of owner: an agent, which is what memory has
+# always been keyed by, and a device, whose notes every agent bound to it
+# shares. The pair is addressed as `(scope, owner)` everywhere, and what
+# the suite below pins is that the two are separate in every direction
+# that matters: what one holds, what the other reads, and what a prune in
+# one does to the other.
+
+
+async def test_an_added_fact_answers_the_id_it_is_addressed_by() -> None:
+    """The id is what update, forget and restore name a fact by, so it
+    is what `add` has to answer with."""
+    store = memory()
+    first = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    second = await store.add(MemoryScope.AGENT, "poet", "the dog is Bosse", agent="poet")
+
+    assert isinstance(first, int)
+    assert second > first
+    assert store.read("poet").splitlines() == ["- the user is vegetarian", "- the dog is Bosse"]
+
+
+async def test_a_device_fact_is_not_an_agent_fact() -> None:
+    """The scope separation, in both directions: what the device knows
+    is not in the agent's block, and what the agent knows is not in the
+    device's rows, even where the two names are the same string."""
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.add(MemoryScope.DEVICE, "poet", "the kettle is loud", agent="poet")
+
+    assert _rows("poet") == ["the user is vegetarian"]
+    assert _rows("poet", scope="device") == ["the kettle is loud"]
+    assert store.read("poet") == "- the user is vegetarian"
+
+
+async def test_an_add_too_long_for_its_scope_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pruning cannot answer this one: dropping every other fact would
+    still leave it over the cap. The refusal is the module's own fixed
+    sentence, compared by equality, and nothing is stored."""
+    monkeypatch.setattr(store_module, "MAX_BYTES", 40)
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "a short fact", agent="poet")
+
+    with pytest.raises(ValueError) as refusal:
+        await store.add(MemoryScope.AGENT, "poet", "x" * 41, agent="poet")
+
+    assert str(refusal.value) == store_module.TOO_LONG
+    assert _rows("poet") == ["a short fact"]
+
+
+async def test_each_scope_is_pruned_against_its_own_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exact survivor sets on both sides. An agent at its cap drops
+    agent facts and touches no device row, and a device at its own,
+    smaller cap does the mirror: one pair of numbers over both would
+    either starve the first or let the second grow into the prompt."""
+    monkeypatch.setattr(store_module, "MAX_LINES", 4)
+    monkeypatch.setattr(store_module, "DEVICE_LINES", 2)
+    store = memory()
+    for index in range(5):
+        await store.add(
+            MemoryScope.AGENT, "poet", f"agent fact {index}", agent="poet"
+        )
+    for index in range(3):
+        await store.add(
+            MemoryScope.DEVICE, "aa:bb", f"device fact {index}", agent="poet"
+        )
+
+    assert _rows("poet") == [f"agent fact {index}" for index in range(1, 5)]
+    assert _rows("aa:bb", scope="device") == ["device fact 1", "device fact 2"]
+
+    # And a device write past the device cap leaves the agent's rows
+    # exactly where they were.
+    await store.add(MemoryScope.DEVICE, "aa:bb", "device fact 3", agent="poet")
+    assert _rows("poet") == [f"agent fact {index}" for index in range(1, 5)]
+    assert _rows("aa:bb", scope="device") == ["device fact 2", "device fact 3"]
 
 
 async def test_concurrent_appends_keep_every_fact() -> None:
