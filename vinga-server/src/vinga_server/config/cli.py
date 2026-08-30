@@ -468,10 +468,14 @@ CELL_LENGTH = 64
 # contract is a line added here rather than a line that quietly appears.
 #
 # One order for both erasures rather than a second tuple beside it.
-# Erasing a thread answers four of these and not the two about sessions,
+# Erasing a thread answers six of these and not the two about sessions,
 # because it touches neither the sessions its turns were spoken in nor
 # their telemetry, so the block prints the counts its answer carries in
 # this order and says nothing about the ones it does not.
+#
+# The last two are the memory the deleted threads took with them, which
+# goes in the same transaction as their turns: what each conversation
+# was keeping, and the facts it had forgotten.
 ERASED_COUNTS = (
     "sessions",
     "turns",
@@ -479,6 +483,8 @@ ERASED_COUNTS = (
     "events",
     "conversations",
     "milestones",
+    "state",
+    "held_facts",
 )
 
 # What to do with the URL `ota-url` prints, said beside it on stderr so

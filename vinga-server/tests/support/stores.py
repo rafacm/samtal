@@ -148,6 +148,25 @@ def rows(table: str, **where: Any) -> list[dict[str, Any]]:
         engine.dispose()
 
 
+def memory_rows(table: str, **where: Any) -> list[dict[str, Any]]:
+    """The same, for the schema beside it: what one agent, one device or
+    one conversation has in memory, read through an engine of this
+    reader's own.
+
+    Beside `rows` rather than in the one suite that started with it,
+    because what a thread's deletion takes now spans both schemas and a
+    suite about the coupling has to be able to look at both.
+    """
+    engine = read_engine(DatabaseConfig())
+    try:
+        clause = " and ".join(f"{name} = :{name}" for name in where)
+        query = f"select * from memory.{table}" + (f" where {clause}" if where else "")
+        with engine.connect() as connection:
+            return [dict(row) for row in connection.execute(text(query), where).mappings()]
+    finally:
+        engine.dispose()
+
+
 # --- the threads a session can find and resume ------------------------
 
 

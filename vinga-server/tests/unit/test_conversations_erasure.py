@@ -289,6 +289,10 @@ def test_a_deleted_session_takes_its_rows_and_its_thread_with_it(client) -> None
         "events": 1,
         "conversations": 1,
         "milestones": 0,
+        # The thread went whole, so its memory went with it in the same
+        # transaction. It was keeping none, which is what these say.
+        "state": 0,
+        "held_facts": 0,
     }
     for table in TABLES:
         assert stored(table) == [], table

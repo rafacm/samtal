@@ -1423,11 +1423,12 @@ class Erasure(BaseModel):
 
     Counts rather than an acknowledgement sentence, because the caller
     of a purge asked about a set it named by selector and cannot know
-    what was in it. Six numbers rather than one, because the tables go
+    what was in it. Eight numbers rather than one, because the tables go
     for different reasons: a session's own row, the turns that named it
     wherever their thread is, the invocations under those turns, the
     session's telemetry, the recap checkpoints whose coverage held an
-    erased turn, and the threads left with nothing.
+    erased turn, the threads left with nothing, and the two halves of
+    the memory those threads took with them.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1463,6 +1464,20 @@ class Erasure(BaseModel):
             "How many recap checkpoints were deleted: those whose recorded coverage "
             "held an erased turn, every checkpoint descended from one along the "
             "`parent` lineage, and those belonging to a thread that went whole."
+        )
+    )
+    state: int = Field(
+        description=(
+            "How many notes the deleted threads were keeping went with them. A "
+            "conversation's state shares its thread's lifecycle, so it is deleted in "
+            "the same transaction and this count is as true as the others."
+        )
+    )
+    held_facts: int = Field(
+        description=(
+            "How many facts those threads had forgotten and could still have brought "
+            "back went with them. What an agent remembers about the user or the "
+            "device is not a thread's and is not counted here."
         )
     )
 
@@ -1930,11 +1945,15 @@ class ConversationTurns(BaseModel):
 class ThreadErasure(BaseModel):
     """What erasing a thread took, per table.
 
-    Four counts and deliberately not the six a session erasure answers:
+    Six counts and deliberately not the eight a session erasure answers:
     erasing a thread takes its turns out of whatever sessions they were
     spoken in and touches neither those sessions nor their telemetry. A
     session is a connection episode and it still happened, with a gap in
     it now.
+
+    The two about memory are here because a conversation's own memory is
+    the thread's rather than the session's: it goes when the thread does,
+    in the same transaction, whichever door the deletion came through.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1955,5 +1974,19 @@ class ThreadErasure(BaseModel):
         description=(
             "How many recap checkpoints went: the thread's own, and everything "
             "descended from one along the `parent` lineage."
+        )
+    )
+    state: int = Field(
+        description=(
+            "How many notes this conversation was keeping went with it. Its state "
+            "shares its lifecycle, so it is deleted in the same transaction and this "
+            "count is as true as the others."
+        )
+    )
+    held_facts: int = Field(
+        description=(
+            "How many facts this conversation had forgotten and could still have "
+            "brought back went with it. What the agent remembers about the user or "
+            "the device is not this thread's and is not counted here."
         )
     )

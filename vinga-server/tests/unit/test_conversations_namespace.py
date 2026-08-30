@@ -680,6 +680,8 @@ def test_erasing_a_thread_leaves_its_sessions_standing(client) -> None:
         "turns": 1,
         "tool_invocations": 0,
         "milestones": 0,
+        "state": 0,
+        "held_facts": 0,
     }
     assert [row["session"] for row in stored("sessions")] == ["alpha"]
     assert len(stored("events")) == 1

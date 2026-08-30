@@ -346,6 +346,8 @@ def test_delete_confirms_at_a_terminal_and_answers_the_counts(
         "events: 1",
         "conversations: 1",
         "milestones: 0",
+        "state: 0",
+        "held_facts: 0",
     ]
     assert out(run, capsys, "session", "list")[1].startswith("this server has recorded no")
 

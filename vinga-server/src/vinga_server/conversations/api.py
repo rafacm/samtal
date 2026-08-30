@@ -65,6 +65,12 @@ length of one transaction through `db.write_engine`, which takes the
 chain's advisory lock at BEGIN and migrates nothing. Neither holds an
 engine between requests, and both work with recording off, where there
 is no `ConversationStore` and no engine to borrow.
+
+That transaction reaches one row set this module does not own: a
+thread's memory, its ledger and the facts it forgot, which shares its
+thread's lifecycle. The deletes are the memory store's own SQL issued on
+this transaction, so they commit with the turns or not at all, and the
+counts this answers with are as true as the rest of them.
 """
 
 import datetime as dt
@@ -109,6 +115,7 @@ from vinga_server.conversations.schema import (
 )
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN
 from vinga_server.db import is_busy, read_engine, write_engine
+from vinga_server.memory.store import Purged, purge
 
 if TYPE_CHECKING:
     # The name only, for the annotation in `_reader`: the configuration
@@ -635,6 +642,11 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         does. A session that is still running when its row goes stops
         being recorded at the writer's next marker; what it says after
         that is not kept.
+
+        A thread this leaves with nothing is deleted whole, and its
+        memory goes with it in the same transaction: what that
+        conversation was keeping, and the facts it forgot and could have
+        brought back.
         """
         return _erased(erase, session=session, addressed=True)
 
@@ -748,18 +760,27 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         sessions they were spoken in, the calls those turns made, and
         its recap checkpoints.
 
+        Its memory goes with it in the same transaction: what that
+        conversation was keeping, and the facts it forgot and could have
+        brought back. What the agent remembers about the user and about
+        the device is not a thread's and stays.
+
         The sessions themselves are untouched, and so is their
         telemetry: a session is a connection episode and it still
         happened, with a gap in it now. A thread that is still being
         spoken to when its row goes stops being recorded at the writer's
         next marker, and the conversation in the room carries on.
         """
-        taken = _erasure(erase, lambda connection: _thread_erasure(connection, conversation))
+        taken, gone = _erasure(
+            erase, lambda connection: _thread_erasure(connection, conversation)
+        )
         return {
             "conversations": len(taken.threads),
             "turns": taken.turns,
             "tool_invocations": taken.tool_invocations,
             "milestones": taken.milestones,
+            "state": gone.state,
+            "held_facts": gone.held_facts,
         }
 
 
@@ -777,7 +798,7 @@ def _erased(
     selectors are resolved to a list of sessions and the same helper
     erases them.
     """
-    taken = _erasure(
+    taken, gone = _erasure(
         erase, lambda connection: _session_erasure(connection, session, device, before, addressed)
     )
     return {
@@ -787,13 +808,15 @@ def _erased(
         "events": taken.events,
         "conversations": len(taken.threads),
         "milestones": taken.milestones,
+        "state": gone.state,
+        "held_facts": gone.held_facts,
     }
 
 
 def _erasure(
     erase: Callable[[], AbstractContextManager[Connection]],
     deleting: Callable[[Connection], threads.Erased],
-) -> threads.Erased:
+) -> tuple[threads.Erased, Purged]:
     """One deletion's transaction, whatever it deletes.
 
     The failure arms are the whole no-leak surface of a write, and they
@@ -820,12 +843,20 @@ def _erasure(
     - and the writer keeps the other side of the same order: it reads
       what was published inside its own durable transaction, on every
       attempt (`store._discard_dead`).
+
+    The threads' memory goes inside the same transaction, before the
+    commit and after the rows that name the threads have been read, so
+    there is never an instant in which a conversation is gone while what
+    it was keeping remains, and the two counts this answers with cannot
+    be falsified by a later failure. The memory chain's lock is taken by
+    the purge itself, second, which is the ascending order `db` states.
     """
     problem: ConfigError | None = None
     try:
         with store.erasure_order():
             with erase() as connection:
                 taken = deleting(connection)
+                gone = purge(connection, taken.threads)
             store.erased(taken.threads)
     except ConfigError:
         raise
@@ -835,7 +866,7 @@ def _erasure(
         )
     if problem is not None:
         raise problem
-    return taken
+    return taken, gone
 
 
 def _session_erasure(
