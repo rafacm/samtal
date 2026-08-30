@@ -88,6 +88,7 @@ still one worker's order. The completeness test is last for that reason
 and skips rather than lies when the module was not run whole.
 """
 
+import asyncio
 import json
 import os
 import shutil
@@ -111,6 +112,8 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
+from vinga_server.memory.scopes import MemoryScope
+from vinga_server.memory.store import open_memory
 from vinga_server.ota import OTA_PATH
 from vinga_server.simulator import board, utterance
 
@@ -138,6 +141,10 @@ SESSION_MAC = "02:00:00:00:00:31"
 SESSION_OTHER_MAC = "02:00:00:00:00:32"
 
 WHEEL_CONVERSATION = "5f6a7b8c9d0e1f20314253647586a9b0"
+
+# The thread whose ledger the memory verbs read, distinct from the one
+# above because that one is erased mid-case.
+WHEEL_MEMORY_THREAD = "314253647586a9b05f6a7b8c9d0e1f20"
 
 
 def session_manifest(device: str) -> dict[str, object]:
@@ -836,6 +843,57 @@ def test_the_conversation_verbs_reach_the_record_from_the_installed_wheel(
     # And the sessions those turns were spoken in are still here, which
     # is the asymmetry between the two erasures.
     assert "thread-one" in answered(run("session", "list"), "session list")
+
+
+def test_the_memory_verbs_reach_the_third_schema_from_the_installed_wheel(
+    run, module_database: str
+) -> None:
+    """The `memory` noun from the same bare install: the owners, one
+    agent's facts, a correction piped in, and two deletions.
+
+    The correction is what makes this worth doing from a wheel rather
+    than in process: what a subprocess reads on standard input is what a
+    script pipes into one, and the whole shape of this verb is that the
+    text arrives there and never in argv.
+    """
+    seeded = open_memory(DatabaseConfig(name=module_database))
+    try:
+        numbers = [
+            asyncio.run(seeded.add(MemoryScope.AGENT, "sam", fact, agent="sam"))
+            for fact in ("the user likes rain", "the user is vegetarian")
+        ]
+        asyncio.run(
+            seeded.set_state(WHEEL_MEMORY_THREAD, "scene", "a forest", agent="sam")
+        )
+    finally:
+        seeded.close()
+
+    listed = answered(run("memory", "list", "agent"), "memory list")
+    assert listed.splitlines()[0].split() == ["OWNER", "FACTS"]
+    assert listed.splitlines()[1].split() == ["sam", "2"]
+
+    facts = answered(run("memory", "list", "agent", "sam"), "memory list")
+    assert facts.startswith(f"{numbers[0]}: the user likes rain\n")
+
+    corrected = answered(
+        run(
+            "memory", "set", "agent", "sam", str(numbers[0]),
+            stdin="the user loves rain\n",
+        ),
+        "memory set",
+    )
+    assert corrected.startswith(f"{numbers[0]}: the user loves rain\n")
+
+    # No --force anywhere, for the reason the destructive block above
+    # gives: a subprocess has no terminal, and a command that asked
+    # would hang a pipeline rather than answer one.
+    assert answered(
+        run("memory", "delete", "agent", "sam", str(numbers[1])), "memory delete"
+    ) == "facts: 1\n"
+    assert answered(
+        run("memory", "delete", "conversation", WHEEL_MEMORY_THREAD, "--all"),
+        "memory delete",
+    ) == "state: 1\n"
 
 
 # The commands that reach no server at all

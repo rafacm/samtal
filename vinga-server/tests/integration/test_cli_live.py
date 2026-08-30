@@ -49,6 +49,7 @@ worker's order. The completeness test is last for the same reason, and
 skips rather than lies when the module was not run whole.
 """
 
+import asyncio
 import contextlib
 import io
 import json
@@ -100,6 +101,8 @@ from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
+from vinga_server.memory.scopes import MemoryScope
+from vinga_server.memory.store import open_memory
 from vinga_server.ota import OTA_PATH
 from vinga_server.simulator import board, conversation, utterance
 
@@ -133,6 +136,11 @@ LANE_CONVERSATION = "7b1c2d3e4f50617283a4b5c6d7e8f900"
 # id rather than the one above, so an erasure in either case cannot
 # reach the rows the other is about.
 LANE_THREAD = "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f6"
+
+# The thread whose ledger the memory verbs read, distinct from the one
+# above because that one is erased mid-case and a ledger keyed to a
+# deleted thread would go with it.
+LANE_MEMORY_THREAD = "7e8f90a1b2c3d4e5f60d1e2f3a4b5c6d"
 
 
 def session_manifest(device: str) -> dict[str, object]:
@@ -1407,6 +1415,77 @@ def test_the_conversation_verbs_read_and_erase_a_real_thread_over_the_wire(
     assert leaked(SECRET, logs=watched.everything()) == []
 
 
+def test_the_memory_verbs_read_and_correct_over_the_wire(
+    deployed: Live,
+    module_database: str,
+    capsys: pytest.CaptureFixture[str],
+    watched: Watched,
+) -> None:
+    """The three verbs of the `memory` noun against a real uvicorn: the
+    owners, one agent's own facts, a correction and two deletions.
+
+    Seeded through the store an agent writes through, which is what
+    makes this the whole path: what the routes answer is what a reply
+    would have stored, in a schema no read-only role is granted on, so
+    this connection is the only way to see it at all.
+
+    The correction is piped in rather than typed as an argument, which
+    is the property the whole grammar of this noun is shaped by, and it
+    is what a script does: a remembered fact reaches shell history and
+    the process list from an argument and cannot be taken back.
+    """
+    seeded = open_memory(DatabaseConfig(name=module_database))
+    try:
+        numbers = [
+            asyncio.run(
+                seeded.add(MemoryScope.AGENT, "sam", fact, agent="sam")
+            )
+            for fact in ("the user likes rain", "the user is vegetarian")
+        ]
+        asyncio.run(
+            seeded.add(
+                MemoryScope.DEVICE, SESSION_MAC, "the kitchen is small", agent="sam"
+            )
+        )
+        asyncio.run(
+            seeded.set_state(LANE_MEMORY_THREAD, "scene", "a forest", agent="sam")
+        )
+    finally:
+        seeded.close()
+
+    assert run("memory", "list", "agent") == 0
+    listed = capsys.readouterr().out
+    assert listed.splitlines()[0].split() == ["OWNER", "FACTS"]
+    assert listed.splitlines()[1].split() == ["sam", "2"]
+
+    assert run("memory", "list", "agent", "sam") == 0
+    facts = capsys.readouterr().out
+    assert facts.startswith(f"{numbers[0]}: the user likes rain\n")
+
+    assert run("memory", "list", "device", SESSION_MAC) == 0
+    assert "the kitchen is small" in capsys.readouterr().out
+
+    assert run("memory", "list", "conversation", LANE_MEMORY_THREAD) == 0
+    assert capsys.readouterr().out.startswith("scene: a forest\n")
+
+    assert run(
+        "memory", "set", "agent", "sam", str(numbers[0]),
+        stdin="the user loves rain\n",
+    ) == 0
+    assert capsys.readouterr().out.startswith(f"{numbers[0]}: the user loves rain\n")
+
+    assert run("memory", "delete", "agent", "sam", str(numbers[1]), "--force") == 0
+    assert capsys.readouterr().out == "facts: 1\n"
+
+    assert run("memory", "delete", "conversation", LANE_MEMORY_THREAD, "--all", "--force") == 0
+    assert capsys.readouterr().out == "state: 1\n"
+
+    assert run("memory", "list", "conversation", LANE_MEMORY_THREAD) == 0
+    assert capsys.readouterr().out.startswith("this conversation is keeping nothing")
+
+    assert leaked(SECRET, logs=watched.everything()) == []
+
+
 def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     deployed: Live, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1900,6 +1979,19 @@ REFUSALS: tuple[Refusal, ...] = (
         "thread's uuid hex, which every turn of it carries; a thread whose last "
         "activity is older than server.conversations.retention_days has been pruned, "
         "and a thread that lost every turn to an erasure was deleted with them.",
+        True,
+    ),
+    # The third schema's family, and the sentence is the server's for
+    # the reason the two above are: an addressed deletion of a number
+    # nothing has, refused by the endpoint in a sentence that repeats
+    # neither the number nor the owner.
+    Refusal(
+        ("memory",),
+        ("memory", "delete", "agent", "sam", "999999999", "--force"),
+        "no fact of that number is stored under that memory. The numbers are the ids "
+        "this namespace's facts listing answers with, and they are never reused, so a "
+        "number that is not there is a fact that has been corrected out, erased, or was "
+        "never this owner's. Nothing was changed.",
         True,
     ),
     # The live half of the same store's family, and the sentence is the

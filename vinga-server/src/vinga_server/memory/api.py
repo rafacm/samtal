@@ -361,7 +361,7 @@ WriterDep = Annotated[
 
 
 def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]]) -> None:
-    """The six reads and the four writes, registered on the application
+    """The six reads and the seven writes, registered on the application
     that is both mounted and rendered.
 
     The handlers are plain `def`, so FastAPI runs them on the threadpool
