@@ -267,12 +267,14 @@ said to; the **device** scope, what is known about the place and its
 household, shared by every agent bound to that device; and
 **conversation state**, a keyed ledger of what is currently true in the
 thread happening now, which dies with it. All three are injected into
-the system prompt in that order, each under a heading stating its rank,
-and what is most current wins. A removed fact is held rather than
-erased until the conversation that removed it ends, which is what makes
-"no, put that back" answerable. The agent scope is larger than a
-prompt, so it splits in two: a small injected core of the newest facts,
-and the rest reached by looking it up. Distinct from what an assistant
+the system prompt, in the order they take precedence in, which is the
+conversation first, then the agent's facts, then the device's notes,
+each under a heading stating its rank: what is most current wins. A
+removed fact is held rather than erased until the conversation that
+removed it ends, which is what makes "no, put that back" answerable. The
+agent scope is larger than a prompt, so it splits in two: a small
+injected core of the newest facts, and the rest reached by looking it
+up. Distinct from what an assistant
 appears to know inside one conversation, which is the dialogue it is
 reading. See
 [the concepts page](concepts.md#memory).
