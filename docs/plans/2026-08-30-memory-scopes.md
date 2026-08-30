@@ -302,8 +302,13 @@ the conversations-API shape.** Routes, registered from a new
 - `DELETE .../facts/{id}` and `DELETE .../facts`: erase one fact or
   the owner's whole scope, hard deletes both, because the operator
   door is correction and audit, not the spoken-undo flow.
-- `GET /memory/conversations/{conversation}/state`,
-  `DELETE .../state/{key}`, `DELETE .../state`.
+- `GET /memory/conversations/{conversation}/state` and
+  `DELETE .../state`, the delete taking an optional JSON body
+  naming one key and clearing the whole ledger without one. The
+  key never rides the URL: keys are model-chosen and the
+  configuration boundary already treats caller-chosen keys as
+  possible credential locations, and a path lands in proxy and
+  access logs where a body does not.
 
 Reads answer empty shapes for an owner with no rows (the #283
 contract: a store with no rows is not a 404); the addressed deletes
@@ -313,14 +318,19 @@ sentences that never quote the id back. Reads use per-request
 `MEMORY_CHAIN`, both in the conversations API's dependency shape.
 
 **The CLI noun is `memory`, singular, core verbs only, address in
-the URL's own order.** `vinga memory list agent poet`,
-`vinga memory set agent poet 7 "the user is not vegetarian"`,
-`vinga memory delete agent poet 7` (destroys, so it prompts and
-takes `--force`), `vinga memory delete device aa:bb:... --all` for
-the whole-scope erase (a flag rather than an absent id, so a
-mistyped id can never mean everything), `vinga memory list
-conversation <hex>` and `vinga memory delete conversation <hex>
-<key>` for state. Three address segments (scope, owner, id) is the
+the URL's own order, and content never rides argv.**
+`vinga memory list agent poet`; `vinga memory set agent poet 7`
+reading the corrected text from stdin or `-f file`, never from an
+argument, because a remembered fact is content that can be
+credential-shaped and argv reaches shell history and process
+listings, which is the CLI guide's credential rule applied to the
+thing it protects; `vinga memory delete agent poet 7` (destroys, so
+it prompts and takes `--force`); `vinga memory delete device
+aa:bb:... --all` for the whole-scope erase (a flag rather than an
+absent id, so a mistyped id can never mean everything);
+`vinga memory list conversation <hex>` for state, and
+`vinga memory delete conversation <hex>` reading the key from
+stdin, or `--all` for the ledger. Three address segments (scope, owner, id) is the
 guide's ceiling and stays under it; `set` is the core verb for
 correction (no `correct` synonym); owner listings are
 `vinga memory list agent` with no owner, the same words one level
@@ -521,7 +531,11 @@ Named by role, homes confirmed against the authority taxonomy:
     credential-shaped state value driven through every failure path
     and asserted absent from events (equality against declared
     constants, not substring), both log formats, API problem bodies
-    and exception chains.
+    and exception chains; and the transport surfaces the operator
+    grammar could leak through: no CLI command carries fact text or
+    a state key in its argv, and no request the CLI or the routes
+    build carries either in a URL path or query string, asserted
+    against the access-log request targets as well as the bodies.
 - The event drivers extend for the scope field; the migration suite
   pins `2002_memory_scopes` as head, the renamed column, the new
   table, and the metadata-drift comparison; the CI wheel step's
@@ -743,6 +757,11 @@ resolution.
    credential locations. Move fact text to file or stdin input,
    carry state keys in request bodies, and extend the no-leak
    tests to argv and access-log request targets.
+
+   *Resolution*: adopted whole: `memory set` reads the text from
+   stdin or `-f`, the state key travels in a JSON body on
+   `DELETE .../state` (the CLI reads it from stdin), and the
+   no-leak family gains the argv and access-log-target assertions.
 
 9. **P2: the schema omits the constraints and indexes its lifecycle
    requires.** `scope` is unconstrained text, nothing ties
