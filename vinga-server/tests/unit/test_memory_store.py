@@ -945,6 +945,82 @@ async def test_a_purge_on_a_callers_connection_belongs_to_its_transaction() -> N
     assert len(_held("poet")) == 1
 
 
+# A thread id is a value too, and a purge binds them
+#
+# The one write that runs on somebody else's connection, and therefore
+# the one that cannot contain its failure: it has to take the caller's
+# transaction down. What it must not take with it is the driver's own
+# error, which carries the statement it ran and the ids bound into it.
+
+PURGED = "sk-test-4f81c0d2-a-thread-nobody-should-repeat"
+
+
+@contextlib.contextmanager
+def _the_ledger_refusing_deletes() -> Iterator[None]:
+    """A test-only `BEFORE DELETE` trigger on the ledger, which is the
+    cheapest genuine failure a live connection can meet: a statement
+    that runs and is refused, with the ids the caller bound still in the
+    error the driver raises."""
+    holder = _connection()
+    try:
+        holder.execute(
+            "create function memory.refuse_state_delete() returns trigger "
+            "language plpgsql as $$ begin raise exception 'no deletes in this "
+            "test'; end $$"
+        )
+        holder.execute(
+            "create trigger refuse_state_delete before delete on memory.state "
+            "for each row execute function memory.refuse_state_delete()"
+        )
+        holder.commit()
+        yield
+    finally:
+        holder.execute("drop trigger if exists refuse_state_delete on memory.state")
+        holder.execute("drop function if exists memory.refuse_state_delete()")
+        holder.commit()
+        holder.close()
+
+
+async def test_a_purge_that_the_database_refuses_quotes_nothing_of_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The refusal is this module's own fixed sentence, and the thread
+    id the purge bound into its statement is nowhere: not in the
+    sentence, not on the chain the caller can walk, and not in either
+    log format. The caller's transaction is left to roll back, which is
+    what the counts being true depends on."""
+    from vinga_server.db import write_engine
+
+    store = memory()
+    await store.set_state(PURGED, "turn", "white to move", agent="poet")
+
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with caplog.at_level("DEBUG"), _the_ledger_refusing_deletes():
+            with engine.connect() as connection:
+                with connection.begin():
+                    with pytest.raises(ConfigError) as refusal:
+                        store.purge(connection, [PURGED])
+    finally:
+        engine.dispose()
+
+    assert str(refusal.value) == store_module.PURGE_FAILED
+    # Built inside the handler and raised after it, so the failure that
+    # quoted the statement is on no chain a caller can walk.
+    assert refusal.value.__cause__ is None
+    assert refusal.value.__context__ is None
+    walked: list[BaseException] = []
+    cause: BaseException | None = refusal.value
+    while cause is not None:
+        walked.append(cause)
+        cause = cause.__cause__ or cause.__context__
+    for surface in (str(refusal.value), both_formats(caplog), *map(str, walked)):
+        assert PURGED not in surface
+    # And the rows are where they were: the caller's transaction rolled
+    # back around a refusal it could act on.
+    assert _state(PURGED) == [("turn", "white to move")]
+
+
 async def test_the_sweep_takes_an_orphan_older_than_the_grace_period() -> None:
     """Narrowed to what no transaction covers. A thread the record
     knows is not the sweep's business however old it is, and one it does

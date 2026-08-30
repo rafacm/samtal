@@ -197,6 +197,26 @@ NO_FACT_TO_RESTORE = (
     "brought back from this one. Nothing was changed"
 )
 
+# And what a cleanup that could not delete answers its caller with.
+# Separate sentences from the two above because they are read somewhere
+# else: nothing a model says is built from these, and what asks for a
+# purge is a thread's erasure or its retention prune, whose caller is an
+# operator. Value-free for one reason more than the others: what a purge
+# binds into its statements is thread ids, and an erasure that quoted
+# them back would be repeating the identifiers it exists to remove.
+PURGE_FAILED = (
+    "the memory of those conversations could not be removed: the database this "
+    "server keeps memory in refused the delete, and nothing was changed. Nothing of "
+    "the failure is repeated here, because a database error quotes the statement it "
+    "ran and the values bound into it"
+)
+
+PURGE_BUSY = (
+    "the memory of those conversations could not be removed: another connection was "
+    "writing to memory for longer than the lock timeout allows, and nothing was "
+    "changed. The same request may simply be made again"
+)
+
 NOTHING_TO_LOOK_FOR = "there is nothing to look for"
 
 NOTHING_TO_SET = "there is nothing to write down: a note needs a name and something to say"
@@ -627,10 +647,18 @@ class MemoryStore:
         the SQL and the caller owns the transaction, so a thread's
         erasure and its memory leave in the same commit and there is
         never a moment when the thread is gone while its state remains.
-        That is also why nothing is contained here. A failure has to
-        reach the caller and take its transaction down with it, since a
-        purge that swallowed its own failure would let an erasure answer
-        with counts a rollback made false.
+        A failure therefore has to reach the caller and take its
+        transaction down with it, because a purge that swallowed one
+        would let an erasure answer with counts a rollback made false.
+
+        What reaches the caller is a refusal of this module's own, never
+        the driver's. A SQLAlchemy failure carries the statement it ran
+        and the parameters bound into it, and the parameters here are
+        thread ids: a caller that rendered one into a problem body or a
+        log line would be quoting the very identifiers an erasure exists
+        to remove. So the refusal is built inside the handler and raised
+        after it, cause severed, and the caller's transaction rolls back
+        exactly as it would have.
 
         A thread's memory is its ledger and the facts it forgot. Active
         facts are nobody's thread: they belong to the agent or the
@@ -638,22 +666,32 @@ class MemoryStore:
         """
         if not threads:
             return NOTHING_PURGED
-        return Purged(
-            state=int(
-                connection.execute(
-                    delete(schema.state).where(
-                        schema.state.c.conversation.in_(threads)
-                    )
-                ).rowcount
-            ),
-            held_facts=int(
-                connection.execute(
-                    delete(schema.facts).where(
-                        schema.facts.c.forgotten_in.in_(threads)
-                    )
-                ).rowcount
-            ),
-        )
+        problem: Exception
+        try:
+            return Purged(
+                state=int(
+                    connection.execute(
+                        delete(schema.state).where(
+                            schema.state.c.conversation.in_(threads)
+                        )
+                    ).rowcount
+                ),
+                held_facts=int(
+                    connection.execute(
+                        delete(schema.facts).where(
+                            schema.facts.c.forgotten_in.in_(threads)
+                        )
+                    ).rowcount
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - classified, never quoted
+            # By class and never by message, through the one classifier
+            # `db` owns, the same pair every other write here answers
+            # with: a contended delete is retryable and says so.
+            problem = (
+                DatabaseBusyError(PURGE_BUSY) if is_busy(exc) else StorageError(PURGE_FAILED)
+            )
+        raise problem
 
     def purge_threads(self, threads: Sequence[str]) -> Purged:
         """The same purge in a transaction of this store's own, for a
@@ -1364,6 +1402,8 @@ __all__ = [
     "NO_FACT_TO_FORGET",
     "NO_FACT_TO_RESTORE",
     "NO_FACT_TO_UPDATE",
+    "PURGE_BUSY",
+    "PURGE_FAILED",
     "QUIET_TIMEOUT_S",
     "RECALL_BYTES",
     "RECALL_LINES",
