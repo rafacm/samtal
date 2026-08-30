@@ -7,7 +7,7 @@ bytes by hand. That is exactly the shape of thing that stops being true
 without anybody noticing, so this lane executes the committed file and
 asserts its whole contract rather than reading it.
 
-Three claims, and each of them is a way the role could be wrong:
+Four claims, and each of them is a way the role could be wrong:
 
 - `vinga_ro` reads every table of the conversation record, so an
   analyst asking what was said gets an answer.
@@ -16,6 +16,16 @@ Three claims, and each of them is a way the role could be wrong:
 - It has neither `USAGE` on the domain schema nor any write anywhere,
   so a query over conversations cannot reach a stored secret's
   ciphertext or change anything.
+- It has no `USAGE` on the memory schema either. Remembered facts are
+  not more sensitive than the transcripts it already reads; the
+  operator read surface for them is #83's design, and granting the raw
+  tables early would freeze a contract #83 reshapes.
+
+And one claim about the file rather than the role, which is the reason
+the file is rerun rather than merely present: a release that adds a
+schema is met by an existing least-privilege deployment as a boot that
+cannot create it, and the documented order (rerun administratively,
+then deploy) is what carries it across with every row intact.
 
 Against a database of this test's own rather than the lane's: the file
 creates schemas and grants, which is not a state the next test should
@@ -40,6 +50,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from sqlalchemy import text
 
 from tests.conftest import reset_database
 from tests.support.commands import COMMAND_SECONDS
@@ -50,11 +61,13 @@ from vinga_server.conversations.store import open_conversations
 from vinga_server.db import (
     DEFAULT_PASSWORD,
     PASSWORD_ENV,
-    UNREACHABLE,
+    SCHEMA_NOT_PERMITTED,
     connection_url,
     open_database,
 )
 from vinga_server.db import schema as domain_schema
+from vinga_server.memory import open_memory
+from vinga_server.memory import schema as memory_schema
 
 PROVISIONING = Path(__file__).resolve().parents[3] / "deploy" / "postgres-init.sql"
 
@@ -276,24 +289,25 @@ def test_the_file_gives_the_schemas_to_the_role_it_was_told_about(
     """The `AUTHORIZATION` half, and the `\\getenv` half with it.
 
     An administrator ran the file and owns everything it created by
-    default; both schemas must nonetheless belong to the server role the
+    default; every schema must nonetheless belong to the server role the
     environment named, because `CREATE` on a database does not grant a
     role `CREATE` on a schema somebody else owns, and Alembic would then
     be unable to make its own tables.
     """
     assert _owner_of(provisioned, "domain") == server_role
     assert _owner_of(provisioned, "record") == server_role
+    assert _owner_of(provisioned, "memory") == server_role
 
 
-def test_a_role_with_nothing_but_its_schemas_migrates_both_chains(
+def test_a_role_with_nothing_but_its_schemas_migrates_every_chain(
     provisioned: str, server_role: str
 ) -> None:
     """The privilege contract the deployment documentation states, run
     rather than described.
 
     This role is not a superuser, does not own the database and has no
-    `CREATE` on it, so the only reason either chain can create a table
-    is that the file handed it schemas it owns. That is also the reason
+    `CREATE` on it, so the only reason any chain can create a table is
+    that the file handed it schemas it owns. That is also the reason
     `upgrade_to_head` asks whether a schema exists before creating it:
     `CREATE SCHEMA IF NOT EXISTS` checks the database privilege first
     and would refuse here even with nothing to do.
@@ -302,6 +316,7 @@ def test_a_role_with_nothing_but_its_schemas_migrates_both_chains(
 
     open_database(settings).dispose()
     open_conversations(settings).dispose()
+    open_memory(settings).close()
 
     for table in conversations_schema.TABLES:
         assert _as_analyst(provisioned, f"select * from record.{table.name}") == (
@@ -364,6 +379,29 @@ def test_the_analyst_role_cannot_reach_the_domain_schema(
 
     for table in domain_schema.metadata.sorted_tables:
         answer = _as_analyst(provisioned, f"select * from domain.{table.name}")
+        # 42501 is insufficient_privilege, which is what a schema with no
+        # USAGE answers.
+        assert answer == "refused: 42501", table.name
+
+
+def test_the_analyst_role_cannot_reach_the_memory_schema(
+    provisioned: str, server_role: str
+) -> None:
+    """The third schema's denial, written down rather than left to the
+    default.
+
+    The reason is not sensitivity: what an agent was asked to remember
+    is no more private than the transcripts this role already reads. It
+    is that #83 designs the operator read surface for memory (addressed
+    by scope, served over the API), and a grant on the raw tables now
+    would freeze a contract #83 is about to reshape. Narrowing a granted
+    read later breaks somebody; widening later is one additive line in
+    the file.
+    """
+    open_memory(_as_server_role(provisioned, server_role)).close()
+
+    for table in memory_schema.TABLES:
+        answer = _as_analyst(provisioned, f"select * from memory.{table.name}")
         # 42501 is insufficient_privilege, which is what a schema with no
         # USAGE answers.
         assert answer == "refused: 42501", table.name
@@ -500,8 +538,14 @@ def test_a_deployment_on_the_previous_file_upgrades_by_rerunning_it(
     rather than left to be discovered: on the privilege contract this
     lane exists to hold, the server role has no `CREATE` on the database
     and cannot make the new schema for itself, so a server started first
-    refuses with the fixed database refusal instead of quietly recording
-    into a store nobody provisioned.
+    refuses with the fixed sentence that names the rerun instead of
+    quietly recording into a store nobody provisioned.
+
+    That sentence used to be the general one for an instance this server
+    cannot use, which was true and unhelpful: an operator reading it
+    checked five connection variables that were all correct. Since #314
+    the privilege refusal is classified on its own, by exception class,
+    and says the one thing there is to do.
 
     The domain half is untouched by the rename and migrates either way,
     which is what makes the refusal specific rather than a database that
@@ -517,7 +561,7 @@ def test_a_deployment_on_the_previous_file_upgrades_by_rerunning_it(
     open_database(settings).dispose()
     with pytest.raises(StorageError) as refusal:
         open_conversations(settings)
-    assert str(refusal.value) == UNREACHABLE
+    assert str(refusal.value) == SCHEMA_NOT_PERMITTED
 
     _run_the_file(blank_database, server_role)
 
@@ -529,6 +573,144 @@ def test_a_deployment_on_the_previous_file_upgrades_by_rerunning_it(
     # And the schema the store used to live in is still standing, which
     # is what "the old one is left where it is" means.
     assert _owner_of(blank_database, PREVIOUS_STORE_SCHEMA) == server_role
+
+
+# The two-schema shape this release adds a schema to. Written out rather
+# than kept as a second committed file, for the reason the previous
+# upgrade's helper gives: what is upgraded FROM is a released shape
+# rather than anything this repository still ships.
+TWO_SCHEMA_SHAPE = ("domain", "record")
+
+
+def _the_two_schema_shape(database: str, server_role: str) -> None:
+    """A database provisioned the way the file provisioned one before
+    memory had a schema of its own.
+
+    Only the half the upgrade turns on is reproduced: the two schemas,
+    the role, and its grants on the record. The role-level timeouts and
+    the revokes are the file's own contract and are asserted where the
+    file itself is run.
+    """
+    for schema in TWO_SCHEMA_SHAPE:
+        _sql(
+            database,
+            f'create schema if not exists "{schema}" authorization "{server_role}"',
+        )
+    if _role_exists(RO_ROLE):
+        _sql("postgres", f"alter role \"{RO_ROLE}\" with login password '{RO_PASSWORD}'")
+    else:
+        _sql("postgres", f"create role \"{RO_ROLE}\" login password '{RO_PASSWORD}'")
+    _sql(database, f'grant connect on database "{database}" to "{RO_ROLE}"')
+    _sql(database, f'grant usage on schema "record" to "{RO_ROLE}"')
+    _sql(database, f'grant select on all tables in schema "record" to "{RO_ROLE}"')
+    _sql(
+        database,
+        f'alter default privileges for role "{server_role}" '
+        f'in schema "record" grant select on tables to "{RO_ROLE}"',
+    )
+
+
+def _stored_setting(settings: DatabaseConfig) -> object:
+    """One row read back out of the domain half, through a fresh open."""
+    engine = open_database(settings)
+    try:
+        with engine.connect() as connection:
+            found = connection.execute(
+                text("select value from domain.domain_settings where key = 'upgraded'")
+            ).first()
+    finally:
+        engine.dispose()
+    return None if found is None else found[0]
+
+
+def _stored_sessions(settings: DatabaseConfig) -> list[str]:
+    """What the record half holds, through a fresh open."""
+    engine = open_conversations(settings)
+    try:
+        with engine.connect() as connection:
+            return [
+                row[0]
+                for row in connection.execute(text("select session from record.sessions"))
+            ]
+    finally:
+        engine.dispose()
+
+
+def test_a_deployment_on_the_two_schema_shape_upgrades_by_rerunning_it(
+    blank_database: str, server_role: str
+) -> None:
+    """The upgrade a release that adds a schema really asks for, run in
+    the order the documentation gives it, on the privilege contract this
+    lane exists to hold.
+
+    The server role is not a superuser, does not own the database and
+    has no `CREATE` on it, so it cannot make the memory schema for
+    itself: an image started before the rerun refuses with the fixed
+    sentence that names the rerun, which is what makes the order stated
+    rather than discovered. The two chains that were already there
+    migrate and serve either way, which is what makes the refusal
+    specific rather than a database that is simply unreachable.
+
+    And the rows are the point of the whole thing. A deployment upgrades
+    with what it has stored, so a row is written in each existing store
+    before the rerun and read back afterwards through a fresh open: an
+    upgrade that carried the schemas across and lost the state would be
+    the same failure with better paperwork.
+    """
+    _require_the_file()
+    settings = _as_server_role(blank_database, server_role)
+    _the_two_schema_shape(blank_database, server_role)
+
+    domain = open_database(settings)
+    try:
+        with domain.begin() as connection:
+            connection.execute(
+                text(
+                    "insert into domain.domain_settings (key, value) "
+                    "values ('upgraded', '\"yes\"')"
+                )
+            )
+    finally:
+        domain.dispose()
+    record = open_conversations(settings)
+    try:
+        with record.begin() as connection:
+            connection.execute(
+                text(
+                    "insert into record.sessions "
+                    "(session, started_at, metrics, text, dropped) "
+                    "values ('before-the-upgrade', '2026-08-30T10:00:00+00:00', "
+                    "true, true, 0)"
+                )
+            )
+    finally:
+        record.dispose()
+
+    with pytest.raises(StorageError) as refusal:
+        open_memory(settings)
+    assert str(refusal.value) == SCHEMA_NOT_PERMITTED
+
+    _run_the_file(blank_database, server_role)
+
+    # Every chain, as the restricted role, in the order a boot opens
+    # them, and the memory schema is the one that could not be made
+    # before the rerun.
+    open_database(settings).dispose()
+    open_conversations(settings).dispose()
+    open_memory(settings).close()
+
+    assert _owner_of(blank_database, "memory") == server_role
+    assert _stored_setting(settings) == "yes"
+    assert _stored_sessions(settings) == ["before-the-upgrade"]
+
+    # And the analyst role reads what it always read and nothing more:
+    # the rerun grants it the record and revokes the new schema, which
+    # is what keeps #83 free to design the read surface.
+    assert _as_analyst(blank_database, "select * from record.sessions") == "allowed"
+    for table in memory_schema.TABLES:
+        assert _as_analyst(blank_database, f"select * from memory.{table.name}") == (
+            "refused: 42501"
+        ), table.name
 
 
 def test_the_file_runs_again_over_what_it_already_made(
