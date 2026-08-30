@@ -123,12 +123,16 @@ beside `opened` in the fixtures, not before.
 - No hand-maintained page describes this test's timing, so nothing
   else is falsified. The command-spellings census is untouched (no
   documentation moves, no command spellings).
-- Bookkeeping outside the tree, done by the driving session at merge
-  time: the #254 watch table gains the second sighting's row with the
-  diagnosis (a race in the test itself, demonstrated deterministically,
-  and therefore not evidence against the parallel lane, since enough
-  contention would lose the race serially too); #328 gets a closing
-  comment linking the PR, the demonstration, and the second sighting.
+- Bookkeeping outside the tree, done by the driving session, split
+  by urgency. Recording the second sighting is an M1 completion
+  criterion done before or with the PR, not at merge: the #254
+  watch table gains run 33140677096's row with the diagnosis (a
+  race in the test itself, demonstrated deterministically, and
+  therefore not evidence against the parallel lane, since enough
+  contention would lose the race serially too), so the watch's
+  record is true even if the PR stalls. Only #328's closing
+  comment, linking the PR, the demonstration and the second
+  sighting, stays merge-time.
 
 ## Tests
 
@@ -171,7 +175,8 @@ The changed test is the deliverable; what verifies it:
 ## Milestones
 
 - [ ] M1: the hold. The test change, the changelog entry, the
-  implementation doc section; PR TBD.
+  implementation doc section, and the #254 watch-table row for run
+  33140677096 posted before or with the PR; PR TBD.
 
 ## Plan review round
 
@@ -216,6 +221,10 @@ condensed but faithful; resolutions appended per amendment.
    33140677096 with its diagnosis must be an M1 completion
    criterion, done before or with the PR; only #328's closing
    comment stays merge-time bookkeeping.
+
+   *Resolution*: adopted. The documentation footprint and the M1
+   milestone now name the watch-table row as an M1 completion
+   criterion posted before or with the PR.
 
 4. **P3: the cited 1011 test neither exists under that name nor
    owns the mid-reply path.** The real case is
