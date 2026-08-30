@@ -44,6 +44,7 @@ from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.memory import store as store_module
 from vinga_server.memory.store import MemoryScope, MemoryStore
 from vinga_server.providers import ToolCall, Turn
 from vinga_server.tools import builtin
@@ -679,6 +680,102 @@ async def test_a_correction_and_a_removal_of_one_fact_land_in_the_models_order()
     assert not corrected.is_error and not removed.is_error
     assert removed.content == f"Forgot [{fact_id}]: the user is vegan"
     assert facts(store) == ""
+
+
+# A scope at its cap, where remembering is a mutation like any other
+#
+# Every write to a scope that is full also prunes it, so a `remember`
+# and an edit of the oldest fact in one round decide each other even
+# though neither addresses what the other named. Run out of order, the
+# append deletes the row the edit just wrote and both answer success,
+# which is the one shape a model cannot recover from: it was told the
+# correction landed.
+#
+# The cap is one line here, which is the smallest arrangement that has
+# an oldest fact and no room for a second.
+
+
+def a_scope_of_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store_module, "MAX_LINES", 1)
+
+
+async def test_remembering_before_a_correction_leaves_the_correction_pruned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model asks to remember something new and then to correct the
+    fact that is already there, in that order, on a scope with room for
+    one.
+
+    In that order the new fact arrives, the prune takes the old one, and
+    the correction meets a fact that is not there any more, which the
+    agent can say. Reversed, the correction succeeds, the append prunes
+    the row it just wrote, and the model has been told a correction
+    landed that nothing kept.
+    """
+    a_scope_of_one(monkeypatch)
+    store = lane_memory()
+    fact_id = await store.add(
+        MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+    )
+    script = ScriptedLlm(
+        [
+            [
+                call("remember", text="the user has a dog"),
+                call("update_memory", id=fact_id, text="the user is vegan"),
+            ],
+            "Noted.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    async with the_first_write_parked("add", "update"):
+        await run_reply(session, "I have a dog, and I am vegan now")
+
+    remembered, corrected = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not remembered.is_error
+    assert corrected.is_error
+    assert corrected.content.endswith(store_module.NO_FACT_TO_UPDATE)
+    assert facts(store) == "- the user has a dog"
+
+
+async def test_remembering_before_a_removal_leaves_nothing_to_remove(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same reversal on the other edit, where what it costs is the
+    undo: reversed, the removal holds the old fact for a restore that
+    the append then makes meaningless, and the agent says out loud that
+    it forgot something the prune was about to take anyway."""
+    a_scope_of_one(monkeypatch)
+    store = lane_memory()
+    fact_id = await store.add(
+        MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+    )
+    script = ScriptedLlm(
+        [
+            [
+                call("remember", text="the user has a dog"),
+                call("forget", id=fact_id),
+            ],
+            "Done.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    async with the_first_write_parked("add", "forget"):
+        await run_reply(session, "I have a dog, and forget the other thing")
+
+    remembered, removed = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not remembered.is_error
+    assert removed.is_error
+    assert removed.content.endswith(store_module.NO_FACT_TO_FORGET)
+    assert facts(store) == "- the user has a dog"
+    # And nothing is being held for an undo that would bring back a fact
+    # this scope has no room for.
+    assert store.recall("poet", POET_MAC, "vegetarian") == ""
 
 
 def ledger(store: MemoryStore, conversation: str) -> str:

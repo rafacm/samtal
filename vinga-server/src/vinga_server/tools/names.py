@@ -76,24 +76,30 @@ BUILTIN_TOOL_NAMES = (
 # The tools whose order in a round is their meaning, so a reply may not
 # run two of them at once.
 #
-# Every one of them is addressed by an identity the model names: a key
-# it chose for the ledger, a number it read out of a lookup. Two calls
-# in one round can therefore name the same thing, a set and a clear of
-# `scene` or a correction and a removal of fact 7, and what is true
-# after that round is whichever ran last. The model's order IS the
-# answer, and a round that ran them concurrently would leave the
-# database's lock arrival deciding it instead. Worse for the numbered
-# three than for the ledger: a removal that overtook the correction
-# beside it answers with words the correction had already replaced, and
-# the agent says them out loud.
+# Every write to a memory is here, which is the smallest rule that is
+# actually true. The obvious ones are addressed by an identity the model
+# names: a key it chose for the ledger, a number it read out of a
+# lookup. Two of those in one round can name the same thing, a set and a
+# clear of `scene` or a correction and a removal of fact 7, and what is
+# true afterwards is whichever ran last.
 #
-# Nothing else here has the property. A device tool and a server tool
-# touch different worlds; `remember` appends rather than replacing, so
-# two of them in a round leave both facts whichever order they land in;
-# `recall` changes nothing; and the three that move a session are
-# resolved by the loop itself, in issue order, and never reach a
-# dispatch at all.
+# `remember` looks like the exception and is not. It appends, so two of
+# them leave both facts whichever order they land in, but a scope at its
+# cap prunes on every write: a `remember` reordered ahead of a
+# correction of the oldest fact deletes the row that correction just
+# wrote and answers success to both. What couples them is the prune
+# rather than the address, and a rule that let one mutation overtake
+# another would have to know which scope was full to know whether it
+# mattered.
+#
+# So the model's order IS the answer for all of them, and a round that
+# ran them concurrently would leave the database's lock arrival deciding
+# it instead. Nothing else here has the property: a device tool and a
+# server tool touch different worlds, `recall` changes nothing, and the
+# three that move a session are resolved by the loop itself, in issue
+# order, and never reach a dispatch at all.
 ORDERED_TOOL_NAMES = (
+    REMEMBER,
     UPDATE_MEMORY,
     FORGET,
     RESTORE_MEMORY,
