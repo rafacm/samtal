@@ -347,6 +347,28 @@ def test_the_reload_description_names_the_whole_domain_half() -> None:
     assert "waits for the start" not in described
 
 
+def test_the_prompt_read_describes_where_it_reads_memory_from() -> None:
+    """The one sentence in this document that says what the memory half
+    of an assembly costs, held to the storage that is actually behind it
+    (#314).
+
+    A pin on the meaning rather than on the prose: what a client
+    generator puts in front of a caller told them for one release that
+    the read was a file read, which stopped being true when remembered
+    facts became rows, and a description nothing checks is a description
+    that goes on saying it.
+    """
+    prompt = json.loads(docgen.openapi())["paths"]["/runtime/agents/{name}/prompt"]["get"]
+    described = prompt["description"]
+
+    assert "database round trip" in described
+    assert "worker thread" in described
+    # The file-backed vocabulary, refused outright: it is the wording
+    # this route carried, and the only way it comes back is unnoticed.
+    for stale in ("file read", "memory file", "memory directory"):
+        assert stale not in described, stale
+
+
 def test_the_acknowledgement_notice_names_two_boundaries_and_no_start() -> None:
     """And the schema a client reads a write's answer through. Two
     boundaries, because there are two: a device asking, and a reload."""
