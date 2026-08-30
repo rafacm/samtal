@@ -40,6 +40,7 @@ from vinga_server.providers import (
     LlmEvent,
     LlmProvider,
     TextDelta,
+    ToolCall,
     ToolChoice,
     ToolDef,
     Turn,
@@ -147,6 +148,58 @@ async def test_a_withheld_memory_tool_is_refused_as_one_that_does_not_exist() ->
     assert result.is_error
     assert result.content == 'there is no tool called "remember"'
     assert memory_rows("facts", owner="poet") == []
+
+
+@pytest.mark.parametrize("name", MEMORY_TOOLS)
+async def test_a_withheld_tool_called_badly_is_still_a_tool_that_does_not_exist(
+    name: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The refusal has to be the same answer whatever the model sent
+    with the call, and a mangled argument list is the one thing that
+    used to get a different one.
+
+    "The arguments were not a JSON object" is what a tool that exists
+    says to a bad call, so answering it for a withheld name would tell
+    the model that the name is real and only its arguments were wrong,
+    which is exactly the difference the fixed sentence exists to hide.
+    All seven, because the answer is per name and a rule that held for
+    one of them is not the rule.
+
+    The retained log is the other half: a line saying a builtin got
+    unparseable arguments is a line about a tool that was called, and
+    for this reply there is no such tool to have been called.
+    """
+    broken = ToolCall(id="c1", name=name, malformed_arguments='{"text": "oops"')
+    script = ScriptedLlm([[broken], "I could not do that."])
+    session = session_for(paired(poet=OFF), POET_MAC, {"poet": script}, memory=lane_memory())
+
+    with caplog.at_level("DEBUG"):
+        assert await run_reply(session, "do it") == ["I could not do that."]
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert result.content == f'there is no tool called "{name}"'
+    assert not [record for record in caplog.records if "unparseable" in record.getMessage()]
+
+
+async def test_an_agent_that_may_remember_still_hears_about_its_bad_arguments() -> None:
+    """The other side of the reorder, which is what keeps it a
+    reordering rather than a removal: a tool the agent does have,
+    called with arguments the model never closed, is answered as it
+    always was."""
+    broken = ToolCall(id="c1", name="remember", malformed_arguments='{"text": "oops"')
+    script = ScriptedLlm([[broken], "Let me try that again."])
+    session = session_for(paired(), POET_MAC, {"poet": script}, memory=lane_memory())
+
+    assert await run_reply(session, "do it") == ["Let me try that again."]
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "not a JSON object" in result.content
 
 
 async def test_a_switched_off_agent_costs_no_read_at_all(

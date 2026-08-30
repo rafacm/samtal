@@ -123,6 +123,29 @@ def no_such_tool(name: str | None) -> tuple[str, bool]:
     return f'there is no tool called "{name}"', True
 
 
+def withheld(name: str | None, remembers: Callable[[], bool]) -> bool:
+    """Whether this name is one of the memory tools an agent that may not
+    remember was never offered.
+
+    One home for the rule because two callers ask it at two moments and
+    the whole point is that they answer identically. The builtins ask it
+    at the call, which is where a source says whether it will run a
+    name; the runtime asks it before it answers anything about a call at
+    all, because the answers it gives first would otherwise tell a
+    withheld tool from a name nobody publishes: a model that mangles its
+    arguments is told the arguments were unparseable, which is what a
+    tool that exists says, and a tool this agent may not reach does not
+    exist for the length of this reply.
+
+    The policy arrives as the callable both askers already hold rather
+    than as its answer, so that a name that is not a memory tool never
+    asks for one. That is what keeps this question answerable about any
+    call at all: the policy belongs to a reply, and a device tool or an
+    MCP tool is a name this rule has nothing to say about.
+    """
+    return name in names.MEMORY_TOOL_NAMES and not remembers()
+
+
 class BuiltinTools:
     """The tools the server implements itself.
 
@@ -221,8 +244,10 @@ class BuiltinTools:
         # the rule the protocol states about a grant: a tool the offer
         # withheld is refused rather than run when a model asks for it
         # anyway. The name is still this source's to own, so what
-        # answers is this source saying there is no such tool.
-        if claim.name in names.MEMORY_TOOL_NAMES and not self._remembers():
+        # answers is this source saying there is no such tool. The
+        # runtime asks the same question earlier, about calls this
+        # source is never handed; this is the answer for the calls it is.
+        if withheld(claim.name, self._remembers):
             return no_such_tool(claim.name)
         if claim.name == names.REMEMBER:
             return (
@@ -381,4 +406,5 @@ __all__ = [
     "ThreadSearch",
     "ToolSource",
     "no_such_tool",
+    "withheld",
 ]
