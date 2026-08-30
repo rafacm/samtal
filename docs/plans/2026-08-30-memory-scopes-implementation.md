@@ -313,3 +313,180 @@ released behavior that changed while the milestone said it would not.
 - The five generated documents regenerate to their committed bytes, and
   the command-spellings census is current.
 - Every guard above was run against its mutation before being trusted.
+
+## M2: conversation state end to end
+
+PR TBD.
+
+### What landed
+
+In the order the commits tell it: the lock rule the coupling needs, the
+two deletion paths made atomic, the refusal that closes resurrection,
+the tools, the rendering, the composition, and the documents.
+
+- **`db`'s ascending lock order,** stated beside `advisory_key` and in
+  the module's own list of properties, because a transaction that writes
+  both stores now exists. `take_the_chain_lock` is the statement the
+  write engine's begin listener always issued, written once now that a
+  second caller issues it for a second chain.
+- **`memory.store.purge(connection, threads)`,** which takes the memory
+  chain's lock itself and then deletes the threads' ledgers and held
+  facts on a transaction its caller owns. A function rather than the
+  method M1 wrote, for the reason in the deviations.
+- **Retention names what it took.** `threads.prune` reads the doomed
+  threads by name before deleting them and `Pruned` carries them, with
+  the count derived from the names; `ConversationStore` is handed the
+  purge at construction (an import would be a cycle), calls it inside
+  the prune transaction, and publishes the ids through `erased()` inside
+  `erasure_order()`, exactly as an API deletion does.
+- **The erasure paths purge inside their own transaction.**
+  `conversations/api.py`'s `_erasure` issues the memory deletes on the
+  connection it already holds, before the commit, and both response
+  models gain `state` and `held_facts` from that same transaction. The
+  CLI's `ERASED_COUNTS` grows the pair, and `api-openapi.json` is
+  regenerated.
+- **The other half of the protocol, in the memory store.** A dead-thread
+  set fed by a new `threads_erased`, a `_thread_keyed` seam that holds
+  `erasure_order()` across every write addressed to a conversation
+  (`set_state`, `clear_state`, a soft `forget`, a restore), and one more
+  fixed refusal, `CONVERSATION_ERASED`. A permanent forget is not
+  thread-keyed and is not held.
+  `conversations/store.py` grows `erasures_announced_to`, a listener
+  seam beside the writer register, because the memory store is in
+  another package and is told by name rather than reached into.
+- **The two state tools.** `set_state` and `clear_state` in
+  `tools/builtin.py` and in `names.BUILTIN_TOOL_NAMES`, with
+  descriptions written from the plan's scope rule of thumb and naming
+  the promotion (`remember`) that outliving the conversation requires.
+  `BuiltinTools` gains the zero-argument `MemoryContext` callable;
+  `ToolSource` does not widen.
+- **The rendering.** `with_memory` deepens into `with_scopes`, taking the
+  store's `PromptMemory` and appending state, agent and device in that
+  order, each under a heading that states its own rank and under a
+  provenance token of its own. A scope with nothing in it renders no
+  block, which is what keeps the agent-only prompt byte-identical.
+  `PipelineRuntime` gains `_device` beside `_agent` and `_conversation`,
+  and `_system_prompt` reads all three scopes in one worker-thread hop.
+  The preview stays agent-keyed and its route description says why.
+- **The composition.** Memory is opened before the conversation writer is
+  constructed, so its close unwinds last and the writer's drain runs
+  against an open store; the erasure subscription is entered there; the
+  boot sweeps orphans older than the grace period; and the runtime is
+  handed a session-close purge exactly where `conversations is None`.
+- **The documents.** The concepts page's Memory section is the three
+  scopes, the ledger's lifetime and the promotion it forces; the server
+  README gains the tools in both spellings, the ledger's paragraph and
+  the corrected block order; the overview's step 7 says what the model
+  is sent; the changelog carries the behavior, the reserved-name growth
+  and the two counts. The census was regenerated after the README edits.
+
+### The pins that translated
+
+Named one by one, because each is a contract that moved rather than a
+test that was rewritten:
+
+- the offered-tool ordered literals in `test_session_tools.py`, which
+  grow `set_state` and `clear_state` between `remember` and
+  `new_conversation`;
+- `DUE_BUILTINS` in `tests/integration/test_tools.py`, the same two
+  names;
+- the reserved-entry-name parametrizations in `test_tool_names.py` and
+  `test_config_tools.py`, which now walk the whole builtin set;
+- every `prompt.with_memory` call in `test_runtime_prompt.py`,
+  `test_session_prompt.py`, `test_config_api_runtime.py` and
+  `test_memory_store.py`, which becomes `with_scopes` over a
+  `PromptMemory` carrying the agent's scope alone: the byte-equality
+  family, the identity-on-empty pin and the awkward-input parametrization
+  all pass unchanged against it;
+- `test_the_memory_read_happens_off_the_event_loop`, which now watches
+  `read_for_prompt` and asserts one read per round rather than that a
+  read happened at all;
+- the erasure-count assertions in `test_conversations_erasure.py`,
+  `test_conversations_namespace.py`, `test_config_cli_sessions.py` and
+  `test_config_cli_conversations.py`, each gaining `state` and
+  `held_facts`.
+
+### Deviations from the plan
+
+Four, and none of them changes what the milestone ships.
+
+- **`purge` is a module-level function, not a method.** The plan calls it
+  "the store's `purge(connection, threads)` M1 built". Neither caller has
+  a store to call it on: the conversation writer is handed it because
+  importing the memory store there would close a cycle (the memory store
+  reads `record.conversations`), and a deletion through the operator API
+  runs on a connection it opened for itself, precisely so erasure works
+  with recording off where no store object exists. A function is what
+  both of them can reach, and the SQL still has one home. It keeps
+  everything M1's review round gave the method: the failure boundary
+  that classifies through `db.is_busy` and answers `PURGE_BUSY` or
+  `PURGE_FAILED` built inside the handler and raised after it, with the
+  chain lock taken inside that boundary rather than in front of it,
+  since a lock that does not arrive inside the timeout is exactly the
+  contended case the retryable sentence is for.
+- **Finding 7's "impossible order" is dissolved rather than only fixed.**
+  The reorder the plan names is in (memory before the writer, exit
+  callbacks so the writer drains first) and is pinned by test, but the
+  failure it was written about cannot happen once `purge` is a function:
+  a teardown retention purge runs on the record chain's connection and
+  never touches the memory store's engines. The order is kept because it
+  is the correct one and because the erasure subscription has to outlive
+  the writer, not because a closed store would refuse.
+- **The `MemoryContext` callable is a method on the runtime rather than a
+  closure built in `bespoke_runtime_factory`.** The plan puts the closure
+  in the factory, over the events object. `BuiltinTools` is constructed
+  inside `PipelineRuntime.__init__`, and `_device` and `_conversation`
+  are properties over that same events object, so the bound method reads
+  exactly what the closure would have read and keeps those two answers in
+  one place.
+- **`read_for_prompt` takes `device: str | None`.** A session whose
+  device never identified itself has no device scope, and saying so with
+  None is honest where reaching for an owner of `""` would answer "no
+  rows" by accident.
+
+### Discoveries
+
+- **A dead-thread set is process-scoped, which a suite has to respect.**
+  The refusal is for the life of the process, exactly as the conversation
+  writer's is, because ids are minted per session and never reused. A
+  test that erases a fixed id therefore poisons every later test in the
+  same worker; `test_memory_lifecycle.py` mints one per test, which is
+  what a session does.
+- **A test's `Config` does not point where `DatabaseConfig()` points.**
+  The lane sets the model's defaults to the database it provisioned, but
+  a `Config` parsed from a dictionary carries the packaged default baked
+  into its parent's schema. The boot-sweep test names the lane database
+  explicitly for that reason, and any later app test that asserts on rows
+  will have to.
+- **The concepts page said conversation history carries across a
+  handover.** It has not since threads became per agent (#190). The
+  paragraph is in the section this milestone rewrote, so it was corrected
+  rather than left; the correction is #190's drift, not this milestone's.
+- **A straddle test can be sensitive to two mechanisms at once.** The
+  before-the-erasure case is enforced by `erasure_order()` and by the
+  memory chain's lock together, so removing either alone still leaves the
+  property true; the after case is sensitive to both. Both were run
+  against both mutations rather than assumed.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean (5 source files, the events package).
+- `uv run pytest tests/unit -q`: 4686 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, the shape CI
+  runs: same.
+- `uv run pytest tests/integration -q`: 228 passed.
+- The five generated documents regenerate to their committed bytes
+  (`api-openapi.json` is regenerated in this change; `domain-config.md`,
+  `conversations-schema.md`, `events.md` and `cli.md` are unchanged), the
+  command-spellings census was regenerated after the README edits, and
+  `python scripts/check_doc_links.py .` checked 172 files with no
+  failures.
+- Every concurrency and lifecycle guard was run against the mutation it
+  exists for before being trusted: the dead-set check removed; the
+  erasure order not held by a memory write; the purge not taking the
+  memory chain's lock; retention not purging; the erasure's purge
+  committed in a transaction of its own; the session-close purge not
+  called, and called where threads are recorded; the exit callbacks
+  registered in the other order; and the boot sweep removed.
+- Not verified: the `image` job, which builds and smokes the container.

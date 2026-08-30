@@ -51,6 +51,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.configs import DEVICE_MAC, POET_MAC, base_config
+from tests.support.events import both_formats
 from tests.support.sessions import events_of, session_for, until
 from tests.support.stores import memory, memory_rows
 from vinga_server import db as db_module
@@ -535,6 +536,36 @@ async def test_a_write_that_begins_after_an_erasure_is_refused(
     assert isinstance(refusal, ValueError)
     assert str(refusal) == memory_store.CONVERSATION_ERASED
     assert state_of(thread) == []
+
+
+async def test_the_refusal_repeats_nothing_of_the_note_it_refused(
+    thread: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The one refusal this milestone adds, held to the rule every other
+    one in the store is held to: a fixed sentence compared by equality,
+    with nothing of the conversation, the name or the value in it, in
+    the sentence or in either log format.
+
+    Driven with a credential-shaped value, because what a ledger holds is
+    the model's own text and a note is exactly the shape of thing
+    somebody pastes a secret into.
+    """
+    spoken = "sk-test-9f1c02ab-a-note-nobody-should-repeat"
+    store = memory()
+    store.threads_erased(frozenset({thread}))
+
+    with caplog.at_level("DEBUG"):
+        with pytest.raises(ValueError) as refusal:
+            await store.set_state(thread, "secret", spoken, agent="poet")
+        with pytest.raises(ValueError) as cleared:
+            await store.clear_state(thread, "secret", agent="poet")
+
+    assert str(refusal.value) == memory_store.CONVERSATION_ERASED
+    assert str(cleared.value) == memory_store.CONVERSATION_ERASED
+    assert refusal.value.__cause__ is None and refusal.value.__context__ is None
+    for surface in (str(refusal.value), both_formats(caplog)):
+        assert spoken not in surface
+        assert thread not in surface
 
 
 async def test_a_fact_remembered_during_an_erasure_is_kept(
