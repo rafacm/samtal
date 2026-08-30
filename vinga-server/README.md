@@ -721,10 +721,12 @@ dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
 restrict tool names to `[A-Za-z0-9_-]`.
 
 **Builtins** are `switch_agent`, offered when the device is bound to
-more than one agent; and the memory family (`remember`,
-`update_memory`, `forget`, `restore_memory`, `recall`), the
-conversation ledger's `set_state` and `clear_state`, and
-`new_conversation` and `resume_conversation`, always offered.
+more than one agent; the memory family (`remember`, `update_memory`,
+`forget`, `restore_memory`, `recall`) and the conversation ledger's
+`set_state` and `clear_state`, offered to every agent whose `memory`
+section leaves them on, which is every agent that does not say
+otherwise; and `new_conversation` and `resume_conversation`, always
+offered.
 
 A successful `switch_agent` ends the current agent's reply: the new
 agent greets the user in its own prompt and its own voice, on its own
@@ -767,9 +769,10 @@ scope's budget is refused rather than stored. The insert and the pruning
 happen in one transaction under the schema's own writer lock, so two
 conversations talking to the same agent at once cannot lose each other's
 fact and no reply ever reads a memory that is over its cap. There is
-nothing to configure: the schema is migrated at every boot the way the
+nothing to switch on: the schema is migrated at every boot the way the
 record's is, and an agent that has been told nothing gets no memory
-block.
+block. There is something to switch off, and it is an agent's own
+`memory` section, below.
 
 **The prompt carries the newest of an agent's facts, not all of them.**
 A scope of a thousand facts does not fit in front of a small local
@@ -852,28 +855,48 @@ point of them rather than an oversight: renaming an agent orphans what
 it remembered and replacing a board orphans that board's notes, and
 `--all` is how those rows leave.
 
-No builtin is granted the way an MCP server is. One appears under a
-structural condition and the other nine are simply always there.
+**Whether an agent remembers at all is one line of its
+configuration.** No builtin is granted the way an MCP server is, and
+none needs to be: each of them is either structural or a policy of its
+own, and the two are different things.
+
 `switch_agent`'s condition is the device's: it exists exactly when the
 board is bound to more than one agent, and withholding it from one of
 them would strand a conversation on whichever agent has no way back,
-which is the receptionist handoff the tool was written for. The seven
-memory tools have no condition: every server keeps remembered facts and
-every conversation can keep a ledger, and the injection into the system
-prompt is unconditional, so an agent with `remember` withheld would
-recall for ever and never learn, one with the state tools withheld
-would be read a ledger it had no way to write, and one with the numbered
-three withheld could not correct or take back anything it had been told.
-Whether a particular agent should be allowed to remember at all is
-genuinely per-agent policy, and it is
-[#83](https://github.com/rafacm/vinga/issues/83)'s to decide. The two
-conversation tools have no condition either, for a reason of their own:
-a tool that is simply absent is a tool a model invents, so they are
-offered wherever a conversation is and a server that cannot resume
-anything says so in a sentence the agent reads out. Tools with sound
-structural rules do not need a grant model on top of them; the day a
-builtin arrives whose availability is genuinely per-agent policy, the
-grant edge the `mcp` list already carries is where it lands.
+which is the receptionist handoff the tool was written for. The two
+conversation tools have no condition, for a reason of their own: a tool
+that is simply absent is a tool a model invents, so they are offered
+wherever a conversation is and a server that cannot resume anything
+says so in a sentence the agent reads out.
+
+The seven memory tools have a policy, which is the `memory` section of
+the agent, or of `agent_defaults` for every agent that names none. On
+unless it says otherwise, so a deployment that writes nothing has the
+memory every agent has always had; off is one field:
+
+```yaml
+memory:
+  enabled: false
+```
+
+Off is the whole family at once, tools and injection together, because
+they are one feature seen from two sides: an agent with `remember`
+withheld and the block still injected would recall for ever and never
+learn, one with the state tools withheld would be read a ledger it had
+no way to write, and one with the numbered three withheld could not
+correct or take back anything it had been told. So a switched-off agent
+is offered none of the seven and is sent none of the blocks, including
+the notes its siblings on the same board keep: it can neither write
+what the room knows nor read it. Asking for a tool it was not offered
+is answered as any name this server does not publish is.
+
+Nothing already stored is deleted by it. The rows stay under the
+agent's name, `vinga memory list agent poet` still shows them, and
+switching the section back on is an agent that remembers what it
+remembered before; `vinga memory delete` is the door that takes rows
+away. A reload applies the change at that agent's next utterance, and
+one reply never gets half of it: which tools it is offered and what its
+prompt carries are decided together, once, at the top of the reply.
 
 A tool that fails, times out, or does not exist comes back to the model
 as an error result rather than ending the reply, so the assistant says

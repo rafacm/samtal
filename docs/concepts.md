@@ -423,11 +423,10 @@ remembered thing is:
   `remember` tool, saying that the fact is the device's; everything
   about a person stays in the agent's own scope.
 
-All three are present in every deployment: there is nothing to
-configure and nothing to switch on. They are stored in Postgres, in a
-schema of the server's own that it migrates at every boot (issue #314);
-the `memory:` section that used to name a directory of files has
-retired with the files.
+All three are available in every deployment: there is nothing to switch
+on. They are stored in Postgres, in a schema of the server's own that
+it migrates at every boot (issue #314); the `memory:` section that used
+to name a directory of files has retired with the files.
 
 **What is remembered can be corrected, removed and brought back.**
 Every remembered fact has a number, which `remember` answers with and
@@ -463,7 +462,8 @@ the active LLM provider's egress exactly as the transcript and the
 persona do. An agent on a cloud model sends what it remembered along
 with what was just said. The device scope is the half worth saying
 plainly: a note about the room or the household reaches the provider of
-*every* agent bound to that device, not only the one that was told it.
+*every* agent bound to that device that may remember, not only the one
+that was told it.
 `server.local_only` is the existing guard and it is the same one: a
 provider that sends session data off the host cannot be booted under it.
 
@@ -479,9 +479,16 @@ conversation has to be promoted to agent memory with `remember`, which
 is what a game agent's "save the game" and a tutor's "you have mastered
 this" actually are.
 
-Whether a *particular* agent may remember at all is not answerable
-today, deliberately: per-agent control arrives with the scopes' own
-issue, and until then every agent is offered the memory tools.
+**Whether a *particular* agent may remember at all is that agent's own
+setting.** An agent (or the defaults every agent inherits) carries a
+`memory` section, on unless it says otherwise, and off means the whole
+thing: the agent is offered none of the memory tools and is read none
+of the three scopes, its board's notes included. Half an answer would
+be worse than either whole one, so there is not one: an agent that
+could be told things and never write them down would recall for ever
+and never learn. Nothing already stored is deleted by switching it off,
+and switching it back on is an agent that remembers what it remembered
+before.
 
 One decided direction builds on the keying:
 

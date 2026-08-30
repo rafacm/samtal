@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-31
+
+### Added
+
+- **Whether an agent remembers at all is now one line of its
+  configuration** (#83). An agent, or the `agent_defaults` layer every
+  agent that names none inherits, carries a `memory` section with one
+  field: `memory: {enabled: false}` opts that agent out. It inherits
+  and replaces exactly as `filler` does, and it is on where nothing
+  says otherwise, so a deployment that writes none of this behaves
+  exactly as it did.
+  Off is the whole family at once. The agent is offered none of the
+  seven memory tools, is answered as it would be for a name this server
+  does not publish if it asks for one anyway, and is sent none of the
+  injected blocks: not its own facts, not the conversation's ledger,
+  and not the notes its siblings on the same board keep. Tools and
+  injection are one feature seen from two sides, and half of it would
+  be worse than either whole answer: an agent that could be told things
+  and never write them down would recall for ever and never learn.
+  Nothing already stored is deleted by switching it off. The rows stay
+  under the agent's name, `vinga memory list agent` still shows them,
+  and switching it back on is an agent that remembers what it
+  remembered before; `vinga memory delete` is what takes rows away.
+  A reload applies the change at that agent's next utterance, and one
+  reply never gets half of it: which tools a reply offers and what its
+  prompt carries are resolved together, once, before its first round.
+  `vinga agent preview` honours the section, so what it prints is what
+  that agent is sent.
+
 ## 2026-08-30
 
 ### Added
