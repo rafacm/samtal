@@ -7661,6 +7661,20 @@
         "title": "McpGrant",
         "type": "object"
       },
+      "MemoryPolicy": {
+        "additionalProperties": false,
+        "description": "Whether an agent remembers anything at all.\n\nOn by default, because every deployment has the schema behind it and\nan assistant that cannot remember is the exception rather than the\nshape. Switched off, the switch is the whole thing: the agent is\noffered none of the memory tools and its prompt carries none of the\nscope blocks, its device's included, so an agent that may not\nremember cannot read what its siblings on the same board accrued\neither. A half-off agent, told what the room knows and unable to\nwrite it down, would be a worse answer than either whole one.\n\nWhat the switch does not do is delete anything. Rows already stored\nunder the agent's name stay stored and stay visible to the operator\nsurface, and switching the section back on is an agent that\nremembers what it remembered before. Erasing is `vinga memory\ndelete`, which is a different act with a different door.",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "description": "Whether this agent may remember anything. On by default. Off withholds the whole family at once: the memory tools are not offered and no remembered facts, device notes or conversation state are injected into the prompt, so the agent can neither write memory nor read it. Nothing already stored is deleted.",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "MemoryPolicy",
+        "type": "object"
+      },
       "AgentConfig": {
         "additionalProperties": false,
         "description": "One agent: a prompt, plus whichever stages it overrides.",
@@ -7742,7 +7756,7 @@
               }
             ],
             "default": null,
-            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant.",
+            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this list: the memory family is offered wherever the memory section leaves it on, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant.",
             "title": "Mcp"
           },
           "filler": {
@@ -7756,6 +7770,18 @@
             ],
             "default": null,
             "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether this layer may remember anything. Unset inherits the agent_defaults section, and an agent under neither may remember, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `memory: {enabled: false}` opts an agent out of the memory tools and the injected scope blocks together."
           },
           "prompt_includes": {
             "anyOf": [
@@ -7865,7 +7891,7 @@
               }
             ],
             "default": null,
-            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant.",
+            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this list: the memory family is offered wherever the memory section leaves it on, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant.",
             "title": "Mcp"
           },
           "filler": {
@@ -7879,6 +7905,18 @@
             ],
             "default": null,
             "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether this layer may remember anything. Unset inherits the agent_defaults section, and an agent under neither may remember, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `memory: {enabled: false}` opts an agent out of the memory tools and the injected scope blocks together."
           },
           "prompt_includes": {
             "anyOf": [

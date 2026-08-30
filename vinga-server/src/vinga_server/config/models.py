@@ -1702,6 +1702,39 @@ class FillerConfig(BaseModel):
         return self
 
 
+class MemoryPolicy(BaseModel):
+    """Whether an agent remembers anything at all.
+
+    On by default, because every deployment has the schema behind it and
+    an assistant that cannot remember is the exception rather than the
+    shape. Switched off, the switch is the whole thing: the agent is
+    offered none of the memory tools and its prompt carries none of the
+    scope blocks, its device's included, so an agent that may not
+    remember cannot read what its siblings on the same board accrued
+    either. A half-off agent, told what the room knows and unable to
+    write it down, would be a worse answer than either whole one.
+
+    What the switch does not do is delete anything. Rows already stored
+    under the agent's name stay stored and stay visible to the operator
+    surface, and switching the section back on is an agent that
+    remembers what it remembered before. Erasing is `vinga memory
+    delete`, which is a different act with a different door.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether this agent may remember anything. On by default. Off withholds "
+            "the whole family at once: the memory tools are not offered and no "
+            "remembered facts, device notes or conversation state are injected into "
+            "the prompt, so the agent can neither write memory nor read it. Nothing "
+            "already stored is deleted."
+        ),
+    )
+
+
 class McpGrant(BaseModel):
     """One `mcp` list entry in its object form: a server, and which of
     its tools the layer may reach.
@@ -1919,9 +1952,10 @@ class AgentDefaults(BaseModel):
             "published name without the entry prefix. Unset inherits the "
             "agent_defaults list; naming a list replaces the inherited one rather "
             "than extending it, so an empty list opts an agent out of the tools its "
-            "siblings have. The builtin tools are outside this model: remember is "
-            "offered to every agent, and switch_agent appears under a structural "
-            "condition (a device bound to more than one agent) rather than by grant."
+            "siblings have. The builtin tools are outside this list: the memory "
+            "family is offered wherever the memory section leaves it on, and "
+            "switch_agent appears under a structural condition (a device bound to "
+            "more than one agent) rather than by grant."
         ),
     )
 
@@ -1964,6 +1998,22 @@ class AgentDefaults(BaseModel):
             "Latency masking with a pre-synthesized filled pause. Unset inherits the "
             "agent_defaults section; naming one replaces it wholly rather than "
             "merging with it, so `filler: {enabled: false}` opts an agent out."
+        ),
+    )
+
+    # Whether this layer remembers anything. None means inherit, and a
+    # section replaces the inherited one wholly exactly as `filler`
+    # does, so `memory: {enabled: false}` opts an agent out. On where
+    # neither layer names it, which is what keeps every deployment
+    # written before this field behaving as it did.
+    memory: MemoryPolicy | None = Field(
+        default=None,
+        description=(
+            "Whether this layer may remember anything. Unset inherits the "
+            "agent_defaults section, and an agent under neither may remember, which "
+            "is the default; naming a section replaces the inherited one wholly "
+            "rather than merging with it, so `memory: {enabled: false}` opts an "
+            "agent out of the memory tools and the injected scope blocks together."
         ),
     )
 
@@ -2677,6 +2727,24 @@ class Config(DomainConfig):
         if own is not None:
             return own
         return self.agent_defaults.filler
+
+    def memory_for_agent(self, agent: str) -> MemoryPolicy:
+        """Whether this agent may remember anything: its own section when
+        it names one, agent_defaults otherwise, and the declared default
+        when neither does.
+
+        A section rather than None where nothing is written, which is the
+        one place this differs from `filler_for_agent`: an absent filler
+        section and one that is off mean the same thing, and an absent
+        memory section means the opposite of an off one. Answering with
+        the model's own defaults keeps that difference where the field
+        declares it rather than at every call site.
+        """
+        own = self.agents[agent].memory
+        if own is not None:
+            return own
+        inherited = self.agent_defaults.memory
+        return inherited if inherited is not None else MemoryPolicy()
 
     def referenced_mcp_servers(self) -> set[str]:
         """The entries some agent actually uses. Only these are

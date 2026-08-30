@@ -61,3 +61,13 @@ prompt_includes:
 # for what the section holds.
 # filler:
 #   enabled: false
+
+# Whether this agent remembers anything, which it does unless this says
+# otherwise. Off is the whole family at once: no memory tools are
+# offered and no remembered facts, no notes about the board and no
+# conversation state are injected into the prompt, so the agent can
+# neither write memory nor read it, including what its siblings on the
+# same board were told. Nothing already stored is deleted, and switching
+# it back on is an agent that remembers what it remembered before.
+# memory:
+#   enabled: false

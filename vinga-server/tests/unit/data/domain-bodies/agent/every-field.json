@@ -5,6 +5,7 @@
   "vad": "silero",
   "mcp": ["home", {"server": "weather"}, {"server": "shed", "tools": ["open", "close"]}],
   "filler": {"enabled": true, "delay_ms": 1500.0, "phrases": ["Hmm...", "Let me see..."]},
+  "memory": {"enabled": false},
   "prompt_includes": ["household", "house_style"],
   "prompt": "You are Sam. Reply in Swedish."
 }
