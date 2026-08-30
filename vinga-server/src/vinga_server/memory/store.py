@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from sqlalchemy import Connection, Engine, delete, select
+from sqlalchemy import update as sql_update
 
 from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
@@ -111,6 +112,30 @@ TOO_LONG = (
     "this is too long to remember: one fact has to fit inside the space this memory "
     "keeps for all of them, and forgetting everything else would not make room for "
     "it. Nothing was changed; say it in fewer words"
+)
+
+# What an id that names nothing this caller may reach answers with, one
+# sentence per operation.
+#
+# A fact that is not there and a fact that belongs to another agent or
+# another device are answered identically, on purpose and not by
+# accident: a refusal that told them apart would confirm that somebody
+# else's ids exist and let them be walked. Nothing of the id is repeated
+# back either, for the same reason.
+NO_FACT_TO_UPDATE = (
+    "there is no such fact to correct: no fact of this memory has that number. "
+    "Nothing was changed. Look the fact up again to find the number it has now"
+)
+
+NO_FACT_TO_FORGET = (
+    "there is no such fact to forget: no fact of this memory has that number. "
+    "Nothing was changed. Look the fact up again to find the number it has now"
+)
+
+NO_FACT_TO_RESTORE = (
+    "there is nothing to bring back: nothing was forgotten in this conversation "
+    "under that number, and a fact forgotten in another conversation cannot be "
+    "brought back from this one. Nothing was changed"
 )
 
 
@@ -457,6 +482,192 @@ class MemoryStore:
 
         return self._written(agent, scope, work)
 
+    async def update(
+        self, scope: MemoryScope, owner: str, fact_id: int, text: str, *, agent: str
+    ) -> None:
+        """Correct one fact in place, keeping the id it is addressed by
+        and refreshing the moment it was written.
+
+        The id is bounded by ownership in the WHERE clause rather than by
+        the model's good behavior: what this reaches is a row whose
+        `(scope, owner)` is the pair the caller named and nothing else,
+        so an agent cannot correct another agent's fact by guessing a
+        number, and a device's notes are reachable only as the device.
+
+        Held facts are not reachable either. A fact that was forgotten is
+        waiting to be brought back as it was said, and editing it there
+        would make the undo answer with something the user never said.
+        """
+        corrected = _one_line(text)
+        if not corrected:
+            raise ValueError(NOTHING_TO_REMEMBER)
+        _refuse_the_oversized(corrected, scope)
+        await asyncio.to_thread(self._update, agent, scope, owner, fact_id, corrected)
+
+    def _update(
+        self, agent: str, scope: MemoryScope, owner: str, fact_id: int, fact: str
+    ) -> None:
+        def work(connection: Connection) -> None:
+            done = connection.execute(
+                sql_update(schema.facts)
+                .where(*_addressed(scope, owner, fact_id), _ACTIVE)
+                .values(fact=fact, at=_utc_now().isoformat())
+            )
+            if done.rowcount != 1:
+                raise _Refused(NO_FACT_TO_UPDATE)
+            # A correction can grow a fact past what its scope holds, so
+            # the same prune every mutation ends with runs here too, and
+            # the corrected row is the one it may not take.
+            _prune(connection, scope, owner, protecting=fact_id)
+
+        self._written(agent, scope, work)
+
+    async def forget(
+        self,
+        scope: MemoryScope,
+        owner: str,
+        fact_id: int,
+        conversation: str,
+        *,
+        agent: str,
+        permanently: bool = False,
+    ) -> str:
+        """Forget one fact, and answer what was removed so the agent can
+        say it out loud.
+
+        Soft by default, which is the whole of the reversibility
+        decision: the row is held rather than erased, out of every read
+        and out of every cap, and the conversation it was forgotten in is
+        recorded because that is what a restore addresses and what the
+        thread's own end takes with it.
+
+        `permanently` erases immediately and enters no held area, so
+        there is nothing to bring back and nothing left for an operator
+        to find. It is the one door for a fact that should not have been
+        stored at all.
+        """
+        return await asyncio.to_thread(
+            self._forget, agent, scope, owner, fact_id, conversation, permanently
+        )
+
+    def _forget(
+        self,
+        agent: str,
+        scope: MemoryScope,
+        owner: str,
+        fact_id: int,
+        conversation: str,
+        permanently: bool,
+    ) -> str:
+        def work(connection: Connection) -> str:
+            found = connection.execute(
+                select(schema.facts.c.fact).where(
+                    *_addressed(scope, owner, fact_id), _ACTIVE
+                )
+            ).first()
+            if found is None:
+                raise _Refused(NO_FACT_TO_FORGET)
+            where = _addressed(scope, owner, fact_id)
+            if permanently:
+                connection.execute(delete(schema.facts).where(*where))
+            else:
+                connection.execute(
+                    sql_update(schema.facts)
+                    .where(*where)
+                    .values(
+                        forgotten_at=_utc_now().isoformat(),
+                        forgotten_in=conversation,
+                    )
+                )
+            # No prune: taking a row out of the active set can only free
+            # capacity, never use it.
+            return str(found[0])
+
+        return self._written(agent, scope, work)
+
+    async def restore(
+        self,
+        scope: MemoryScope,
+        owner: str,
+        conversation: str,
+        fact_id: int | None = None,
+        *,
+        agent: str,
+    ) -> str:
+        """Bring back a fact this conversation forgot, and answer it.
+
+        With no id, the last thing forgotten in this conversation, which
+        is the shape a person actually asks for. With one, that fact, and
+        the conversation is still part of the address: a fact forgotten
+        somewhere else is not this conversation's to bring back, which
+        makes the id door mean what the no-id door means.
+
+        The restored fact comes back exactly as it was said. Its id is
+        the one it always had, and its place in the reading order is the
+        one it always had, because the held area kept the row rather than
+        a copy of its text.
+        """
+        return await asyncio.to_thread(
+            self._restore, agent, scope, owner, conversation, fact_id
+        )
+
+    def _restore(
+        self,
+        agent: str,
+        scope: MemoryScope,
+        owner: str,
+        conversation: str,
+        fact_id: int | None,
+    ) -> str:
+        def work(connection: Connection) -> str:
+            held = select(schema.facts.c.id, schema.facts.c.fact).where(
+                schema.facts.c.scope == scope,
+                schema.facts.c.owner == owner,
+                schema.facts.c.forgotten_in == conversation,
+            )
+            if fact_id is None:
+                held = held.order_by(
+                    schema.facts.c.forgotten_at.desc(), schema.facts.c.id.desc()
+                ).limit(1)
+            else:
+                held = held.where(schema.facts.c.id == fact_id)
+            found = connection.execute(held).first()
+            if found is None:
+                raise _Refused(NO_FACT_TO_RESTORE)
+            connection.execute(
+                sql_update(schema.facts)
+                .where(schema.facts.c.id == found[0])
+                .values(forgotten_at=None, forgotten_in=None)
+            )
+            # The scope may have refilled while the fact was held, so a
+            # restore re-prunes like every other mutation rather than
+            # failing or leaving the scope over its cap. The restored row
+            # is protected: a prune that took it would answer success and
+            # change nothing.
+            _prune(connection, scope, owner, protecting=int(found[0]))
+            return str(found[1])
+
+        return self._written(agent, scope, work)
+
+
+# What every id-addressed operation adds to its WHERE clause, so the
+# reach is the row's ownership rather than the model's good behavior.
+_ACTIVE = schema.facts.c.forgotten_at.is_(None)
+
+
+def _addressed(scope: MemoryScope, owner: str, fact_id: int) -> tuple[object, ...]:
+    """One fact, addressed the way every operation that names an id
+    addresses it: the id AND the pair that owns it.
+
+    Written once because it is one rule, and stating it three times is
+    how one of the three comes to be missing it.
+    """
+    return (
+        schema.facts.c.id == fact_id,
+        schema.facts.c.scope == scope,
+        schema.facts.c.owner == owner,
+    )
+
 
 def _caps(scope: MemoryScope) -> tuple[int, int]:
     """How many lines and how many bytes one scope keeps.
@@ -616,6 +827,9 @@ __all__ = [
     "MAX_LINES",
     "MEMORY_CHAIN",
     "NOTHING_TO_REMEMBER",
+    "NO_FACT_TO_FORGET",
+    "NO_FACT_TO_RESTORE",
+    "NO_FACT_TO_UPDATE",
     "QUIET_TIMEOUT_S",
     "TOO_LONG",
     "UNWRITABLE",

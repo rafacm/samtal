@@ -77,6 +77,23 @@ def _rows(owner: str, scope: str = "agent") -> list[str]:
         holder.close()
 
 
+def _held(owner: str, scope: str = "agent") -> list[tuple[str, str]]:
+    """One owner's held facts, each with the conversation that forgot
+    it. What a restore reaches, and what a prune must never take."""
+    holder = _connection()
+    try:
+        return [
+            (row[0], row[1])
+            for row in holder.execute(
+                "select fact, forgotten_in from memory.facts where scope = %s "
+                "and owner = %s and forgotten_at is not null order by id",
+                (scope, owner),
+            )
+        ]
+    finally:
+        holder.close()
+
+
 # The gate the two-writer case is arranged around
 #
 # An advisory key of this suite's own, in nobody's chain: what a test
@@ -325,6 +342,236 @@ async def test_each_scope_is_pruned_against_its_own_cap(
     await store.add(MemoryScope.DEVICE, "aa:bb", "device fact 3", agent="poet")
     assert _rows("poet") == [f"agent fact {index}" for index in range(1, 5)]
     assert _rows("aa:bb", scope="device") == ["device fact 2", "device fact 3"]
+
+
+# Correcting, forgetting and bringing back
+#
+# The three operations that address a fact by the id `add` answered
+# with. What they share is the address: the id AND the pair that owns
+# it, which is what keeps one agent out of another's memory and one
+# conversation out of another's undo.
+
+THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+OTHER_THREAD = "0123456789abcdef0123456789abcdef"
+
+
+async def test_a_correction_keeps_the_id_and_replaces_the_words() -> None:
+    store = memory()
+    fact_id = await store.add(MemoryScope.AGENT, "poet", "the dog is called Bose", agent="poet")
+
+    await store.update(MemoryScope.AGENT, "poet", fact_id, "the dog is called Bosse", agent="poet")
+
+    assert _rows("poet") == ["the dog is called Bosse"]
+    # The id is stable, which is what makes it an address: forgetting by
+    # the number the add answered with still reaches the corrected fact.
+    assert await store.forget(
+        MemoryScope.AGENT, "poet", fact_id, THREAD, agent="poet"
+    ) == "the dog is called Bosse"
+
+
+async def test_a_forgotten_fact_is_out_of_the_reading_and_can_come_back() -> None:
+    """Soft, spoken and reversible: the removal answers with what it
+    removed, the fact leaves every read, and bringing it back brings back
+    the bytes rather than something rephrased."""
+    store = memory()
+    kept = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    gone = await store.add(
+        MemoryScope.AGENT, "poet", "the user's dog is called Bosse", agent="poet"
+    )
+
+    spoken = await store.forget(MemoryScope.AGENT, "poet", gone, THREAD, agent="poet")
+
+    assert spoken == "the user's dog is called Bosse"
+    assert store.read("poet") == "- the user is vegetarian"
+    assert _held("poet") == [("the user's dog is called Bosse", THREAD)]
+
+    brought_back = await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet")
+
+    assert brought_back == "the user's dog is called Bosse"
+    assert _held("poet") == []
+    # In the place it always had, because the held area kept the row and
+    # not a copy of its words.
+    assert store.read("poet").splitlines() == [
+        "- the user is vegetarian",
+        "- the user's dog is called Bosse",
+    ]
+    assert _rows("poet")[kept - kept] == "the user is vegetarian"
+
+
+async def test_the_last_thing_forgotten_is_what_comes_back_first() -> None:
+    """No id means the last thing forgotten in this conversation, which
+    is the shape a person actually asks for."""
+    store = memory()
+    first = await store.add(MemoryScope.AGENT, "poet", "fact one", agent="poet")
+    second = await store.add(MemoryScope.AGENT, "poet", "fact two", agent="poet")
+    await store.forget(MemoryScope.AGENT, "poet", first, THREAD, agent="poet")
+    await store.forget(MemoryScope.AGENT, "poet", second, THREAD, agent="poet")
+
+    assert await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet") == "fact two"
+    # And the id door reaches the other one, which is still held.
+    assert (
+        await store.restore(MemoryScope.AGENT, "poet", THREAD, first, agent="poet")
+        == "fact one"
+    )
+    assert _held("poet") == []
+
+
+async def test_a_fact_forgotten_permanently_does_not_come_back() -> None:
+    store = memory()
+    gone = await store.add(MemoryScope.AGENT, "poet", "the card number is 4111", agent="poet")
+
+    spoken = await store.forget(
+        MemoryScope.AGENT, "poet", gone, THREAD, agent="poet", permanently=True
+    )
+
+    assert spoken == "the card number is 4111"
+    assert _rows("poet") == []
+    # Nothing held, so there is nothing for a restore to find and
+    # nothing left for an operator to read either.
+    assert _held("poet") == []
+    with pytest.raises(ValueError) as refusal:
+        await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet")
+    assert str(refusal.value) == store_module.NO_FACT_TO_RESTORE
+
+
+# What an id may not reach
+#
+# Ids are global and guessable, so every id-addressed operation is
+# bounded by ownership in its WHERE clause. A missing fact and an
+# inaccessible one are answered identically on purpose: a refusal that
+# told them apart would confirm that somebody else's ids exist.
+
+
+async def test_another_agents_fact_is_not_reachable_by_its_number() -> None:
+    store = memory()
+    theirs = await store.add(
+        MemoryScope.AGENT, "tutor", "the user is learning Spanish", agent="tutor"
+    )
+
+    with pytest.raises(ValueError) as correcting:
+        await store.update(MemoryScope.AGENT, "poet", theirs, "something else", agent="poet")
+    with pytest.raises(ValueError) as forgetting:
+        await store.forget(MemoryScope.AGENT, "poet", theirs, THREAD, agent="poet")
+
+    assert str(correcting.value) == store_module.NO_FACT_TO_UPDATE
+    assert str(forgetting.value) == store_module.NO_FACT_TO_FORGET
+    # And the same sentence a fact that never existed gets, so the
+    # refusal confirms nothing.
+    with pytest.raises(ValueError) as missing:
+        await store.forget(MemoryScope.AGENT, "poet", theirs + 10_000, THREAD, agent="poet")
+    assert str(missing.value) == store_module.NO_FACT_TO_FORGET
+    assert _rows("tutor") == ["the user is learning Spanish"]
+
+
+async def test_another_devices_note_is_not_reachable_by_its_number() -> None:
+    store = memory()
+    theirs = await store.add(MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet")
+
+    with pytest.raises(ValueError) as elsewhere:
+        await store.update(MemoryScope.DEVICE, "cc:dd", theirs, "quiet", agent="poet")
+    # And the scope is half of the address too: the same number under
+    # the agent scope is not this note.
+    with pytest.raises(ValueError) as wrong_scope:
+        await store.update(MemoryScope.AGENT, "aa:bb", theirs, "quiet", agent="poet")
+
+    assert str(elsewhere.value) == store_module.NO_FACT_TO_UPDATE
+    assert str(wrong_scope.value) == store_module.NO_FACT_TO_UPDATE
+    assert _rows("aa:bb", scope="device") == ["the kettle is loud"]
+
+
+async def test_a_fact_forgotten_in_another_conversation_stays_forgotten() -> None:
+    """The conversation is part of a restore's address, which is what
+    makes the id door mean what the no-id door means: this thread brings
+    back what this thread forgot."""
+    store = memory()
+    gone = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.forget(MemoryScope.AGENT, "poet", gone, OTHER_THREAD, agent="poet")
+
+    with pytest.raises(ValueError) as by_id:
+        await store.restore(MemoryScope.AGENT, "poet", THREAD, gone, agent="poet")
+    with pytest.raises(ValueError) as by_last:
+        await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet")
+
+    assert str(by_id.value) == store_module.NO_FACT_TO_RESTORE
+    assert str(by_last.value) == store_module.NO_FACT_TO_RESTORE
+    assert _held("poet") == [("the user is vegetarian", OTHER_THREAD)]
+    assert _rows("poet") == []
+
+
+# The cap invariant, across every mutation
+#
+# Held rows are outside all of it: never counted, never pruned, still
+# restorable. Everything else re-prunes inside the transaction that took
+# the scope past its cap, so a grown correction and a restore into a
+# scope that refilled both succeed rather than failing or overflowing.
+
+
+async def test_a_correction_too_long_for_its_scope_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store_module, "MAX_BYTES", 40)
+    store = memory()
+    fact_id = await store.add(MemoryScope.AGENT, "poet", "a short fact", agent="poet")
+
+    with pytest.raises(ValueError) as refusal:
+        await store.update(MemoryScope.AGENT, "poet", fact_id, "x" * 41, agent="poet")
+
+    assert str(refusal.value) == store_module.TOO_LONG
+    assert _rows("poet") == ["a short fact"]
+
+
+async def test_a_correction_that_grows_a_fact_re_prunes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scope is inside its bound when the transaction ends, whatever
+    the correction did to it: the oldest active fact goes, and the
+    corrected one stays even where it is the oldest."""
+    # Room for the corrected fact and one other, which is what makes the
+    # correction fit while the three facts around it do not.
+    monkeypatch.setattr(store_module, "MAX_BYTES", len(b"- aaa longer\n- ccc"))
+    store = memory()
+    oldest = await store.add(MemoryScope.AGENT, "poet", "aaa", agent="poet")
+    await store.add(MemoryScope.AGENT, "poet", "bbb", agent="poet")
+    await store.add(MemoryScope.AGENT, "poet", "ccc", agent="poet")
+
+    await store.update(MemoryScope.AGENT, "poet", oldest, "aaa longer", agent="poet")
+
+    # The corrected fact is the oldest, and it survives: a prune that
+    # took it would answer success and change nothing.
+    assert _rows("poet") == ["aaa longer", "ccc"]
+
+
+async def test_held_facts_are_outside_every_cap_and_come_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole of what makes the undo a promise. A held fact is not
+    counted against the cap, is not chosen by any prune however many
+    writes go past it, and is still there to be brought back; and the
+    restore itself re-prunes rather than overflowing."""
+    monkeypatch.setattr(store_module, "MAX_LINES", 2)
+    store = memory()
+    first = await store.add(MemoryScope.AGENT, "poet", "fact 0", agent="poet")
+    held = await store.add(MemoryScope.AGENT, "poet", "fact 1", agent="poet")
+    await store.forget(MemoryScope.AGENT, "poet", held, THREAD, agent="poet")
+
+    # Two writes that each take the scope past its cap, with the held
+    # row sitting between them in id order.
+    await store.add(MemoryScope.AGENT, "poet", "fact 2", agent="poet")
+    await store.add(MemoryScope.AGENT, "poet", "fact 3", agent="poet")
+
+    assert _rows("poet") == ["fact 2", "fact 3"]
+    assert _held("poet") == [("fact 1", THREAD)]
+    # The oldest active fact was taken by the prune while the older held
+    # one was not, which no cap arithmetic that counted it could do.
+    with pytest.raises(ValueError) as gone:
+        await store.forget(MemoryScope.AGENT, "poet", first, THREAD, agent="poet")
+    assert str(gone.value) == store_module.NO_FACT_TO_FORGET
+
+    assert await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet") == "fact 1"
+    # Back in its own place, with the scope back inside its cap: the
+    # restore re-pruned the oldest active fact rather than refusing or
+    # leaving three where two fit.
+    assert _rows("poet") == ["fact 1", "fact 3"]
 
 
 async def test_concurrent_appends_keep_every_fact() -> None:
