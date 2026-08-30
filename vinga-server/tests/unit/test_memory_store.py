@@ -1,17 +1,21 @@
 """The memory store: what it keeps, what it drops, and how it fails.
 
 The schema's own suite next door is about the chain (the head, the
-identity column, the index, the advisory key). This one is about the two
-sentences a caller speaks, `read` and `remember`, and about the four
-properties the storage move (#314) was made for: a fact survives the
-process that stored it, the caps are applied inside the write
-transaction rather than beside it, two writers through independent
-connections cannot lose each other's fact, and a database that refuses
-answers with a fixed sentence rather than with the connection string it
-tried.
+identity column, the indexes, the checks, the advisory key). This one is
+about the sentences a caller speaks, and about the properties they are
+held to: a fact survives the process that stored it, the caps are
+applied inside the write transaction rather than beside it, two writers
+through independent connections cannot lose each other's fact, an id
+reaches only what its owner may reach, a held fact is outside every cap
+and still there to be brought back, and a database that refuses answers
+with a fixed sentence rather than with the connection string it tried.
 
-Nothing here reaches into the store for an engine. What it drives is
-`read`, `remember`, and the stores `tests/support/stores.py` builds
+Every fixed sentence is compared by equality against the module's own
+constant rather than searched for as a substring, which is what keeps a
+refusal a contract instead of a phrase that happens to appear.
+
+Nothing here reaches into the store for an engine. What it drives is the
+store's own calls and the stores `tests/support/stores.py` builds
 through the same public constructor the opener uses; where a test has to
 see the rows themselves, it opens its own connection, which is the point
 of the independent-connection assertions below.
@@ -1435,9 +1439,34 @@ async def test_nothing_of_a_connection_reaches_a_surface_a_model_or_an_operator_
                 open_memory(settings)
 
             store = memory_that_cannot_write()
+            unreadable = memory_that_cannot_read()
+            # Every door onto the database, because the claim is
+            # "nowhere" and a door left out is a door nothing asserts
+            # about. The reads answer empty and the cleanup answers
+            # nothing; only the writes refuse.
             assert store.read("poet") == ""
+            assert unreadable.read_for_prompt("poet", "aa:bb", THREAD) == (
+                store_module.NOTHING_REMEMBERED
+            )
+            assert unreadable.recall("poet", "aa:bb", "cheese") == ""
+            assert store.sweep() == store_module.NOTHING_PURGED
+            assert store.purge_threads([THREAD]) == store_module.NOTHING_PURGED
             with pytest.raises(ConfigError) as writing:
                 await store.remember("poet", "the user is vegetarian")
+            for call in (
+                lambda: store.add(
+                    MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet"
+                ),
+                lambda: store.update(
+                    MemoryScope.AGENT, "poet", 7, "corrected", agent="poet"
+                ),
+                lambda: store.forget(MemoryScope.AGENT, "poet", 7, THREAD, agent="poet"),
+                lambda: store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet"),
+                lambda: store.set_state(THREAD, "turn", "white to move", agent="poet"),
+                lambda: store.clear_state(THREAD, agent="poet"),
+            ):
+                with pytest.raises(ConfigError):
+                    await call()
 
             spoken = f'the tool "remember" failed: {writing.value}'
 
@@ -1453,6 +1482,93 @@ async def test_nothing_of_a_connection_reaches_a_surface_a_model_or_an_operator_
             walked.append(cause)
             cause = cause.__cause__ or cause.__context__
         assert all(STORED not in str(one) for one in walked)
+
+
+# A fact is content, and a refusal is read out loud
+#
+# The other half of the sentinel above. What a caller passes here is the
+# user's own words, and every refusal this module makes is spoken by a
+# model into a conversation that may be recorded. So the claim is that
+# no refusal, no event and no log line repeats a word of what was
+# offered, or the number that was addressed, and every sentence a caller
+# meets is one of this module's own declared constants.
+
+SPOKEN = "sk-test-2b9e41c7-a-fact-nobody-should-repeat"
+
+ADDRESSED = 424_242
+
+
+async def test_nothing_a_caller_offered_is_repeated_back_by_a_refusal(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Every refusal a caller can reach, driven with a credential-shaped
+    fact, a credential-shaped ledger value and an id that names nothing,
+    and each sentence compared by equality against the constant that
+    declares it rather than searched for as a substring."""
+    monkeypatch.setattr(store_module, "MAX_BYTES", 40)
+    monkeypatch.setattr(store_module, "STATE_BYTES", 40)
+    working = memory()
+    refused = memory_that_cannot_write()
+    unreadable = memory_that_cannot_read()
+
+    said: list[str] = []
+    with caplog.at_level("DEBUG"):
+        for call in (
+            # Decided before a connection: the caps, and the empty forms.
+            lambda: working.add(MemoryScope.AGENT, "poet", SPOKEN, agent="poet"),
+            lambda: working.update(
+                MemoryScope.AGENT, "poet", ADDRESSED, SPOKEN, agent="poet"
+            ),
+            lambda: working.set_state(THREAD, "secret", SPOKEN, agent="poet"),
+            lambda: working.add(MemoryScope.AGENT, "poet", "  ", agent="poet"),
+            lambda: working.set_state(THREAD, "secret", "  ", agent="poet"),
+            # Decided where the rows are: an id that names nothing this
+            # caller may reach.
+            lambda: working.update(
+                MemoryScope.AGENT, "poet", ADDRESSED, "short", agent="poet"
+            ),
+            lambda: working.forget(
+                MemoryScope.AGENT, "poet", ADDRESSED, THREAD, agent="poet"
+            ),
+            lambda: working.restore(
+                MemoryScope.AGENT, "poet", THREAD, ADDRESSED, agent="poet"
+            ),
+            # Decided by a database that refused, on every write path.
+            lambda: refused.add(MemoryScope.AGENT, "poet", "a short fact", agent="poet"),
+            lambda: refused.set_state(THREAD, "turn", "white to move", agent="poet"),
+            lambda: refused.clear_state(THREAD, agent="poet"),
+        ):
+            with pytest.raises((ValueError, ConfigError)) as refusal:
+                await call()
+            said.append(str(refusal.value))
+        # And the two reads, which refuse nobody and answer empty.
+        assert unreadable.recall("poet", "aa:bb", SPOKEN) == ""
+        assert unreadable.read_for_prompt("poet", "aa:bb", THREAD) == (
+            store_module.NOTHING_REMEMBERED
+        )
+
+    # Every sentence is one this module declared, by equality.
+    declared = {
+        store_module.TOO_LONG,
+        store_module.STATE_ENTRY_TOO_LONG,
+        store_module.NOTHING_TO_REMEMBER,
+        store_module.NOTHING_TO_SET,
+        store_module.NO_FACT_TO_UPDATE,
+        store_module.NO_FACT_TO_FORGET,
+        store_module.NO_FACT_TO_RESTORE,
+        store_module.UNWRITABLE,
+    }
+    assert set(said) <= declared
+    assert len(said) == 11
+
+    # And nothing of what was offered reaches a surface, whether the
+    # refusal was decided here or by the database.
+    for surface in (*said, both_formats(caplog)):
+        assert SPOKEN not in surface
+        assert str(ADDRESSED) not in surface
+    for record in caplog.records:
+        assert SPOKEN not in repr(record.__dict__)
+        assert str(ADDRESSED) not in repr(record.__dict__)
 
 
 async def test_a_reply_happens_over_a_memory_that_cannot_be_read(

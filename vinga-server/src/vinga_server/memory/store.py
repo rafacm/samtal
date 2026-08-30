@@ -1,4 +1,4 @@
-"""The store behind an agent's remembered facts: one chain, two engines.
+"""The store behind what an agent remembers: one chain, two engines.
 
 What this module hides from its callers is the whole of the storage: a
 schema of its own and the migrations that build it, an advisory lock
@@ -7,22 +7,42 @@ that lock before it reads anything, a separate read-only engine so a
 reply's memory read never waits on a writer, and a connection whose
 failures are classified rather than quoted. A caller asks for a store
 and disposes it; it never learns which schema, which lock key, which
-isolation level, or what a psycopg failure looks like.
+isolation level, or what a psycopg failure looks like. It never learns
+what a scope is stored as either: it names one, and the store knows
+which table, which cap and which index that means.
 
-What a caller does get is two sentences: `read(agent)`, the facts as
-the prompt injects them, and `remember(agent, fact)`, one fact kept.
-Memory is keyed by agent and not by agent and device, because an agent
-is one entity across rooms: "remember I am vegetarian", said in the
-kitchen, holds in the bedroom. Telling people apart on a shared device
-is the voiceprint problem, and keying by device would fragment memory
-without solving it.
+Three memories, addressed as a scope and an owner. An agent's own,
+keyed by its configured name, because an agent is one entity across
+rooms: "remember I am vegetarian", said in the kitchen, holds in the
+bedroom. A device's, keyed by its MAC and shared by every agent bound
+to it, which is where the place and the household belong. And a
+conversation's, keyed by the thread's uuid hex, a ledger of what is
+currently true that shares its thread's lifecycle whole. Telling people
+apart on a shared device is still the voiceprint problem, and none of
+these three solves it.
 
-There is no recall tool. For memory small enough to inject, injection
-is the standard shape: it costs no lookup latency (a recall round trip
-is spoken silence) and does not depend on a small local model choosing
-to call it. The caps below are what keep that true, and are why this
-becomes a two-tier store, a small injected core plus a search tool,
-once memory outgrows the prompt.
+What a caller gets, in the order the sentences are met:
+
+- `read_for_prompt(agent, device, conversation)`, all three scopes
+  rendered in one round trip, and `read(agent)`, the agent's scope
+  whole, which is what #314's callers still speak.
+- `add`, `update`, `forget` and `restore`, addressed by the id `add`
+  answers with and bounded by the ownership of the row rather than by
+  the model's good behavior; `remember` is `add` on the agent scope.
+- `recall(agent, device, query)`, a bounded lookup over every active
+  fact those two scopes hold, which is how the model reaches what the
+  prompt did not inject and how it learns the number of a fact it wants
+  to correct.
+- `set_state` and `clear_state`, the conversation's ledger.
+- `purge`, `purge_threads` and `sweep`, which take the memory of
+  threads that are gone.
+
+Injection is still the standard shape for what fits: it costs no lookup
+latency (a lookup round trip is spoken silence) and does not depend on
+a small local model choosing to call it. The caps are what keep that
+true, and the two-tier shape the file store's docstring predicted is
+what the agent scope became once it outgrew the prompt: a small
+injected core, and the rest reachable by asking.
 
 The chain is declared here rather than beside `db.open_at`, for the
 reason the conversation store's is: which schema a store lives in is a
