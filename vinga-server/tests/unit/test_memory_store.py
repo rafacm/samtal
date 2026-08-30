@@ -18,6 +18,8 @@ of the independent-connection assertions below.
 """
 
 import asyncio
+import contextlib
+from collections.abc import Iterator
 
 import psycopg
 import pytest
@@ -35,7 +37,7 @@ from tests.support.stores import (
 )
 from vinga_server.config.loader import ConfigError, DatabaseBusyError
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.db import connection_url
+from vinga_server.db import advisory_key, connection_url
 from vinga_server.memory import MEMORY_CHAIN, open_memory
 from vinga_server.memory import store as store_module
 from vinga_server.runtime import prompt
@@ -64,6 +66,95 @@ def _rows(agent: str) -> list[str]:
         ]
     finally:
         holder.close()
+
+
+# The gate the two-writer case is arranged around
+#
+# An advisory key of this suite's own, in nobody's chain: what a test
+# connection holds so that a transaction under test stops exactly where
+# the test needs it to. `advisory_key` answers this application's own
+# space, and the chains take 1, 2 and 3, so a number far outside that
+# run cannot be mistaken for one of theirs.
+GATE_KEY = advisory_key(9001)
+
+# The fact the first writer stores, and the one its prune drops.
+#
+# The gate hangs on the prune rather than on the insert, and that is the
+# whole of the arrangement: a writer parked after its insert but before
+# its read would still read the other's committed rows when it resumed,
+# because every statement of a READ COMMITTED transaction takes its own
+# snapshot, and the arithmetic would come out right with no lock at all.
+# Parked after the delete, it has already decided, and a second writer
+# that decides beside it is deciding on the same rows.
+GATED_FACT = "fact 3"
+GATED_VICTIM = "fact 0"
+
+
+@contextlib.contextmanager
+def _the_prune_gate_held() -> Iterator[None]:
+    """A trigger that parks whichever transaction prunes `GATED_VICTIM`,
+    and the connection whose lock parks it.
+
+    A test-only `AFTER DELETE` trigger rather than a sleep, because what
+    this buys is an interleaving rather than a delay: the first writer
+    is inside its transaction, past its insert, its read and its prune,
+    and has not committed, for as long as this is entered.
+    """
+    gate = _connection()
+    installer = _connection()
+    try:
+        installer.execute(
+            "create function memory.hold_prune() returns trigger language plpgsql as "
+            f"$$ begin if old.fact = '{GATED_VICTIM}' then "
+            f"perform pg_advisory_xact_lock({GATE_KEY}); end if; return null; end $$"
+        )
+        installer.execute(
+            "create trigger hold_prune after delete on memory.facts "
+            "for each row execute function memory.hold_prune()"
+        )
+        installer.commit()
+        gate.execute("select pg_advisory_xact_lock(%s)", (GATE_KEY,))
+        yield
+    finally:
+        # The gate first: the trigger cannot be dropped while a
+        # transaction is parked inside it.
+        gate.rollback()
+        gate.close()
+        installer.execute("drop trigger if exists hold_prune on memory.facts")
+        installer.execute("drop function if exists memory.hold_prune()")
+        installer.commit()
+        installer.close()
+
+
+async def _waiting_on_a_lock(how_many: int, within_s: float = 5.0) -> bool:
+    """Whether this many backends of this database are parked on a lock,
+    asked of the database rather than assumed from a sleep.
+
+    Any lock, not the advisory one alone, because which lock the second
+    writer waits on is exactly what the arrangement is testing: the
+    chain's advisory gate where the listener exists, and the row lock on
+    the fact both writers chose to prune where it does not. Waiting for
+    "parked" rather than for "parked on the right thing" is what keeps
+    both runs prompt and lets the final state be the only verdict.
+
+    Answers False on the deadline instead of raising, so a caller can
+    treat not-parked as information.
+    """
+    watcher = _connection()
+    deadline = asyncio.get_running_loop().time() + within_s
+    try:
+        while asyncio.get_running_loop().time() < deadline:
+            (parked,) = watcher.execute(
+                "select count(*) from pg_stat_activity where datname = "
+                "current_database() and wait_event_type = 'Lock'"
+            ).fetchone()
+            watcher.rollback()
+            if parked >= how_many:
+                return True
+            await asyncio.sleep(0.02)
+        return False
+    finally:
+        watcher.close()
 
 
 async def test_a_remembered_fact_is_read_back_for_that_agent() -> None:
@@ -243,15 +334,29 @@ async def test_a_prune_that_fails_takes_the_insert_with_it(
 async def test_two_writers_at_the_cap_cannot_lose_each_others_fact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two stores over separately opened engines, writing at once, with
-    the store prefilled exactly at the pruning boundary.
+    """Two stores over separately opened engines, prefilled exactly at
+    the pruning boundary, with the interleaving forced rather than hoped
+    for.
 
-    Arranged so the lock is what makes the answer right. At the line
-    cap, each write drops exactly one row, so two writes that both read
-    the pre-write state would agree on the same victim, leave the other
-    victim behind, and end four rows deep or with the wrong survivor
-    set. Under the chain's advisory lock the second write reads what the
-    first committed, and the survivors are the last three facts said.
+    Starting both and waiting on them proves nothing: nothing makes the
+    second transaction read before the first commits, and a runner that
+    happens to run them in order gets the right answer with no lock at
+    all. So the first writer is parked inside its own transaction, past
+    its insert, its read and its prune and before its commit, by a
+    test-only trigger that waits on a key this suite holds; only then is
+    the second started, and the gate is released once the second has had
+    its chance to move.
+
+    That is what makes the chain lock the thing under test. At the line
+    cap each write drops exactly one row, and both would choose the same
+    victim. With the lock, the second writer never begins until the
+    first has committed: it reads three rows plus its own, drops the
+    next oldest, and the three newest facts are what is left. Without
+    it, the second decides on the same rows the first decided on, both
+    delete `GATED_VICTIM`, the second's delete finds it already gone,
+    and what survives is four rows, over the cap, still carrying the
+    fact the pruning was supposed to drop. The assertions below are the
+    exact final state, which is what the mutation cannot pass.
     """
     monkeypatch.setattr(store_module, "MAX_LINES", 3)
     monkeypatch.setattr(store_module, "MAX_BYTES", len(b"- fact 3\n- fact 4\n- fact 5"))
@@ -262,16 +367,23 @@ async def test_two_writers_at_the_cap_cannot_lose_each_others_fact(
     first = open_memory(DatabaseConfig())
     second = open_memory(DatabaseConfig())
     try:
-        await asyncio.gather(
-            first.remember("poet", "fact 3"), second.remember("poet", "fact 4")
-        )
+        with _the_prune_gate_held():
+            parked = asyncio.create_task(first.remember("poet", GATED_FACT))
+            assert await _waiting_on_a_lock(1), "the first writer never reached the gate"
+
+            behind = asyncio.create_task(second.remember("poet", "fact 4"))
+            # The second writer parked too, wherever the arrangement
+            # leaves it, so the gate is released against two decided
+            # transactions rather than against a stopwatch.
+            assert await _waiting_on_a_lock(2), "the second writer never started"
+        await asyncio.gather(parked, behind)
         rendered = first.read("poet")
     finally:
         second.close()
         first.close()
 
     surviving = _rows("poet")
-    assert set(surviving) == {"fact 2", "fact 3", "fact 4"}
+    assert set(surviving) == {"fact 2", GATED_FACT, "fact 4"}
     assert len(surviving) == 3
     assert rendered.splitlines() == [f"- {fact}" for fact in surviving]
     assert len(rendered.encode("utf-8")) <= store_module.MAX_BYTES
