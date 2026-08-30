@@ -360,8 +360,12 @@ surface, its API reference is the document that earns generating.
 - [ ] **M1: the memory chain exists.** `memory/schema.py` (the
   `facts` table and its index), `memory/migrations/` with `env.py`
   in the record chain's shape and baseline `2001_agent_memory`,
-  `MEMORY_CHAIN` declared beside them, boot opening (and thereby
-  migrating) the chain, `deploy/postgres-init.sql`'s third schema
+  `memory/store.py` in its permanent home from the first commit,
+  holding `MEMORY_CHAIN`, the two engines, `open_memory` and the
+  exit-stack disposal while staying behaviorally dormant (no `read`
+  or `remember` yet, and no temporary forwarding anywhere), boot
+  opening (and thereby migrating) the chain through it,
+  `deploy/postgres-init.sql`'s third schema
   with the revoke and the #83 comment, the lane fixtures and the
   wheel step covering the third chain, the autogen flag, the drift
   and open suites, the upgrade choreography (deployment docs and
@@ -371,9 +375,10 @@ surface, its API reference is the document that earns generating.
   bullet, changelog. No caller changes; the schema is dormant. Design footprint: the `StoreChain` seam
   carries a third chain with no opener changes, which is the seam
   doing its job.
-- [ ] **M2: the store cutover.** `memory/store.py` (`MemoryStore`
-  over the two engines, caps in the write transaction, containment
-  and sanitized failures), the catalog's channel move and
+- [ ] **M2: the store cutover.** `memory/store.py` deepens in
+  place (`MemoryStore`'s `read` and `remember` over the engines M1
+  already owns, caps in the write transaction, containment and
+  sanitized failures), the catalog's channel move and
   `memory_unwritable`, the composition and caller rewiring off
   Optional, `tools/memory.py` and `MemoryConfig` and the
   recombination sites deleted, the `memory:` moved-section refusal,
@@ -470,6 +475,11 @@ resolution.
    ownership, `open_memory` and disposal, behaviorally dormant
    until M2; no temporary pass-through, no interface change between
    milestones.
+
+   *Resolution*: adopted; both milestone bullets are rewritten so
+   `memory/store.py` is M1's from the first commit with the chain,
+   engines, opener and disposal, and M2 deepens it in place with
+   `read` and `remember`.
 
 7. **P2: the hard-cutover documentation is not concrete enough for
    the reset criterion.** Require explicit README and changelog
