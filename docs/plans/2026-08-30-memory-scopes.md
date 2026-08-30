@@ -114,7 +114,20 @@ thread hex, depending on `scope`), which is exactly the shape a
 future `user` column extends by ordinary migration, per the roadmap
 constraint. The floor consequence is nil: `2001_agent_memory` remains
 the promised baseline and this is the forward migration the promise
-says every schema change arrives as.
+says every schema change arrives as, proven on data rather than on
+an empty database: the integration lane seeds a database at
+`2001_agent_memory` with rows whose ids, timestamps and text are
+exact, migrates, and asserts the bytes preserved, `scope = 'agent'`
+on every row, the held pair null, and identity allocation
+continuing past the seeded maximum. The rename makes this a
+stop-then-start upgrade: an old image still serving while the
+migration runs would fail its next memory statement, so the
+changelog and the README's upgrade section state the order plainly
+(stop the old server, then start the new image), which is how this
+single-server pre-beta project already upgrades; an
+expand-and-contract migration to buy rolling upgrades would price a
+property no supported deployment shape uses, and declining it is
+recorded here rather than slipped.
 
 **One store call reads the whole prompt's memory.**
 `MemoryStore.read(agent)` deepens into
@@ -557,10 +570,14 @@ Named by role, homes confirmed against the authority taxonomy:
     a state key in its argv, and no request the CLI or the routes
     build carries either in a URL path or query string, asserted
     against the access-log request targets as well as the bodies.
-- The event drivers extend for the scope field; the migration suite
-  pins `2002_memory_scopes` as head, the renamed column, the new
-  table, and the metadata-drift comparison; the CI wheel step's
-  memory block updates its head literal and inventory.
+- The event drivers extend for the scope field and the cleanup
+  variant; the migration suite pins `2002_memory_scopes` as head,
+  the renamed column, the new table, the checks and both indexes,
+  and the metadata-drift comparison; the integration lane runs the
+  seeded 2001-to-2002 preservation case (exact rows in, exact rows
+  out as agent scope with the held pair null, identity continuing);
+  the CI wheel step's memory block updates its head literal and
+  inventory.
 
 ## Risks and mitigations
 
@@ -606,8 +623,8 @@ Named by role, homes confirmed against the authority taxonomy:
   constants; the wheel step and lane fixtures updated; changelog.
   No caller changes; behavior is #314's exactly. Design footprint:
   the store deepens in place, callers still see no database
-  vocabulary. Documentation footprint: none beyond the changelog,
-  stated.
+  vocabulary. Documentation footprint: the changelog and the README
+  upgrade section's stop-then-start sentence; nothing else, stated.
 - [ ] **M2: conversation state end to end.** The state tools, the
   state block and the three-block rendering (device block present
   and empty), `MemoryContext` plumbing, `read_for_prompt` on the
@@ -828,6 +845,12 @@ resolution.
     with exact rows, migrate, and assert preserved bytes, scope,
     null held fields and identity continuation; state the upgrade as
     stop-then-start or design expand-and-contract.
+
+    *Resolution*: adopted; the seeded preservation case is in the
+    schema resolution and the test list, and the upgrade is stated
+    as stop-then-start in the changelog and the README's upgrade
+    section (M1's footprint), with the declined expand-and-contract
+    recorded rather than slipped.
 
 13. **P2: the `server.local_only` question remains incorrectly
     answered.** The footprint never states memory egress: injected
