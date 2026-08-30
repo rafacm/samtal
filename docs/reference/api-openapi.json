@@ -4677,16 +4677,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MemoryStateKey"
-              }
-            }
-          },
-          "required": false
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4745,6 +4735,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryStateKey"
               }
             }
           }
