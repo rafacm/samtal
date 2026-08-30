@@ -181,7 +181,12 @@ class BuiltinTools:
 
     async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         if claim.name == names.REMEMBER:
-            return await builtin.remember(self._memory, agent, claim.arguments or {}), False
+            return (
+                await builtin.remember(
+                    self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
         if claim.name == names.SET_STATE:
             return (
                 await builtin.set_state(

@@ -30,7 +30,9 @@ What a caller gets, in the order the sentences are met:
   asked for.
 - `add`, `update`, `forget` and `restore`, addressed by the id `add`
   answers with and bounded by the ownership of the row rather than by
-  the model's good behavior; `remember` is `add` on the agent scope.
+  the model's good behavior. One door onto keeping a fact, whichever
+  scope it belongs to, so the rules a fact is held to cannot differ by
+  which sentence a caller happened to speak.
 - `recall(agent, device, query)`, a bounded lookup over every active
   fact those two scopes hold, which is how the model reaches what the
   prompt did not inject and how it learns the number of a fact it wants
@@ -163,7 +165,7 @@ RECALL_LINES = 20
 # sentences carrying no value at all.
 #
 # These are the one class of failure in this module a model reads out
-# loud: a raise from `remember` becomes the tool result the reply is
+# loud: a raise from `add` becomes the tool result the reply is
 # built on, so a psycopg message here would put the DSN it tried, and
 # therefore the password in its authority, in front of a model and into
 # the conversation record. The class of the failure travels on the
@@ -381,7 +383,7 @@ class StoreClosed(Exception):
 # How long a close waits for the calls already inside a connection.
 #
 # Derived from the lock timeout rather than picked, because that is what
-# actually bounds a call: a `remember` parked on the chain's advisory
+# actually bounds a call: an `add` parked on the chain's advisory
 # gate waits up to `LOCK_TIMEOUT_MS` before the database refuses it, and
 # a shorter wait here would expire while a call that is behaving exactly
 # as designed is still inside its connection. The margin on top is the
@@ -397,7 +399,7 @@ MEMORY_CHAIN = StoreChain(
     schema=schema.SCHEMA,
     migrations=Path(__file__).resolve().parent / "migrations",
     # The third key in this application's half of the advisory lock
-    # space. Distinct from the other two on purpose: a `remember` is a
+    # space. Distinct from the other two on purpose: remembering is a
     # tool call a human asked for mid-conversation, and sharing the
     # domain chain's key would make it wait behind an `apply`
     # transaction that is deliberately unbounded, while sharing the
@@ -662,29 +664,6 @@ class MemoryStore:
             # everything else is the general refusal.
             problem = DatabaseBusyError(BUSY) if is_busy(exc) else StorageError(UNWRITABLE)
         raise problem
-
-    async def remember(self, agent: str, fact: str) -> None:
-        """Keep one fact for this agent, normalized to a line and capped.
-
-        #314's sentence, behaving exactly as it was released, on the one
-        scope that existed before there were scopes. The id the insert
-        allocates is dropped, because what a caller of this sentence does
-        with one is nothing.
-
-        It writes through the same transaction `add` does and stops
-        short of one of `add`'s two refusals, deliberately. A fact whose
-        rendered line alone is over the byte cap has always been kept:
-        the prune never goes below one fact, so what a deployment stored
-        yesterday it stores today, and the tool an agent speaks through
-        does not start refusing a long sentence in a release whose
-        changelog says nothing above the store moved. The refusal is the
-        right answer, and it arrives on this path in the milestone that
-        announces it, beside the id this call still throws away.
-        """
-        text = _one_line(fact)
-        if not text:
-            raise ValueError(NOTHING_TO_REMEMBER)
-        await asyncio.to_thread(self._add, agent, MemoryScope.AGENT, agent, text)
 
     async def add(
         self, scope: MemoryScope, owner: str, fact: str, *, agent: str

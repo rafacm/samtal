@@ -32,6 +32,7 @@ from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spo
 from tests.support.mcp_stdio_server import SHIPPED_ENV, SHIPPED_INSTRUCTIONS
 from vinga_server.config import Config
 from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.memory.store import MemoryScope
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -551,7 +552,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             # what a concurrent session would do, a second reload gamma
             # must not see, and a reconnect capturing something else,
             # which gamma must not see either.
-            await app.state.composition.memory.remember("gamma", fact)
+            await app.state.composition.memory.add(MemoryScope.AGENT, "gamma", fact, agent="gamma")
             await rewrite_guidance(control, "Ask three times.")
             await reconnect(app, SECOND_SHIPPED)
 

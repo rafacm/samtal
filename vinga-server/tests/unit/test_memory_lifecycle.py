@@ -582,7 +582,7 @@ async def test_a_fact_remembered_during_an_erasure_is_kept(
         erasing, erased = in_a_thread(lambda: erase_thread(client, thread))
         until(held.waited_on, "the erasure never reached its transaction")
 
-        await store.remember("poet", "the user is vegetarian")
+        await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
         assert active_facts() == ["the user is vegetarian"]
     finally:
         held.release()

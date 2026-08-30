@@ -21,7 +21,7 @@ from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
 from tests.support.sessions import call, events_of, run_reply, session_with
 from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
-from vinga_server.memory.store import MemoryStore, PromptMemory
+from vinga_server.memory.store import MemoryScope, MemoryStore, PromptMemory
 from vinga_server.runtime.prompt import (
     STATE_HEADING,
     Guidance,
@@ -216,7 +216,7 @@ async def test_a_fact_remembered_between_replies_is_in_the_next_one() -> None:
     session = session_with(servers, {"poet": llm}, memory=store)
 
     await run_reply(session, "hello")
-    await store.remember("poet", "the user is vegetarian")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     await run_reply(session, "again")
 
     assert "the user is vegetarian" not in llm.systems[0]
@@ -239,7 +239,7 @@ async def test_the_memory_read_happens_off_the_event_loop(
     loop would cost a reply three round trips where it used to pay
     one."""
     store = lane_memory()
-    await store.remember("poet", "the user is vegetarian")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     reads: list[int] = []
     real = MemoryStore.read_for_prompt
 
@@ -346,7 +346,7 @@ async def test_activation_logs_what_the_know_how_half_holds(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     store = lane_memory()
-    await store.remember("poet", "the user is vegetarian")
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     config = base_config()
     guidance = (Guidance("home", GUIDANCE),)
     llm = RecordingLlm()

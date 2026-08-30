@@ -181,7 +181,7 @@ from vinga_server.device.session import DeviceSession
 from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
-from vinga_server.memory.store import NOTHING_PURGED
+from vinga_server.memory.store import NOTHING_PURGED, MemoryScope
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
 from vinga_server.providers import AsrResult, Usage, build_entry
 from vinga_server.providers.openai_asr import OpenAiAsr
@@ -1590,7 +1590,9 @@ async def drive_memory_unwritable(_: Path) -> None:
     engine is the one pointed at nothing here, and its mirror is the
     store whose writer is."""
     try:
-        await memory_that_cannot_write().remember("poet", "the user is vegetarian")
+        await memory_that_cannot_write().add(
+            MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+        )
     except ConfigError:
         pass
 

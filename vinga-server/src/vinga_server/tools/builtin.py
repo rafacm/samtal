@@ -15,11 +15,12 @@ What `remember` and the two state tools write is injected by
 this module defines and runs the tools, and how their output reaches the
 model is the runtime's.
 
-The two state tools are the ones that need to know which conversation
-they are in, which is what `MemoryContext` is: the session's memory
-address as a value, asked for at the moment a call runs rather than kept
-from when the source was built, because a reply can move a session to
-another thread.
+The tools that write memory need to know which memory they are writing,
+which is what `MemoryContext` is: the session's memory address as a
+value, asked for at the moment a call runs rather than kept from when
+the source was built, because a reply can move a session to another
+thread. The two state tools read the thread out of it, and `remember`
+reads the device, which is what a fact about the place is kept under.
 
 The sentences a selection answers with also live here, all of them, and
 that is deliberate rather than tidy. They are one closed vocabulary,
@@ -34,6 +35,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vinga_server.memory.scopes import FACT_SCOPES, MemoryScope
 from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import ToolDef
 from vinga_server.tools import names
@@ -98,16 +100,29 @@ def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
 
 
 def remember_tool() -> ToolDef:
-    """Keep one fact about the user across conversations. Offered to
-    every agent: remembered facts live in a schema this server migrates
-    at every boot, so there is no deployment without a store (#314)."""
+    """Keep one fact across conversations, about the user or about the
+    place. Offered to every agent: remembered facts live in a schema this
+    server migrates at every boot, so there is no deployment without a
+    store (#314).
+
+    The scope is steered rather than enforced, which is the decision this
+    description carries out: what belongs to the device is the place and
+    the household, and everything about the person belongs with the
+    persona. A model that gets it wrong writes a true fact in the wrong
+    place, which an operator can move; a server that guessed for it would
+    be wrong silently.
+    """
     return ToolDef(
         name=names.REMEMBER,
         description=(
-            "Remember one short fact about the user for future conversations, such as "
-            "a preference, a name, or a routine. Store one fact per call, phrased so "
-            "it still makes sense on its own weeks from now. Do not use this for "
-            "things that are only true right now."
+            "Remember one short fact for future conversations, such as a preference, a "
+            "name, or a routine. One fact per call, phrased so it still makes sense on "
+            'its own weeks from now. Leave "scope" out for something about the person '
+            'you are talking to, which is most things; set it to "device" for '
+            "something about this place and everyone in it, such as the room, the "
+            "household, or how the hardware here behaves, which every assistant on "
+            "this device then knows. Do not use this for things that are only true "
+            "right now."
         ),
         input_schema={
             "type": "object",
@@ -115,7 +130,16 @@ def remember_tool() -> ToolDef:
                 "text": {
                     "type": "string",
                     "description": "The fact to remember, as one short sentence.",
-                }
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": [scope.value for scope in FACT_SCOPES],
+                    "description": (
+                        'Whose fact this is: "agent" for the person you are talking '
+                        'to, which is the default, or "device" for this place and its '
+                        "household."
+                    ),
+                },
             },
             "required": ["text"],
         },
@@ -410,14 +434,59 @@ def candidate_list(header: str, found: "Sequence[threads.Candidate]") -> str:
     )
 
 
-async def remember(store: MemoryStore, agent: str, arguments: dict[str, object]) -> str:
-    """Execute `remember`, answering the short confirmation the model
-    then phrases in its own words."""
+# What `remember` refuses a call it cannot act on, in this module's own
+# vocabulary: what the call was missing rather than what arrived.
+REMEMBER_NEEDS_TEXT = 'remember needs a "text" argument holding the fact to remember'
+
+# And what an argument outside the enum the schema declares is told. It
+# names the two members rather than the one that was passed, for the
+# reason every refusal here does: the members are this server's
+# vocabulary and what a model sent is a value.
+UNKNOWN_SCOPE = (
+    'scope has to be either "agent", for something about the person you are talking '
+    'to, or "device", for something about this place and its household'
+)
+
+
+async def remember(
+    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+) -> str:
+    """Execute `remember` against the scope the call named, answering the
+    confirmation the model then phrases in its own words.
+
+    The confirmation carries the number the fact is addressed by, which
+    is the one place a model is handed one without asking: the injected
+    block shows no ids, so a fact remembered a moment ago would otherwise
+    have to be looked up before it could be corrected.
+
+    The owner comes from the session rather than from the arguments, like
+    the conversation the ledger tools write to: which device a note
+    belongs to is a fact of the session, and a model that could name one
+    would be writing into another household's notes.
+    """
     text = arguments.get("text")
     if not isinstance(text, str) or not text.strip():
-        raise ValueError('remember needs a "text" argument holding the fact to remember')
-    await store.remember(agent, text)
-    return f"Remembered: {' '.join(text.split())}"
+        raise ValueError(REMEMBER_NEEDS_TEXT)
+    scope = _fact_scope(arguments.get("scope"))
+    owner = agent if scope is MemoryScope.AGENT else _device_of(context)
+    fact_id = await store.add(scope, owner, text, agent=agent)
+    return f"Remembered [{fact_id}]: {_said(text)}"
+
+
+def _fact_scope(named: object) -> MemoryScope:
+    """Which scope a call named, defaulting to the agent's own.
+
+    Absent means the agent, because that is what most facts are and
+    because the tool that had no scope at all wrote there. Anything
+    outside the two a fact may carry is refused here rather than at the
+    store: the store would refuse it too, and this is where the model
+    can be told what it may have meant.
+    """
+    if named is None:
+        return MemoryScope.AGENT
+    if not isinstance(named, str) or named not in FACT_SCOPES:
+        raise ValueError(UNKNOWN_SCOPE)
+    return MemoryScope(named)
 
 
 # What the two state tools refuse a call they cannot act on. Fixed
@@ -471,6 +540,20 @@ async def clear_state(
     if not taken:
         return f"Nothing was written down under {_said(key)}"
     return f"Forgot {_said(key)}"
+
+
+def _device_of(context: MemoryContext) -> str:
+    """The board this call is happening on, which is what the device
+    scope is addressed by.
+
+    Asserted rather than refused, for the reason the conversation below
+    is: the handshake reads the device's identity before the connection
+    can be accepted at all, so every session that can be asked for
+    anything has one, and a tool call with no device behind it is a
+    defect here rather than something to tell a model about.
+    """
+    assert context.device is not None
+    return context.device
 
 
 def _conversation_of(context: MemoryContext) -> str:
