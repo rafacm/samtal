@@ -1251,7 +1251,7 @@ and the fourth is the half of the no-leak family that was never driven.
 
 ## M5: per-agent memory control
 
-PR TBD.
+PR #363.
 
 ### What landed
 
