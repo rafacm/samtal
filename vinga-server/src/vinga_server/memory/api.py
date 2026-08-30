@@ -62,6 +62,7 @@ issues against a thread is a delete.
 """
 
 import contextlib
+import json
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Annotated, Any
@@ -277,9 +278,58 @@ FactId = Annotated[
 
 RawBody = Annotated[Any, Body()]
 
-# And the one body that may be absent, which is a different request
-# rather than a malformed one: no body clears the whole ledger.
-OptionalBody = Annotated[Any, Body()]
+
+class _Absent:
+    """What a request that carried no body at all is.
+
+    A sentinel of its own, and that is load-bearing rather than tidy.
+    The one body on this API that may be absent means a different
+    request when it is: no body clears the whole ledger, and a body
+    names one entry. FastAPI cannot tell the two apart, because a
+    parameter with a default is given that default both when the request
+    carried nothing and when it carried the JSON value `null`, so `null`
+    would have cleared the ledger while the contract permits only an
+    object there. The difference is visible in the bytes and nowhere
+    else, which is why the body is read from the request rather than
+    declared.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - read only when a case fails
+        return "(no body)"
+
+
+ABSENT = _Absent()
+
+
+async def _optional_body(request: Request) -> object:
+    """The body a request carried, read from the request itself, or the
+    sentinel for a request that carried none.
+
+    Async where the routes are not, which is the whole reason this is a
+    dependency: reading a request body is the framework's own awaitable,
+    and the handlers are plain `def` so that the synchronous database
+    work runs on the threadpool. A dependency may be one and the route
+    below may not.
+
+    A body that is not JSON is refused with the same sentence a body of
+    the wrong shape is, because what is wrong is the same thing: this
+    endpoint takes one object with one key, or nothing. The refusal is
+    built inside the handler and raised after it, the rule this
+    repository keeps everywhere: `json.loads` puts the text it could not
+    read into its own message, and that text is the caller's.
+    """
+    raw = await request.body()
+    if not raw:
+        return ABSENT
+    problem: ConfigError | None = None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        problem = ConfigError(_STATE_BODY)
+    raise problem
+
+
+OptionalBody = Annotated[object, Depends(_optional_body)]
 
 
 def reader(database: DatabaseConfig) -> Callable[[], Iterator[Connection]]:
@@ -602,7 +652,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         openapi_extra=request_body(MemoryStateKey, required=False),
     )
     def clear_conversation_state(
-        conversation: str, writer: WriterDep, body: OptionalBody = None
+        conversation: str, writer: WriterDep, body: OptionalBody
     ) -> dict[str, int]:
         """Clear one entry of a conversation's ledger, or the whole of
         it.
@@ -813,8 +863,14 @@ def _fact(body: object) -> str:
 
 def _key(body: object) -> str | None:
     """The entry named in a body, or None where there was no body, which
-    is the request that clears the whole ledger."""
-    if body is None:
+    is the request that clears the whole ledger.
+
+    The sentinel and not `None`, because `null` is a body: a request
+    that carried one said something, and what it said is not an object
+    with a key in it. Answering it with the whole ledger would be this
+    endpoint doing the one thing it takes a body to avoid.
+    """
+    if body is ABSENT:
         return None
     return _sole(body, "key", _STATE_BODY)
 
@@ -829,6 +885,7 @@ def _sole(body: object, key: str, expectation: str) -> str:
 
 
 __all__ = [
+    "ABSENT",
     "MEMORY_PROBLEMS_INSTEAD",
     "MemoryConversation",
     "MemoryConversations",

@@ -683,6 +683,53 @@ def test_a_request_with_no_body_clears_the_whole_ledger(client: TestClient, thre
     assert memory_rows("state", conversation=thread) == []
 
 
+def test_a_body_of_json_null_clears_nothing(client: TestClient, thread: str) -> None:
+    """`null` is a body, and it is not an object with a key in it.
+
+    The distinction this is about is invisible to the framework: a
+    parameter with a default is given that default both for a request
+    that carried nothing and for one that carried `null`, so the two
+    would mean the same thing and `null` would clear the ledger. What a
+    body is read from here is the request's own bytes, which is where
+    the difference is, and the contract permits only an object where
+    there is a body at all.
+    """
+    kept(thread, scene="a forest", turn="4")
+
+    answer = client.request(
+        "DELETE",
+        f"/memory/conversations/{thread}/state",
+        content=b"null",
+        headers={"content-type": "application/json"},
+    )
+
+    assert answer.status_code == 422
+    assert "key" in refused(answer.json(), 422)
+    assert len(memory_rows("state", conversation=thread)) == 2
+
+
+def test_a_body_that_is_not_json_says_what_the_body_has_to_be(
+    client: TestClient, thread: str
+) -> None:
+    """Read here rather than by the framework, so what is answered is
+    this endpoint's own sentence rather than the one about a request
+    that could not be read at all, and nothing of the text that would
+    not parse comes back."""
+    kept(thread, scene="a forest")
+
+    answer = client.request(
+        "DELETE",
+        f"/memory/conversations/{thread}/state",
+        content=f'{{"key": {SENTINEL}'.encode(),
+        headers={"content-type": "application/json"},
+    )
+
+    assert answer.status_code == 422
+    assert "key" in refused(answer.json(), 422)
+    assert SENTINEL not in answer.text
+    assert len(memory_rows("state", conversation=thread)) == 1
+
+
 @pytest.mark.parametrize(
     "body",
     [{}, {"key": ""}, {"key": 7}, {"key": "a", "extra": "b"}, []],
