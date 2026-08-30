@@ -1677,7 +1677,9 @@ def _runtime(api: FastAPI) -> None:
         keeping and what is known about the device it is happening on,
         belong to a session rather than to an agent and are absent here:
         a preview that invented a device to show its notes would be a
-        second prompt assembler pretending to be the first.
+        second prompt assembler pretending to be the first. An agent
+        whose `memory` section is off has no such block at all, here or
+        in a reply, and is previewed without one.
 
         `async def`, like the status read beside it: the MCP slice is
         read on the loop that mutates it, so the answer cannot be half

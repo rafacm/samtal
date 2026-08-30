@@ -373,19 +373,13 @@ PUBLISHED = {
     "tools__inside__secret_word",
 }
 
-# The builtins due in this configuration, which is the three that are
-# always due. `switch_agent` is not among them: each device here is
-# bound to a single agent, so there is nowhere to switch. `remember` is,
-# because remembered facts live in a schema every server migrates at
-# boot and no deployment is without one (#314); the two conversation
-# tools are, because they are offered whether or not a deployment can
-# resume anything: what a server that cannot answers with is a sentence
-# the agent reads out, and a tool that is simply absent is a tool a
-# model invents (#190).
-# Spelled as a set the assertions below compare against, so that a
-# conditional builtin appearing where its condition does not hold fails
-# this test rather than passing under a subtraction.
-DUE_BUILTINS: set[str] = {
+# The memory family, offered to an agent whose `memory` section leaves
+# it on, which is every agent in this configuration because none of them
+# writes one and the field's default is on (#83). Named as its own set
+# rather than folded into the one below, so that what makes these nine
+# due is readable per condition: this half would go if an agent here
+# were switched off, and the pair below would not.
+MEMORY_BUILTINS: set[str] = {
     "remember",
     "update_memory",
     "forget",
@@ -393,6 +387,18 @@ DUE_BUILTINS: set[str] = {
     "recall",
     "set_state",
     "clear_state",
+}
+
+# The builtins due in this configuration. `switch_agent` is not among
+# them: each device here is bound to a single agent, so there is
+# nowhere to switch. The two conversation tools are, because they are
+# offered whether or not a deployment can resume anything: what a server
+# that cannot answers with is a sentence the agent reads out, and a tool
+# that is simply absent is a tool a model invents (#190).
+# Spelled as a set the assertions below compare against, so that a
+# conditional builtin appearing where its condition does not hold fails
+# this test rather than passing under a subtraction.
+DUE_BUILTINS: set[str] = MEMORY_BUILTINS | {
     "new_conversation",
     "resume_conversation",
 }
