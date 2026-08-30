@@ -36,7 +36,7 @@ from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
-from vinga_server.memory import MemoryStore
+from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import ToolCall, Turn
 from vinga_server.tools.builtin import switch_agent_tool
 from vinga_server.tools.mcp import McpServers

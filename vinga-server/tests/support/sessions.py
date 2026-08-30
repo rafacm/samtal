@@ -51,7 +51,7 @@ from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generations
-from vinga_server.memory import MemoryStore
+from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import ProviderWorld, ToolCall, Turn
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers

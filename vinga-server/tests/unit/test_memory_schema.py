@@ -28,7 +28,8 @@ import vinga_server
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
 from vinga_server.db import DOMAIN_CHAIN, advisory_key, open_database, read_engine, write_engine
-from vinga_server.memory import MEMORY_CHAIN, open_memory, schema
+from vinga_server.memory import schema
+from vinga_server.memory.store import MEMORY_CHAIN, open_memory
 
 EXPECTED_TABLES = {"facts"}
 

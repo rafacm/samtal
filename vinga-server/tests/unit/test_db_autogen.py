@@ -151,7 +151,7 @@ def test_the_selectors_name_the_chains_they_say_they_do(
     pointing at the wrong one.
     """
     from vinga_server.conversations.store import CONVERSATIONS_CHAIN
-    from vinga_server.memory import MEMORY_CHAIN
+    from vinga_server.memory.store import MEMORY_CHAIN
 
     expected = {
         (): DOMAIN_CHAIN,
@@ -191,7 +191,7 @@ def test_the_memory_chain_autogenerates_against_a_scratch_database(
     file is written, which is only possible against a database Alembic
     reached, migrated and compared.
     """
-    from vinga_server.memory import MEMORY_CHAIN
+    from vinga_server.memory.store import MEMORY_CHAIN
 
     monkeypatch.setenv("VINGA_DB_URL", _url_of(blank_database))
     chain = _chain_in(tmp_path, MEMORY_CHAIN)

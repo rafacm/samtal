@@ -39,8 +39,8 @@ from vinga_server import db as db_module
 from vinga_server.config.loader import ConfigError, DatabaseBusyError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import advisory_key, connection_url
-from vinga_server.memory import MEMORY_CHAIN, MemoryStore, open_memory
 from vinga_server.memory import store as store_module
+from vinga_server.memory.store import MEMORY_CHAIN, MemoryStore, open_memory
 from vinga_server.runtime import prompt
 from vinga_server.tools.builtin import remember, remember_tool
 

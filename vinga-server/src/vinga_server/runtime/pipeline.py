@@ -84,7 +84,7 @@ from vinga_server.events.values import (
 )
 from vinga_server.filler import FillerClips
 from vinga_server.generation import Generation, Generations
-from vinga_server.memory import MemoryStore
+from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import (
     AgentProviders,
     AsrResult,

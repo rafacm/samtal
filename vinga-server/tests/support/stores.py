@@ -46,7 +46,7 @@ from vinga_server.db import (
     read_engine,
     write_engine,
 )
-from vinga_server.memory import MEMORY_CHAIN, MemoryStore, open_memory
+from vinga_server.memory.store import MEMORY_CHAIN, MemoryStore, open_memory
 
 # --- a second writer, holding the lock ---------------------------------
 

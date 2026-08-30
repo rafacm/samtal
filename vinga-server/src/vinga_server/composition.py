@@ -29,7 +29,7 @@ from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import RuntimeFactory
 from vinga_server.events.live import LiveEvents
 from vinga_server.generation import Generations
-from vinga_server.memory import MemoryStore
+from vinga_server.memory.store import MemoryStore
 from vinga_server.onboarding import PendingDevices
 from vinga_server.registry import SessionRegistry
 from vinga_server.tools.mcp import McpServers

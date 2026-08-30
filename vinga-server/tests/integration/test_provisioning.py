@@ -69,8 +69,8 @@ from vinga_server.db import (
     read_engine,
 )
 from vinga_server.db import schema as domain_schema
-from vinga_server.memory import MEMORY_CHAIN, open_memory
 from vinga_server.memory import schema as memory_schema
+from vinga_server.memory.store import MEMORY_CHAIN, open_memory
 
 # The head of the packaged memory chain, which is one revision. Written
 # here rather than derived, for the reason the sibling suites write

@@ -26,7 +26,7 @@ model is told is what happened and what to do about it.
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from vinga_server.memory import MemoryStore
+from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import ToolDef
 from vinga_server.tools import names
 
