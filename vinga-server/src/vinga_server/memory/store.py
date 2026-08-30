@@ -41,7 +41,14 @@ from sqlalchemy import Connection, Engine, delete, select
 
 from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.db import StoreChain, advisory_key, is_busy, open_at, read_engine
+from vinga_server.db import (
+    LOCK_TIMEOUT_MS,
+    StoreChain,
+    advisory_key,
+    is_busy,
+    open_at,
+    read_engine,
+)
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import MemoryUnreadable, MemoryUnwritable
 from vinga_server.events.values import ClassName, Identifier
@@ -80,11 +87,34 @@ BUSY = (
     "changed, and the same fact may simply be offered again"
 )
 
+
+class StoreClosed(Exception):
+    """The store is shutting down and is not admitting new calls.
+
+    Raised where a call asks for admission rather than where it would
+    reach a connection, which is what makes it cheap and what makes it
+    safe: a store that is closing has engines whose pools are about to
+    be replaced, and a call let through would open one nobody owns.
+
+    Not a sentence anybody reads. It travels as a class name on the two
+    events this module emits, and both call sites contain it exactly as
+    they contain a database that is not there: the read answers with no
+    memory this round, and the write refuses with `UNWRITABLE`. A
+    shutdown is not a failure a model should be given different words
+    for.
+    """
+
 # How long a close waits for the calls already inside a connection.
 #
-# Generous next to a read of at most two hundred short rows, and short
-# next to a shutdown a person is watching. Its reason is in `close`.
-QUIET_TIMEOUT_S = 5.0
+# Derived from the lock timeout rather than picked, because that is what
+# actually bounds a call: a `remember` parked on the chain's advisory
+# gate waits up to `LOCK_TIMEOUT_MS` before the database refuses it, and
+# a shorter wait here would expire while a call that is behaving exactly
+# as designed is still inside its connection. The margin on top is the
+# round trip the refusal itself costs. A store that will not go quiet
+# even then does not hold the shutdown open; what happens instead is in
+# `close`.
+QUIET_TIMEOUT_S = LOCK_TIMEOUT_MS / 1000 + 2.0
 
 # This store's own chain: the schema its table and its Alembic version
 # table live in, its migrations, and the advisory key its writers
@@ -122,43 +152,81 @@ class MemoryStore:
     def __init__(self, engine: Engine, reader: Engine) -> None:
         self._engine = engine
         self._reader = reader
-        # How many calls are inside a connection right now, and how the
-        # closing waits for them. Both halves of `read` and `remember`
+        # The three facts a close and a call have to agree about, and
+        # the lock they agree about them under. `read` and `remember`
         # run in a worker thread while the close runs on the loop, so
-        # this counter is touched from two threads and guarded.
+        # every one of them is touched from two threads: how many calls
+        # are inside a connection, whether this store is closing, and
+        # whether the pools have already been let go.
         self._quiet = threading.Condition()
         self._in_flight = 0
+        self._closing = False
+        self._disposed = False
 
     def close(self) -> None:
-        """Let go of both connection pools, once the calls holding a
-        connection have finished with it.
+        """Stop admitting calls, and let go of both connection pools
+        once the calls already inside one have finished with it.
 
         Registered on the application's exit stack the moment the store
         is opened, so a boot that fails later unwinds through it. Safe
-        to call twice: disposing a disposed engine replaces a pool that
-        has no connections in it.
+        to call twice, and safe to call while a call is in flight, which
+        is the whole reason it is written this way.
 
-        The wait is not politeness. Disposing an engine closes the
-        connections sitting in its pool and replaces the pool; a
-        connection checked out at that moment is returned to the pool
-        that was replaced, which nothing owns any more and which closes
-        nothing when it is collected. The reply path reads memory from a
-        worker thread, and a shutdown that gives up on a reply still in
-        flight (the drain is bounded) is exactly when that happens. So
-        the close waits for the calls it can see, bounded by
-        `QUIET_TIMEOUT_S` because a store that will not go quiet must
-        not hold a shutdown open, and disposes either way.
+        Disposing an engine closes the connections sitting in its pool
+        and replaces the pool; a connection checked out at that moment
+        is returned to the pool that was replaced, which nothing owns
+        any more and which closes nothing when it is collected. The
+        reply path reads memory from a worker thread and the shutdown
+        drain is bounded, so a call outliving the close is reachable
+        rather than theoretical.
+
+        Two things follow, and neither is politeness. The store stops
+        admitting calls before it waits, atomically, so a worker that
+        was queued behind the close cannot slip in and open a pool this
+        method has already decided is going away. And the disposal is
+        deferred rather than forced: the wait is bounded by
+        `QUIET_TIMEOUT_S` so a shutdown is never held open, but a wait
+        that expires hands the disposal to whichever call returns last
+        rather than pulling the pool out from under it. Either way it
+        happens exactly once.
         """
         with self._quiet:
+            self._closing = True
             self._quiet.wait_for(lambda: self._in_flight == 0, timeout=QUIET_TIMEOUT_S)
+            mine = self._claim_the_disposal()
+        if mine:
+            self._dispose()
+
+    def _claim_the_disposal(self) -> bool:
+        """Whether the caller is the one that disposes, decided under
+        the lock so that exactly one of them is.
+
+        Called by `close` and by the last call out, which is the pair
+        the deferral is between: whichever of them finds no call in
+        flight and no disposal yet done takes it.
+        """
+        if self._in_flight or self._disposed:
+            return False
+        self._disposed = True
+        return True
+
+    def _dispose(self) -> None:
         self._engine.dispose()
         self._reader.dispose()
 
     @contextlib.contextmanager
     def _connected(self) -> Iterator[None]:
         """One call holding a connection, counted so the close can wait
-        for it."""
+        for it, and refused outright once the close has begun.
+
+        The refusal is raised out of `__enter__`, which is before the
+        engine in the caller's `with` is reached at all, so a call that
+        arrives during a close touches no pool: what it meets is the
+        decision, not a connection.
+        """
         with self._quiet:
+            if self._closing:
+                raise StoreClosed
             self._in_flight += 1
         try:
             yield
@@ -167,6 +235,9 @@ class MemoryStore:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._quiet.notify_all()
+                mine = self._closing and self._claim_the_disposal()
+            if mine:
+                self._dispose()
 
     def read(self, agent: str) -> str:
         """This agent's facts, or an empty string when it has none.
@@ -340,10 +411,12 @@ def open_memory(settings: DatabaseConfig) -> MemoryStore:
 
 __all__ = [
     "BUSY",
+    "QUIET_TIMEOUT_S",
     "MAX_BYTES",
     "MAX_LINES",
     "MEMORY_CHAIN",
     "UNWRITABLE",
     "MemoryStore",
+    "StoreClosed",
     "open_memory",
 ]

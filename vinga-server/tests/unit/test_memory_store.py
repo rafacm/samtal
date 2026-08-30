@@ -35,10 +35,11 @@ from tests.support.stores import (
     nowhere,
     the_lock_held,
 )
+from vinga_server import db as db_module
 from vinga_server.config.loader import ConfigError, DatabaseBusyError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import advisory_key, connection_url
-from vinga_server.memory import MEMORY_CHAIN, open_memory
+from vinga_server.memory import MEMORY_CHAIN, MemoryStore, open_memory
 from vinga_server.memory import store as store_module
 from vinga_server.runtime import prompt
 from vinga_server.tools.builtin import remember, remember_tool
@@ -155,6 +156,24 @@ async def _waiting_on_a_lock(how_many: int, within_s: float = 5.0) -> bool:
         return False
     finally:
         watcher.close()
+
+
+async def _closing(store: MemoryStore, within_s: float = 5.0) -> bool:
+    """Whether a store with a fact in it has entered its close, asked
+    through its own interface.
+
+    A closing store refuses a read admission and answers empty, so a
+    read that comes back empty from a store known to hold a fact is the
+    transition, observed rather than slept for. It is the subject of the
+    admission case below, borrowed here as the only signal this store
+    publishes about where its close has got to.
+    """
+    deadline = asyncio.get_running_loop().time() + within_s
+    while asyncio.get_running_loop().time() < deadline:
+        if store.read("poet") == "":
+            return True
+        await asyncio.sleep(0.02)
+    return False
 
 
 async def test_a_remembered_fact_is_read_back_for_that_agent() -> None:
@@ -387,6 +406,96 @@ async def test_two_writers_at_the_cap_cannot_lose_each_others_fact(
     assert len(surviving) == 3
     assert rendered.splitlines() == [f"- {fact}" for fact in surviving]
     assert len(rendered.encode("utf-8")) <= store_module.MAX_BYTES
+
+
+# A close, and the calls it meets
+#
+# The store is closed on the application's exit stack while the reply
+# path may still be reading memory from a worker thread, and the
+# shutdown drain is bounded, so a call outliving the close is reachable
+# rather than theoretical. Disposing an engine under one leaves its
+# connection in a pool nothing owns, which closes nothing when it is
+# collected; letting one in after the close has decided opens a pool
+# nobody will ever dispose. Both cases are arranged here rather than
+# waited for.
+
+
+async def test_a_close_waits_for_a_write_still_inside_its_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A write parked on the chain's advisory gate, and a close that
+    begins while it is parked: the close is still waiting when the write
+    is released, and the write goes on to store its fact through the
+    connection it was holding.
+
+    Nothing here is timed. The write cannot move while another
+    connection holds the chain lock, so "the close has not disposed
+    under it" is asserted where the write is physically unable to have
+    finished, and the lock timeout is widened rather than shortened so
+    that the release is what ends the wait rather than a refusal. The
+    timeout is set before the store is opened, because it rides on a
+    connection's startup options and an engine keeps the ones it was
+    built with.
+
+    That the close really had begun is not assumed either. A `read` on a
+    closing store is refused admission and answers empty, so a store
+    with a fact in it that answers empty has entered its close.
+
+    The write succeeding is the whole point. A pool disposed under it
+    would have taken its connection with it, and what would come back
+    is a failure rather than a fact.
+    """
+    monkeypatch.setattr(db_module, "LOCK_TIMEOUT_MS", 30_000)
+    store = open_memory(DatabaseConfig())
+    await store.remember("poet", "the user is vegetarian")
+
+    with contextlib.ExitStack() as gate:
+        gate.enter_context(the_lock_held(MEMORY_CHAIN))
+        write = asyncio.create_task(store.remember("poet", "a second fact"))
+        assert await _waiting_on_a_lock(1), "the write never reached the gate"
+
+        close = asyncio.create_task(asyncio.to_thread(store.close))
+        assert await _closing(store), "the close never began"
+        assert not close.done(), "the close let go of the pools under a live write"
+
+        gate.close()
+        await write
+        await close
+
+    assert _rows("poet") == ["the user is vegetarian", "a second fact"]
+
+
+async def test_a_call_arriving_during_a_close_is_refused_admission(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the same lock: a call that arrives once the
+    close has decided is turned away where it asks for admission, before
+    the engine in its `with` is reached at all.
+
+    Proven by the class name on the event rather than by the answer,
+    because the answer alone cannot tell the two apart: a read that
+    reached a disposed pool would also answer empty, and a write that
+    reached one would also refuse. What separates them is what the
+    failure was, and `StoreClosed` is a decision this module made rather
+    than anything a driver said.
+    """
+    store = open_memory(DatabaseConfig())
+    await store.remember("poet", "the user is vegetarian")
+    assert store.read("poet") == "- the user is vegetarian"
+
+    store.close()
+
+    with caplog.at_level("WARNING"):
+        assert store.read("poet") == ""
+        with pytest.raises(ConfigError) as refusal:
+            await store.remember("poet", "a second fact")
+
+    assert str(refusal.value) == store_module.UNWRITABLE
+    assert only(caplog, "memory_unreadable").error == "StoreClosed"
+    assert only(caplog, "memory_unwritable").error == "StoreClosed"
+    # And the refused write reached no connection: the row it would have
+    # written is not there, and the one that was is untouched.
+    assert _rows("poet") == ["the user is vegetarian"]
 
 
 # A database that refuses, split by the path that meets it
