@@ -51,6 +51,7 @@ from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import APP_CHANNEL, CaptureDisabled
 from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
+from vinga_server.memory import MEMORY_CHAIN, MemoryStore
 from vinga_server.onboarding.origin import onboarding_url
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
@@ -164,6 +165,59 @@ def refusing_providers(monkeypatch: pytest.MonkeyPatch) -> None:
         raise ProviderError(SENTENCE)
 
     monkeypatch.setattr(app_module, "build_world", refuse)
+
+
+def memory_stores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[MemoryStore], list[MemoryStore]]:
+    """Every memory store this run opens, and every one it closes.
+
+    The store is behaviorally dormant this milestone (#314): nothing
+    reads or writes a fact through it, so an opener deleted from the
+    build would leave every suite green and a deployment with an
+    unmigrated schema. What is asserted is therefore the boot's own two
+    acts, the open that migrates and the close registered beside it, and
+    the schema really appearing in a database that had none.
+    """
+    opened: list[MemoryStore] = []
+    closed: list[MemoryStore] = []
+    real_open = app_module.open_memory
+    real_close = MemoryStore.close
+
+    def spy_open(settings: Any) -> MemoryStore:
+        store = real_open(settings)
+        opened.append(store)
+        return store
+
+    def spy_close(self: MemoryStore) -> None:
+        closed.append(self)
+        real_close(self)
+
+    monkeypatch.setattr(app_module, "open_memory", spy_open)
+    monkeypatch.setattr(MemoryStore, "close", spy_close)
+    return opened, closed
+
+
+def memory_head(name: str) -> list[str]:
+    """What the memory chain in one database is stamped at, or nothing
+    at all when the schema is not there."""
+    engine = read_engine(DatabaseConfig(name=name))
+    try:
+        with engine.connect() as connection:
+            found = connection.execute(
+                text("select to_regnamespace(:name) is not null"),
+                {"name": MEMORY_CHAIN.schema},
+            ).scalar()
+            if not found:
+                return []
+            return [
+                row[0]
+                for row in connection.execute(
+                    text(f"select * from {MEMORY_CHAIN.schema}.alembic_version")
+                )
+            ]
+    finally:
+        engine.dispose()
 
 
 def test_a_described_app_acquires_nothing(
@@ -314,6 +368,61 @@ def test_a_boot_that_fails_after_the_engines_are_built_lets_go_of_them(
             pass
 
     assert closed == ["tts"], "the engines a failed boot had already built were leaked"
+
+
+def test_the_lifespan_migrates_the_memory_schema_and_lets_it_go(
+    blank_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The boot's whole relationship with the memory store, which is an
+    open that migrates and a close registered beside it (#314).
+
+    Over a blank database, because the migration is the half that needs
+    one: the lane's own database is taken through every chain before the
+    first test runs, so a head read there would be true whether this boot
+    opened anything or not.
+
+    Held open while the server serves and let go when it stops, in that
+    order, because a store closed during the build would be one the
+    cutover could not read a fact through.
+    """
+    opened, closed = memory_stores(monkeypatch)
+
+    assert memory_head(blank_database) == [], (
+        "the blank database already had the memory schema, so nothing below "
+        "would prove the boot migrated it"
+    )
+
+    app = served(recording_config(blank_database))
+    with TestClient(app):
+        assert len(opened) == 1, "the boot opened no memory store"
+        assert closed == [], "the memory store was let go while the server was serving"
+        assert memory_head(blank_database) == ["2001_agent_memory"]
+
+    assert closed == opened, "the memory store outlived the server"
+
+
+def test_a_boot_that_fails_after_the_memory_store_lets_go_of_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The partial-startup case for the store this milestone adds. It is
+    opened part way through the build, so a step after it that refuses
+    has to unwind it: two connection pools left behind on every refused
+    boot is exactly what the exit stack exists to prevent."""
+    opened, closed = memory_stores(monkeypatch)
+
+    async def refuse(*args: object, **kwargs: object) -> object:
+        raise ProviderError(SENTENCE)
+
+    # The next thing the boot does after the memory store is opened.
+    monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
+
+    app = served(recording_config())
+    with pytest.raises(StartupFailed):
+        with TestClient(app):
+            pass
+
+    assert len(opened) == 1
+    assert closed == opened, "a refused boot left the memory store's pools behind"
 
 
 def test_a_build_that_fails_part_way_releases_what_it_took(
