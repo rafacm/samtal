@@ -545,6 +545,15 @@ Named by role, homes confirmed against the authority taxonomy:
     forced to straddle an erasure is either deleted with the thread
     or refused by the dead set, both interleavings forced with the
     #314 gate technique rather than reasoned about.
+  - *Lifecycle end to end*: state written before the thread's
+    first turn lands survives the disconnect and comes back exactly
+    on an explicit resume of that thread (the case the grace period
+    exists for, driven through the application rather than the
+    store); a fresh activation starts with an empty ledger; on a
+    deployment without text storage the thread cannot be resumed
+    and the next activation starts clean; and a set, an update and
+    a clear are each visible in the next round's injected ledger
+    without the cached know-how half being rebuilt.
   - *Tools and rendering*: each of the seven tools offered,
     executed, refusing bad arguments in the ValueError shape;
     forget's result carries the removed text; a fact forgotten in
@@ -878,3 +887,10 @@ resolution.
     resume test, the fresh-activation-is-clean case, the text-off
     case, and same-reply visibility of state mutations without a
     know-how rebuild.
+
+    *Resolution*: adopted; a *Lifecycle end to end* test family is
+    named in Tests: pre-first-turn state through disconnect and
+    explicit resume, driven through the application; the clean
+    fresh activation; the text-off thread that cannot be resumed;
+    and per-round visibility of set, update and clear with the
+    know-how half untouched.
