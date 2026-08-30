@@ -89,7 +89,7 @@ import enum
 import logging
 import queue as queuing
 import threading
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -229,6 +229,45 @@ _UNKNOWN_WARNED_MAX = 64
 _writers: "list[ConversationStore]" = []
 _writers_lock = threading.Lock()
 
+# And whoever else in this process has to hear the same thing.
+#
+# The writer is not the only holder of thread-keyed rows any more: a
+# conversation's memory shares its thread's lifecycle, so the memory
+# store has to refuse a write addressed to a thread that is gone for
+# exactly the reason the writer discards a turn addressed to one. What
+# they share is a process and this announcement, and nothing else: the
+# memory store is in another package, reads another schema and is told
+# by name rather than reached into.
+#
+# Beside the writer register rather than folded into it, because the two
+# are registered at different moments by different owners: a writer adds
+# itself when it starts recording, and a listener is attached by the
+# composition root for the life of the application.
+_listeners: "list[Callable[[frozenset[str]], None]]" = []
+
+
+@contextmanager
+def erasures_announced_to(
+    listener: "Callable[[frozenset[str]], None]",
+) -> "Iterator[None]":
+    """Hear what every deletion in this process takes, for as long as
+    the caller holds this.
+
+    A context manager rather than a pair of calls, because what attaches
+    a listener is the composition root's exit stack and what has to be
+    guaranteed is the detach: a listener left behind would be a dead
+    object told about deletions for the rest of the process, and a second
+    application in the same process would announce to both.
+    """
+    with _writers_lock:
+        _listeners.append(listener)
+    try:
+        yield
+    finally:
+        with _writers_lock:
+            if listener in _listeners:
+                _listeners.remove(listener)
+
 # The order the two halves of the dead-id rule are put in, above the
 # database's own lock.
 #
@@ -273,8 +312,9 @@ def erasure_order() -> "Iterator[None]":
 
 
 def erased(threads_gone: "Iterable[str]") -> None:
-    """Tell whatever writer is recording in this process that these
-    threads are gone.
+    """Tell whatever is holding rows for these threads in this process
+    that they are gone: whichever writer is recording, and whoever else
+    is listening.
 
     The half of the dead-id rule that lives outside the writer. Absence
     of a row cannot be the tombstone, because absence is also the
@@ -291,13 +331,16 @@ def erased(threads_gone: "Iterable[str]") -> None:
     is also after the advisory lock was released, and the writer must
     not be able to begin a marker in between.
     """
-    named = set(threads_gone)
+    named = frozenset(threads_gone)
     if not named:
         return
     with _writers_lock:
         live = list(_writers)
+        listening = list(_listeners)
     for writer in live:
         writer.forget(named)
+    for listener in listening:
+        listener(named)
 
 
 def open_conversations(settings: DatabaseConfig) -> Engine:
@@ -468,11 +511,22 @@ class ConversationStore:
         now: Callable[[], dt.datetime] | None = None,
         gate: Callable[[Half], None] | None = None,
         stop_timeout_s: float = STOP_TIMEOUT_S,
+        purge_memory: "Callable[[Any, Sequence[str]], Any] | None" = None,
     ) -> None:
         self.settings = settings
         self.metrics = metrics
         self.text = text
         self.retention_days = retention_days
+        # How this writer's retention takes the memory of the threads it
+        # prunes, handed in rather than imported: the memory store reads
+        # this schema's own table, so a module that named it here would
+        # close an import cycle. What the composition passes is the same
+        # function a deletion through the API calls, so a pruned thread
+        # and an erased one lose their memory to one piece of code.
+        #
+        # None is the absence a caller with no memory store has, which is
+        # the test lane and nothing the composition root builds.
+        self._purge_memory = purge_memory
         self._engine = open_conversations(settings)
         self._queue: queuing.SimpleQueue[Any] = (
             queuing.SimpleQueue() if queue is None else queue
@@ -1378,6 +1432,23 @@ class ConversationStore:
         for this process to write zeros over, and the file the SQLite
         era erased in place is not this deployment's to reach.
 
+        A thread's memory goes in this same transaction, through the
+        callable the composition handed over: a conversation's ledger and
+        the facts it forgot share their thread's lifecycle, and a
+        deletion that took the thread and then went for its memory would
+        have a window in which the thread is gone and its state is not.
+        The order the two chains' locks are taken in is the ascending one
+        `db.advisory_key` states: this engine's begin listener takes the
+        record chain's, and the purge takes the memory chain's.
+
+        And what it took is published exactly the way an erasure through
+        the API publishes: after the commit, inside `erasure_order()`, so
+        a writer (this one included) cannot begin a marker between the
+        commit and the publication and write a turn onto a thread
+        retention has just taken. This runs on the writer thread, which
+        is not inside a durable transaction here, so the lock is free to
+        take.
+
         Failure is a dropped prune, not a dropped conversation: a store
         that could not delete still records, and the next close tries
         again."""
@@ -1385,8 +1456,12 @@ class ConversationStore:
             return
         cutoff = (self._now() - dt.timedelta(days=self.retention_days)).isoformat()
         try:
-            with self._engine.begin() as connection:
-                taken = threads.prune(connection, cutoff)
+            with erasure_order():
+                with self._engine.begin() as connection:
+                    taken = threads.prune(connection, cutoff)
+                    if self._purge_memory is not None:
+                        self._purge_memory(connection, taken.threads)
+                erased(taken.threads)
         except Exception as exc:  # noqa: BLE001 - retention never breaks a session
             # Bound to an ordinary local before the thunk closes over
             # it: `except ... as` unbinds its own name when the block
@@ -1473,5 +1548,6 @@ __all__ = [
     "Turn",
     "erased",
     "erasure_order",
+    "erasures_announced_to",
     "open_conversations",
 ]
