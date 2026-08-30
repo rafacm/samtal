@@ -34,8 +34,9 @@ import asyncio
 import contextlib
 import datetime as dt
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+from typing import TypeVar
 
 from sqlalchemy import Connection, Engine, delete, select
 
@@ -53,8 +54,15 @@ from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import MemoryUnreadable, MemoryUnwritable
 from vinga_server.events.values import ClassName, Identifier
 from vinga_server.memory import schema
+from vinga_server.memory.schema import MemoryScope
 
 events = ServerEvents(__name__)
+
+# What one guarded call answers with, whatever that is: a rendering, an
+# id, a removed fact. The two seams below are the same shape over
+# different answers, and a type variable is what keeps them one seam
+# rather than one per return type.
+T = TypeVar("T")
 
 # What keeps injection cheap: whichever trips first wins, and an insert
 # that overflows drops the oldest facts.
@@ -64,6 +72,12 @@ events = ServerEvents(__name__)
 # store enforced, because the storage moved and the promise did not.
 MAX_BYTES = 8192
 MAX_LINES = 200
+
+# What a device keeps, which is smaller because a device accumulates the
+# few notes a place has rather than a person's whole history, and
+# because the whole of it is injected rather than searched.
+DEVICE_BYTES = 2048
+DEVICE_LINES = 30
 
 # What a write that the database refused answers with, as fixed
 # sentences carrying no value at all.
@@ -86,6 +100,33 @@ BUSY = (
     "longer than the lock timeout allows, and nothing was remembered. Nothing was "
     "changed, and the same fact may simply be offered again"
 )
+
+# And what a caller's own mistake answers with, as fixed sentences for
+# the same reason: a model reads these out too. Nothing a caller passed
+# is quoted back in any of them, because what a caller passes here is
+# the user's own words.
+NOTHING_TO_REMEMBER = "there is nothing to remember"
+
+TOO_LONG = (
+    "this is too long to remember: one fact has to fit inside the space this memory "
+    "keeps for all of them, and forgetting everything else would not make room for "
+    "it. Nothing was changed; say it in fewer words"
+)
+
+
+class _Refused(Exception):
+    """One of this module's fixed refusals, decided where the rows are
+    and carried out of the transaction that decided it.
+
+    Never seen by a caller. `_written` turns it into the `ValueError` the
+    tool layer above turns into something the model rephrases, outside
+    the handler, so nothing of the transaction travels on a chain; and it
+    is a class of its own so that the arm which classifies a database
+    failure cannot mistake a decision for one.
+
+    It carries a sentence this module wrote and nothing else, which is
+    what makes rolling the transaction back the whole of its cost.
+    """
 
 
 class StoreClosed(Exception):
@@ -239,6 +280,102 @@ class MemoryStore:
             if mine:
                 self._dispose()
 
+    def _read(
+        self,
+        agent: str,
+        scopes: Sequence[MemoryScope],
+        work: Callable[[Connection], T],
+        empty: T,
+    ) -> T:
+        """One read on the read engine, contained whole.
+
+        Nothing about a database that cannot be read reaches the caller.
+        These are on the path that builds a system prompt, so a raised
+        exception would leave as a traceback under "reply failed", and a
+        psycopg failure quotes the DSN it tried, which carries a
+        password in its authority. A database this server cannot read
+        means the agent remembers nothing of these scopes this round, and
+        the reply happens. What is logged is the class of the failure and
+        never the message, which is the rule the MCP layer's reason
+        tokens and the thread reads already follow.
+
+        One connection for whatever the caller asked, and one report per
+        scope it asked about. A read that answers three scopes takes one
+        connection because the reply path pays for one off-loop hop per
+        round, and a statement that fails poisons the transaction the
+        other two would have run in, so all of them are lost together and
+        all of them are said. A scope that rendered empty with nothing
+        said about it would be indistinguishable from a scope with
+        nothing in it.
+
+        `scopes` and not one scope for the same reason: `recall` reaches
+        across two and the prompt read across three, and each of them
+        loses everything it reached for.
+        """
+        try:
+            with self._connected(), self._reader.connect() as connection:
+                return work(connection)
+        except Exception as exc:  # noqa: BLE001 - the whole point of the seam
+            failure = exc
+            for scope in scopes:
+                events.emit(
+                    lambda scope=scope: MemoryUnreadable(  # type: ignore[misc]
+                        agent=Identifier(agent),
+                        scope=scope,
+                        error=ClassName.of(failure),
+                    )
+                )
+            return empty
+
+    def _written(
+        self, agent: str, scope: MemoryScope, work: Callable[[Connection], T]
+    ) -> T:
+        """One transaction on the write engine, its failures classified
+        and never quoted.
+
+        The transaction takes the chain's advisory lock before it reads,
+        which is what makes every read-decide-write arithmetic below
+        correct across processes without a word about isolation levels,
+        and what the per-agent `asyncio.Lock` of the file era was a
+        single-process approximation of. It is one transaction and not
+        two, which is the durability the file store could not offer: no
+        reader ever sees an over-cap state, and a failure between a write
+        and the prune that follows it leaves the store exactly as it was.
+
+        Two kinds of failure leave here, and only one of them is a
+        failure. A `_Refused` is this module's own decision, made where
+        the rows are and carried out as the `ValueError` the tool layer
+        turns into something the model rephrases; it emits nothing,
+        because nothing went wrong. Everything else is the database, and
+        is classified by class through the one classifier `db` owns.
+
+        Every refusal is built inside the handler and raised after it,
+        cause severed, the way every boundary in this project raises: an
+        exception raised while another is being handled keeps that one on
+        `__context__`, and here that one holds the connection string it
+        tried.
+        """
+        problem: Exception
+        try:
+            with self._connected(), self._engine.begin() as connection:
+                return work(connection)
+        except _Refused as refusal:
+            problem = ValueError(str(refusal))
+        except Exception as exc:  # noqa: BLE001 - classified, never quoted
+            failure = exc
+            events.emit(
+                lambda: MemoryUnwritable(
+                    agent=Identifier(agent),
+                    scope=scope,
+                    error=ClassName.of(failure),
+                )
+            )
+            # By class and never by message, through the one classifier
+            # `db` owns: a contended write is retryable and says so, and
+            # everything else is the general refusal.
+            problem = DatabaseBusyError(BUSY) if is_busy(exc) else StorageError(UNWRITABLE)
+        raise problem
+
     def read(self, agent: str) -> str:
         """This agent's facts, or an empty string when it has none.
 
@@ -249,114 +386,125 @@ class MemoryStore:
 
         Synchronous, and on the read engine, which is the whole of why
         the store holds two. Reads take no advisory lock, so this
-        answers while another connection is midway through a `remember`
-        and can never wait out a lock timeout on the path that builds a
+        answers while another connection is midway through a write and
+        can never wait out a lock timeout on the path that builds a
         system prompt.
 
-        Nothing about a database that cannot be read reaches the caller.
-        This is on the path that builds a system prompt, so a raised
-        exception would leave as a traceback under "reply failed", and a
-        psycopg failure quotes the DSN it tried, which carries a
-        password in its authority. A database this server cannot read
-        means this agent remembers nothing this round, and the reply
-        happens. What is logged is the class of the failure and never
-        the message, which is the rule the MCP layer's reason tokens and
-        the thread reads already follow.
+        The agent's scope whole, uncapped by the core, which is what
+        keeps this the sentence #314's callers speak while the scoped
+        rendering arrives beside it.
         """
-        try:
-            with self._connected(), self._reader.connect() as connection:
-                return _rendered(_stored(connection, agent))
-        except Exception as exc:  # noqa: BLE001 - the whole point of the seam
-            failure = exc
-            events.emit(
-                lambda: MemoryUnreadable(
-                    agent=Identifier(agent),
-                    scope=schema.MemoryScope.AGENT,
-                    error=ClassName.of(failure),
-                )
-            )
-            return ""
+        return self._read(
+            agent,
+            (MemoryScope.AGENT,),
+            lambda connection: _rendered(_active(connection, MemoryScope.AGENT, agent)),
+            "",
+        )
 
     async def remember(self, agent: str, fact: str) -> None:
-        """Keep one fact, normalized to a line and capped.
+        """Keep one fact for this agent, normalized to a line and capped.
 
-        The refusal for an empty fact is a caller's mistake rather than
-        a storage failure, so it is a `ValueError` with the sentence it
-        has always had and no event: the tool layer above turns a bad
-        argument into something the model rephrases.
-
-        Everything else happens in one transaction on the write engine,
-        which takes the chain's advisory lock before it reads. That is
-        what makes the read-count-prune arithmetic below correct across
-        processes without a word about isolation levels, and what the
-        per-agent `asyncio.Lock` of the file era was a single-process
-        approximation of. The transaction runs in a worker thread
-        because the driver is blocking and the caller is the event loop
-        every live conversation shares.
+        `add` under another name, on the one scope that existed before
+        there were scopes, and the id it returns is dropped: what a
+        caller of this sentence does with an id is nothing, and #83's
+        callers ask for `add` instead.
         """
-        text = " ".join(fact.split())
+        await self.add(MemoryScope.AGENT, agent, fact, agent=agent)
+
+    async def add(
+        self, scope: MemoryScope, owner: str, fact: str, *, agent: str
+    ) -> int:
+        """Keep one fact in one scope, and answer the id it is addressed
+        by from now on.
+
+        The address is the pair `(scope, owner)`: an agent's own name
+        under `agent`, a device's MAC under `device`. `agent` beside them
+        is who was speaking, which is the same name under agent scope and
+        a different one under device scope, and it is carried for the
+        event alone: an operator reading a refused write wants the agent
+        whose conversation lost it.
+
+        Two refusals are decided before a connection is reached, because
+        neither needs one and both are the caller's mistake rather than a
+        storage failure: nothing to remember, and a fact whose rendered
+        line alone will not fit inside the space its scope keeps for all
+        of them. The second exists because pruning everything else could
+        not make room for it, so accepting it would leave the scope over
+        its cap for as long as the fact lived.
+
+        The transaction runs in a worker thread because the driver is
+        blocking and the caller is the event loop every live conversation
+        shares.
+        """
+        text = _one_line(fact)
         if not text:
-            raise ValueError("there is nothing to remember")
-        await asyncio.to_thread(self._store, agent, text)
+            raise ValueError(NOTHING_TO_REMEMBER)
+        _refuse_the_oversized(text, scope)
+        return await asyncio.to_thread(self._add, agent, scope, owner, text)
 
-    def _store(self, agent: str, fact: str) -> None:
-        """The insert and the pruning, in one transaction.
-
-        One transaction and not two, which is the durability the file
-        store could not offer: no reader ever sees an over-cap state,
-        and a failure between the insert and the prune leaves the store
-        exactly as it was rather than over its cap forever.
-
-        The refusal is built inside the handler and raised after it,
-        cause severed, the way every boundary in this project raises: an
-        exception raised while another is being handled keeps that one
-        on `__context__`, and here that one holds the connection string
-        it tried.
-        """
-        problem: Exception | None = None
-        try:
-            with self._connected(), self._engine.begin() as connection:
-                connection.execute(
-                    schema.facts.insert().values(
-                        scope=schema.MemoryScope.AGENT,
-                        owner=agent,
-                        at=_utc_now().isoformat(),
-                        fact=fact,
-                    )
+    def _add(self, agent: str, scope: MemoryScope, owner: str, fact: str) -> int:
+        def work(connection: Connection) -> int:
+            landed = connection.execute(
+                schema.facts.insert().values(
+                    scope=scope,
+                    owner=owner,
+                    at=_utc_now().isoformat(),
+                    fact=fact,
                 )
-                doomed = _over_the_cap(_stored(connection, agent))
-                if doomed:
-                    connection.execute(
-                        delete(schema.facts).where(schema.facts.c.id.in_(doomed))
-                    )
-        except Exception as exc:  # noqa: BLE001 - classified, never quoted
-            failure = exc
-            events.emit(
-                lambda: MemoryUnwritable(
-                    agent=Identifier(agent),
-                    scope=schema.MemoryScope.AGENT,
-                    error=ClassName.of(failure),
-                )
-            )
-            # By class and never by message, through the one classifier
-            # `db` owns: a contended write is retryable and says so, and
-            # everything else is the general refusal.
-            problem = DatabaseBusyError(BUSY) if is_busy(exc) else StorageError(UNWRITABLE)
-        if problem is not None:
-            raise problem
+            ).inserted_primary_key[0]
+            _prune(connection, scope, owner, protecting=landed)
+            return int(landed)
+
+        return self._written(agent, scope, work)
 
 
-def _stored(connection: Connection, agent: str) -> list[tuple[int, str]]:
-    """One agent's active facts, oldest first, each already a rendered
-    line.
+def _caps(scope: MemoryScope) -> tuple[int, int]:
+    """How many lines and how many bytes one scope keeps.
+
+    Read at call time rather than bound anywhere, which is what the cap
+    suites' monkeypatch reaches. Per scope because the pressure is: an
+    agent accumulates a person's whole history, a device accumulates the
+    few notes a place has, and one pair of numbers over both would either
+    starve the first or let the second grow into the prompt.
+    """
+    if scope is MemoryScope.DEVICE:
+        return DEVICE_LINES, DEVICE_BYTES
+    return MAX_LINES, MAX_BYTES
+
+
+def _one_line(text: str) -> str:
+    """What a fact or a value is stored as: one line, whatever it
+    arrived as. The rendering is per line, so a value carrying a newline
+    would be two entries in every block that shows it."""
+    return " ".join(text.split())
+
+
+def _refuse_the_oversized(text: str, scope: MemoryScope) -> None:
+    """Refuse one item whose rendered line alone will not fit inside its
+    scope's byte cap.
+
+    Before any connection, because it needs none, and separately from
+    the prune, because the prune cannot answer it: dropping every other
+    fact would still leave this one over the cap. The alternative is a
+    scope that is silently over its bound for as long as the fact lives.
+    """
+    if len(f"- {text}".encode()) > _caps(scope)[1]:
+        raise ValueError(TOO_LONG)
+
+
+def _active(
+    connection: Connection, scope: MemoryScope, owner: str
+) -> list[tuple[int, str]]:
+    """One owner's active facts within one scope, oldest first, each
+    already a rendered line.
 
     `ORDER BY id` is the file's line order, and the index the schema
     declares is on exactly the three columns this walks. Rendered here
-    rather than at the two call sites because the byte cap is applied to
-    the rendering, so the line is what both the reader and the prune
-    have to be counting.
+    rather than at the call sites because the byte cap is applied to the
+    rendering, so the line is what both the reader and the prune have to
+    be counting.
 
-    Held facts are not stored facts. A forgotten one is out of every
+    Held facts are not active facts. A forgotten one is out of every
     read, out of the prune's arithmetic and out of the caps until it is
     restored, which is what makes the undo a promise rather than a race
     against the next write.
@@ -364,8 +512,8 @@ def _stored(connection: Connection, agent: str) -> list[tuple[int, str]]:
     rows = connection.execute(
         select(schema.facts.c.id, schema.facts.c.fact)
         .where(
-            schema.facts.c.scope == schema.MemoryScope.AGENT,
-            schema.facts.c.owner == agent,
+            schema.facts.c.scope == scope,
+            schema.facts.c.owner == owner,
             schema.facts.c.forgotten_at.is_(None),
         )
         .order_by(schema.facts.c.id)
@@ -373,19 +521,52 @@ def _stored(connection: Connection, agent: str) -> list[tuple[int, str]]:
     return [(row_id, f"- {fact}") for row_id, fact in rows]
 
 
-def _over_the_cap(stored: Sequence[tuple[int, str]]) -> list[int]:
+def _prune(
+    connection: Connection, scope: MemoryScope, owner: str, protecting: int
+) -> None:
+    """Bring one scope's active rows back inside its caps, inside the
+    transaction that took it past them.
+
+    Every mutating transaction ends here, which is the whole of the cap
+    invariant: an add, an update that grew a fact and a restore into a
+    scope that refilled meanwhile all succeed and re-prune rather than
+    failing or leaving the scope over its bound.
+
+    `protecting` is the row this transaction just wrote, and it is never
+    pruned. A restore whose row is the oldest, or an update of the oldest
+    fact, would otherwise be undone by the prune in the same transaction
+    that made it, which is a mutation that answers success and changes
+    nothing.
+    """
+    doomed = _over_the_cap(_active(connection, scope, owner), scope, protecting)
+    if doomed:
+        connection.execute(delete(schema.facts).where(schema.facts.c.id.in_(doomed)))
+
+
+def _over_the_cap(
+    stored: Sequence[tuple[int, str]], scope: MemoryScope, protecting: int
+) -> list[int]:
     """Which rows no longer fit, by id. The oldest go first: a fact
     worth keeping tends to get said again, and the alternative (refusing
     to remember anything more) is worse to hear.
 
-    The same algorithm the file store applied to lines, on the same two
-    constants read at call time: keep the newest `MAX_LINES`, then drop
-    the oldest while the rendered block is over `MAX_BYTES`, never below
-    one fact.
+    The same algorithm the file store applied to lines, on constants read
+    at call time: drop the oldest until the scope is inside its line cap
+    and its rendered block is inside its byte cap, never below one fact,
+    and never the row the transaction just wrote.
     """
-    kept = list(stored[-MAX_LINES:])
-    while len(kept) > 1 and len(_rendered(kept).encode("utf-8")) > MAX_BYTES:
-        kept.pop(0)
+    lines, limit = _caps(scope)
+    kept = list(stored)
+    while len(kept) > lines or (
+        len(kept) > 1 and len(_rendered(kept).encode("utf-8")) > limit
+    ):
+        oldest = next(
+            (index for index, (row_id, _) in enumerate(kept) if row_id != protecting),
+            None,
+        )
+        if oldest is None:
+            break
+        kept.pop(oldest)
     surviving = {row_id for row_id, _ in kept}
     return [row_id for row_id, _ in stored if row_id not in surviving]
 
@@ -429,11 +610,16 @@ def open_memory(settings: DatabaseConfig) -> MemoryStore:
 
 __all__ = [
     "BUSY",
-    "QUIET_TIMEOUT_S",
+    "DEVICE_BYTES",
+    "DEVICE_LINES",
     "MAX_BYTES",
     "MAX_LINES",
     "MEMORY_CHAIN",
+    "NOTHING_TO_REMEMBER",
+    "QUIET_TIMEOUT_S",
+    "TOO_LONG",
     "UNWRITABLE",
+    "MemoryScope",
     "MemoryStore",
     "StoreClosed",
     "open_memory",
