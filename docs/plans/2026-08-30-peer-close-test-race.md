@@ -73,9 +73,17 @@ with a wrapper that, on the one socket this turn opens, replaces
 `socket.close` with a function that waits until `socket.close_code`
 is not `None` (bounded at ten seconds, the bound the 1011 case
 already uses for the same wait) before delegating to the real close.
-With the peer's close processed first, this side's close is the
-echo's no-op, `socket.close_code` is 4001 on every interleaving, and
-`_close_name` answers `UNKNOWN_CLOSE` by construction.
+The bound expiring is a synchronization failure with its own name,
+not a quiet return to the race: the wrapper records the expiry in a
+list the case holds, the case asserts that list empty after the
+turn, and the socket is still closed for cleanup whatever the list
+says. `_close` treats any normally returning wrapper as a completed
+close, so without that assertion a pathological runner would pass
+or fail by scheduling again, with the plan's own bound as the new
+racing party. With the peer's close processed first, this side's
+close is the echo's no-op, `socket.close_code` is 4001 on every
+interleaving, and `_close_name` answers `UNKNOWN_CLOSE` by
+construction.
 
 The hold is honest about what the test claims: the case's subject is
 "when the peer's close is the one this side read, its code is looked
@@ -134,10 +142,11 @@ The changed test is the deliverable; what verifies it:
 
 ## Risks
 
-- The ten-second bound could expire on a pathological runner, in
-  which case the close proceeds and the old race decides the verdict:
-  the failure mode is the status quo's flake, not a hang, and the
-  bound matches the file's existing precedent.
+- The ten-second bound could expire on a pathological runner. The
+  close still proceeds (cleanup is unconditional), but the expiry is
+  asserted absent, so the failure mode is a named synchronization
+  failure rather than either a hang or the old race deciding the
+  verdict; the bound matches the file's existing precedent.
 - Patching an instance method on a library object couples the case to
   `Connection` lacking `__slots__`; websockets is pinned by `uv.lock`,
   and the case fails loudly (an `AttributeError` at patch time), not
@@ -163,6 +172,10 @@ condensed but faithful; resolutions appended per amendment.
    by-construction determinism. The wait's expiry must be an
    explicit synchronization failure even when the close code
    happens to be 4001.
+
+   *Resolution*: adopted. The wrapper records an expiry in a list
+   the case asserts empty after the turn; the close itself remains
+   unconditional so cleanup never depends on the assertion.
 
 2. **P2: the committed test has no deterministic bite.** The only
    deterministic pre-fix failure uses a transient `time.sleep(0.3)`
