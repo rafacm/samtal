@@ -299,12 +299,12 @@ class StoreClosed(Exception):
     safe: a store that is closing has engines whose pools are about to
     be replaced, and a call let through would open one nobody owns.
 
-    Not a sentence anybody reads. It travels as a class name on the two
-    events this module emits, and both call sites contain it exactly as
-    they contain a database that is not there: the read answers with no
-    memory this round, and the write refuses with `UNWRITABLE`. A
-    shutdown is not a failure a model should be given different words
-    for.
+    Not a sentence anybody reads. It travels as a class name on the
+    events this module emits, and every seam contains it exactly as it
+    contains a database that is not there: a read answers with no memory
+    this round, a write refuses with `UNWRITABLE`, and a cleanup takes
+    nothing. A shutdown is not a failure a model should be given
+    different words for.
     """
 
 # How long a close waits for the calls already inside a connection.
@@ -336,7 +336,7 @@ MEMORY_CHAIN = StoreChain(
 
 
 class MemoryStore:
-    """One database's worth of remembered facts.
+    """One database's worth of memory: three scopes and one ledger.
 
     Built through `open_memory`, which is where the migration happens,
     so a database the server cannot reach fails the boot rather than the
@@ -356,11 +356,11 @@ class MemoryStore:
         self._engine = engine
         self._reader = reader
         # The three facts a close and a call have to agree about, and
-        # the lock they agree about them under. `read` and `remember`
-        # run in a worker thread while the close runs on the loop, so
-        # every one of them is touched from two threads: how many calls
-        # are inside a connection, whether this store is closing, and
-        # whether the pools have already been let go.
+        # the lock they agree about them under. Every call runs in a
+        # worker thread while the close runs on the loop, so every one of
+        # them is touched from two threads: how many calls are inside a
+        # connection, whether this store is closing, and whether the
+        # pools have already been let go.
         self._quiet = threading.Condition()
         self._in_flight = 0
         self._closing = False
