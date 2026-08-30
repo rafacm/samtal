@@ -427,6 +427,17 @@ first, then the agent's remembered facts, then the device's notes, each
 under a heading saying which of the three it is and which of them wins.
 What is most current wins.
 
+That injection is also where memory leaves the host, and the two halves
+of the answer are worth stating separately. As **storage**, memory never
+leaves: it is rows in the deployment's own database and no other server
+is told about them. As **prompt content**, it goes wherever the rest of
+the prompt goes: what a conversation is keeping and what the agent
+remembers are read into every reply, so they follow the active LLM
+provider's egress exactly as the transcript and the persona do. An agent
+on a cloud model sends what it remembered along with what was just said.
+`server.local_only` is the existing guard and it is the same one: a
+provider that sends session data off the host cannot be booted under it.
+
 **Conversation state shares its conversation's lifetime, exactly.** It
 is keyed by the thread rather than by the connection, so it survives a
 device hanging up and comes back when that conversation is resumed; and

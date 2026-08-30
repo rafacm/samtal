@@ -1903,6 +1903,18 @@ starts is a local_only server, and a config edit that would break the
 promise stops the server from coming up instead of quietly shipping
 audio to a vendor.
 
+**Memory is stored on the host and read out to the model.** What an
+agent remembers and what a conversation is keeping never leave this
+deployment as storage: they are rows in the database it already owns,
+they travel in the same `pg_dump` as everything else, and no other
+server is told about them. But both are injected into the system prompt
+on every reply, which makes them prompt content: they follow the active
+LLM provider's egress like the transcript and the persona do, so an
+agent on a cloud model sends what it remembered along with what was just
+said. `server.local_only` is the guard, and it is the same guard: a
+provider that sends session data off the host cannot be booted under it,
+and memory rides the boundary that draws.
+
 ## Listening and barge-in
 
 The firmware decides how it listens and the server follows. In `auto`
