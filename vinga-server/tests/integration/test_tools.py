@@ -21,6 +21,7 @@ STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:21"
 SWITCHER_MAC = "aa:bb:cc:dd:ee:22"
+SHARED_MAC = "aa:bb:cc:dd:ee:23"
 
 POET_TONE = 440.0
 TUTOR_TONE = 880.0
@@ -195,6 +196,66 @@ async def test_a_fact_remembered_in_one_conversation_reaches_the_next(
     assert stored.splitlines() == [f"- {fact}"]
     assert spoken(first).count(fact) == 1
     assert spoken(second).count(fact) == 2
+
+
+def household_config(opening: str) -> Config:
+    """Two agents bound to one board, `opening` the one a conversation
+    there starts with.
+
+    The binding order is the only lever a simulator run has over which of
+    two siblings speaks, and both are bound in both spellings, so the
+    pair is a household throughout: what changes between the two runs
+    below is who picks up the phone.
+    """
+    return Config(
+        providers={
+            "llm": {
+                "keeper": {
+                    "type": "mock",
+                    "reply": "Noted: {tool_result}",
+                    "tool_when": "secret",
+                    "tool_name": "remember",
+                    "tool_arguments": {
+                        "text": "the kettle in this room is loud",
+                        "scope": "device",
+                    },
+                },
+                "reader": {"type": "mock", "reply": "Prompt: {system}"},
+            },
+            "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults=dict.fromkeys(("asr", "tts", "vad"), "mock"),
+        agents={
+            "poet": {"prompt": "POET", "llm": "keeper"},
+            "tutor": {"prompt": "TUTOR", "llm": "reader"},
+        },
+        devices={SHARED_MAC: [opening, "tutor" if opening == "poet" else "poet"]},
+        default_agent=opening,
+    )
+
+
+async def test_a_device_note_reaches_every_agent_on_that_device(serve, simulate) -> None:
+    """The device scope end to end, across two server runs and two
+    agents on one board: the poet is told something about the room, and
+    the tutor's own prompt on that board carries it.
+
+    Both replies quote what the device heard, so the claim is checked
+    against what came out of the speaker: the poet's carries the number
+    the fact was kept under, and the tutor's carries the note itself
+    under the device's heading.
+    """
+    async with serve(household_config("poet")) as port:
+        kept, _ = await simulate(port, SHARED_MAC)
+    async with serve(household_config("tutor")) as port:
+        read, _ = await simulate(port, SHARED_MAC)
+
+    assert "Remembered [" in spoken(kept)
+    assert "the kettle in this room is loud" in spoken(kept)
+    said = spoken(read)
+    assert said.startswith("Prompt: TUTOR")
+    assert "the kettle in this room is loud" in said
 
 
 async def test_a_dead_mcp_server_still_boots_and_still_talks(serve, simulate) -> None:
