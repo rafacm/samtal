@@ -35,6 +35,13 @@ Three properties every caller gets and none of them states:
   the state before the other's change and then write over one another.
   A migration takes the same lock before Alembic reads the version
   table, which is how two starting processes settle a baseline race.
+- **A transaction that writes two stores takes both locks in
+  ascending key order.** A thread's erasure deletes its turns and its
+  memory in one transaction, so it holds the record chain's key and
+  then the memory chain's, in that order and never the reverse
+  (`advisory_key` states the rule, `take_the_chain_lock` is how the
+  second one is taken). Two transactions that agree on an order queue;
+  two that disagree deadlock.
 - **Every connection's lock wait is bounded.** `lock_timeout` is a
   connection parameter, set on the startup options rather than by a
   statement, so it survives the rollback a pooled connection is
@@ -219,6 +226,17 @@ def advisory_key(chain: int) -> int:
     Public because the other chain is declared beside the other store
     and needs a key from the same space: two stores picking their own
     numbers is how two chains come to share one.
+
+    The numbers are also an order, and that is the second thing this
+    function decides. A transaction that writes two stores takes both
+    chains' locks, and the rule is that it takes them in ASCENDING key
+    order: the record chain's (2) before the memory chain's (3), never
+    the other way round. Two transactions taking the same two locks in
+    the same order can only queue; taking them in opposite orders is a
+    deadlock the database resolves by killing one of them. That is what
+    keeps the no-deadlock property above true now that a thread's
+    erasure deletes the thread's memory in the same transaction as its
+    turns.
     """
     return (_LOCK_NAMESPACE << 32) | chain
 
@@ -390,11 +408,29 @@ def _write_engine_at(url: URL, chain: StoreChain) -> Engine:
 
     @event.listens_for(engine, "begin")
     def _serialize(connection: object) -> None:
-        connection.exec_driver_sql(  # type: ignore[attr-defined]
-            f"SELECT pg_advisory_xact_lock({chain.lock_key})"
-        )
+        take_the_chain_lock(connection, chain)
 
     return engine
+
+
+def take_the_chain_lock(connection: object, chain: StoreChain) -> None:
+    """Take one chain's advisory lock inside a transaction that is
+    already open.
+
+    The statement every write transaction begins with, written once
+    because two callers issue it. A write engine's begin listener issues
+    it for its own chain, which is the single-writer discipline above;
+    and a transaction that crosses into a second store issues it for
+    that store's chain before its first statement there, which is where
+    the ascending order `advisory_key` states is kept.
+
+    Transaction-scoped, so it is released by the commit or the rollback
+    and by nothing else, and re-entrant: a transaction that takes the
+    same key twice holds it once and gives it back once.
+    """
+    connection.exec_driver_sql(  # type: ignore[attr-defined]
+        f"SELECT pg_advisory_xact_lock({chain.lock_key})"
+    )
 
 
 def upgrade_to_head(engine: Engine, chain: StoreChain) -> None:
@@ -683,6 +719,7 @@ __all__ = [
     "open_database",
     "open_url",
     "read_engine",
+    "take_the_chain_lock",
     "upgrade_to_head",
     "write_engine",
 ]

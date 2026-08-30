@@ -34,8 +34,10 @@ What a caller gets, in the order the sentences are met:
   prompt did not inject and how it learns the number of a fact it wants
   to correct.
 - `set_state` and `clear_state`, the conversation's ledger.
-- `purge`, `purge_threads` and `sweep`, which take the memory of
-  threads that are gone.
+- `purge_threads` and `sweep`, which take the memory of threads that
+  are gone, and `purge`, the same deletes on a transaction somebody
+  else owns, which is how a thread's erasure takes its memory in the
+  commit that takes its turns.
 
 Injection is still the standard shape for what fits: it costs no lookup
 latency (a lookup round trip is spoken silence) and does not depend on
@@ -72,6 +74,7 @@ from vinga_server.db import (
     is_busy,
     open_at,
     read_engine,
+    take_the_chain_lock,
 )
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import (
@@ -672,60 +675,6 @@ class MemoryStore:
 
         return self._written(agent, scope, work)
 
-    def purge(self, connection: Connection, threads: Sequence[str]) -> Purged:
-        """Take the memory of threads that are gone, on a connection the
-        caller already holds.
-
-        The seam the cross-store deletion is made of: this module owns
-        the SQL and the caller owns the transaction, so a thread's
-        erasure and its memory leave in the same commit and there is
-        never a moment when the thread is gone while its state remains.
-        A failure therefore has to reach the caller and take its
-        transaction down with it, because a purge that swallowed one
-        would let an erasure answer with counts a rollback made false.
-
-        What reaches the caller is a refusal of this module's own, never
-        the driver's. A SQLAlchemy failure carries the statement it ran
-        and the parameters bound into it, and the parameters here are
-        thread ids: a caller that rendered one into a problem body or a
-        log line would be quoting the very identifiers an erasure exists
-        to remove. So the refusal is built inside the handler and raised
-        after it, cause severed, and the caller's transaction rolls back
-        exactly as it would have.
-
-        A thread's memory is its ledger and the facts it forgot. Active
-        facts are nobody's thread: they belong to the agent or the
-        device and outlive every conversation.
-        """
-        if not threads:
-            return NOTHING_PURGED
-        problem: Exception
-        try:
-            return Purged(
-                state=int(
-                    connection.execute(
-                        delete(schema.state).where(
-                            schema.state.c.conversation.in_(threads)
-                        )
-                    ).rowcount
-                ),
-                held_facts=int(
-                    connection.execute(
-                        delete(schema.facts).where(
-                            schema.facts.c.forgotten_in.in_(threads)
-                        )
-                    ).rowcount
-                ),
-            )
-        except Exception as exc:  # noqa: BLE001 - classified, never quoted
-            # By class and never by message, through the one classifier
-            # `db` owns, the same pair every other write here answers
-            # with: a contended delete is retryable and says so.
-            problem = (
-                DatabaseBusyError(PURGE_BUSY) if is_busy(exc) else StorageError(PURGE_FAILED)
-            )
-        raise problem
-
     def purge_threads(self, threads: Sequence[str]) -> Purged:
         """The same purge in a transaction of this store's own, for a
         caller that holds none.
@@ -736,7 +685,7 @@ class MemoryStore:
         resumed. Contained like every other lifecycle cleanup, because
         there is nobody to refuse: the session is going away either way.
         """
-        return self._cleaned(lambda connection: self.purge(connection, threads))
+        return self._cleaned(lambda connection: purge(connection, threads))
 
     def sweep(self, grace: dt.timedelta = SWEEP_GRACE) -> Purged:
         """Take the state and the held facts of threads that have no
@@ -1128,6 +1077,78 @@ class MemoryStore:
             return str(found[1])
 
         return self._written(agent, scope, work)
+
+
+def purge(connection: Connection, threads: Sequence[str]) -> Purged:
+    """Take the memory of threads that are gone, on a connection the
+    caller already holds.
+
+    The seam the cross-store deletion is made of: this module owns the
+    SQL and the caller owns the transaction, so a thread's erasure and
+    its memory leave in the same commit and there is never a moment when
+    the thread is gone while its state remains. A failure therefore has
+    to reach the caller and take its transaction down with it, because a
+    purge that swallowed one would let an erasure answer with counts a
+    rollback made false.
+
+    What reaches the caller is a refusal of this module's own, never the
+    driver's. A SQLAlchemy failure carries the statement it ran and the
+    parameters bound into it, and the parameters here are thread ids: a
+    caller that rendered one into a problem body or a log line would be
+    quoting the very identifiers an erasure exists to remove. So the
+    refusal is built inside the handler and raised after it, cause
+    severed, and the caller's transaction rolls back exactly as it would
+    have.
+
+    A function rather than a method, because neither caller has a store.
+    The conversation record's writer is handed this at construction
+    (importing it there would be a cycle, since this module reads the
+    record's own table), and a deletion through the operator API runs on
+    a connection it opened for itself, precisely so that erasure works
+    in a deployment with recording off. What the SQL needs is a
+    connection, and a store would be a parameter neither of them has to
+    give.
+
+    The memory chain's advisory lock is taken before the first statement
+    rather than left to the caller's engine, which is what makes the
+    ascending order `db.advisory_key` states a property of this
+    function: a caller on the record chain's write engine is already
+    holding key 2 when it arrives here, and this takes key 3 second. A
+    caller already on the memory chain's own engine is taking a lock it
+    holds, which costs nothing. It is taken inside the boundary below
+    like every other statement here, because a lock that does not arrive
+    inside the timeout is exactly the contended case the retryable
+    sentence is for.
+
+    A thread's memory is its ledger and the facts it forgot. Active
+    facts are nobody's thread: they belong to the agent or the device
+    and outlive every conversation.
+    """
+    if not threads:
+        return NOTHING_PURGED
+    problem: Exception
+    try:
+        take_the_chain_lock(connection, MEMORY_CHAIN)
+        return Purged(
+            state=int(
+                connection.execute(
+                    delete(schema.state).where(schema.state.c.conversation.in_(threads))
+                ).rowcount
+            ),
+            held_facts=int(
+                connection.execute(
+                    delete(schema.facts).where(schema.facts.c.forgotten_in.in_(threads))
+                ).rowcount
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - classified, never quoted
+        # By class and never by message, through the one classifier `db`
+        # owns, the same pair every other write here answers with: a
+        # contended delete is retryable and says so.
+        problem = (
+            DatabaseBusyError(PURGE_BUSY) if is_busy(exc) else StorageError(PURGE_FAILED)
+        )
+    raise problem
 
 
 # What every id-addressed operation adds to its WHERE clause, so the
@@ -1533,4 +1554,5 @@ __all__ = [
     "Purged",
     "StoreClosed",
     "open_memory",
+    "purge",
 ]
