@@ -307,15 +307,25 @@ the README's grant-model paragraph, which names #83 as the decider,
 is rewritten to describe the control that now exists. Body-parse
 fixtures gain the new field's sparse and written forms.
 
-**The two memory events gain a scope, and no new event family
-arrives.** `memory_unreadable` and `memory_unwritable` keep their
-names, channel and level, and their `agent` field keeps meaning the
-acting agent; each gains a `scope` field from the closed scope set
-(the decision site is the store call that failed, which knows it).
-Operator writes through the API are refusals-or-acknowledgements in
-the #101 shape and emit nothing new, like the conversations API's
-erasures. The catalog change regenerates the events reference, adds
-the README index rows' wording, and extends the two drivers.
+**The two memory events gain a scope, and lifecycle cleanup gets
+one agent-free variant.** `memory_unreadable` and
+`memory_unwritable` keep their names, channel and level, and their
+`agent` field keeps meaning the acting agent; each gains a `scope`
+field from the closed scope set (the decision site is the store
+call that failed, which knows it). The deletions with no acting
+agent (the boot sweep, the session-close purge) cannot borrow those
+variants honestly, so a third arrives on the same channel:
+`memory_cleanup_failed`, WARNING, carrying only the failure's class
+name, its decision site the one `except` arm in the sweep-and-purge
+path. Erasure and retention need no failure event of their own: the
+atomic transaction means their memory counts are as truthful as
+their record counts, and `ThreadErasure` and `Erasure` both gain
+the `state` and `held_facts` counts from the same transaction that
+produced the others. Operator writes through the API are
+refusals-or-acknowledgements in the #101 shape and emit nothing
+new, like the conversations API's erasures. The catalog change
+regenerates the events reference, adds the README index rows, and
+extends the driver set (the two extended drivers, one new one).
 
 **The preview stays agent-keyed and says so.** `GET
 /runtime/agents/{name}/prompt` renders the know-how half plus the
@@ -579,6 +589,14 @@ resolution.
    otherwise define partial-completion semantics, durable retry, and
    an agent-free lifecycle event, with truthful counts on both
    `Erasure` and `ThreadErasure`.
+
+   *Resolution*: dissolved for erasure and retention by finding 1's
+   atomicity (there is no cleanup after the commit; the counts ride
+   the deleting transaction, and both `Erasure` and `ThreadErasure`
+   gain `state` and `held_facts` counts), and adopted for the paths
+   that remain: the boot sweep and the session-close purge get the
+   agent-free `memory_cleanup_failed` variant, WARNING, class name
+   only, with its own driver.
 
 3. **P1: numeric fact operations lack an ownership boundary.** Ids
    are global and guessable, and the plan never states that update,
