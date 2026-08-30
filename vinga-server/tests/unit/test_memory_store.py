@@ -42,6 +42,7 @@ from tests.support.stores import (
 from vinga_server import db as db_module
 from vinga_server.config.loader import ConfigError, DatabaseBusyError
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations.store import CONVERSATIONS_CHAIN
 from vinga_server.db import advisory_key, connection_url
 from vinga_server.memory import store as store_module
 from vinga_server.memory.store import (
@@ -1037,17 +1038,21 @@ async def test_purging_nothing_reaches_no_connection() -> None:
 async def test_a_purge_on_a_callers_connection_belongs_to_its_transaction() -> None:
     """The seam the cross-store deletion is made of: the caller owns the
     transaction, so a rollback takes the memory deletes with it and
-    there is no moment when a thread is gone while its state remains."""
+    there is no moment when a thread is gone while its state remains.
+
+    On the record chain's own write engine, which is the caller this
+    exists for: a transaction already holding key 2 reaches here and
+    takes key 3, which is the ascending order the deadlock rule is."""
     from vinga_server.db import write_engine
 
     store = memory()
     await _a_thread_with_memory(store, THREAD)
 
-    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    engine = write_engine(DatabaseConfig(), CONVERSATIONS_CHAIN)
     try:
         with engine.connect() as connection:
             with connection.begin() as transaction:
-                taken = store.purge(connection, [THREAD])
+                taken = store_module.purge(connection, [THREAD])
                 transaction.rollback()
     finally:
         engine.dispose()
@@ -1114,7 +1119,7 @@ async def test_a_purge_that_the_database_refuses_quotes_nothing_of_it(
             with engine.connect() as connection:
                 with connection.begin():
                     with pytest.raises(ConfigError) as refusal:
-                        store.purge(connection, [PURGED])
+                        store_module.purge(connection, [PURGED])
     finally:
         engine.dispose()
 
