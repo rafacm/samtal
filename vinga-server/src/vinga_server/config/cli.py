@@ -534,6 +534,19 @@ NO_STATE = (
     "thread that has ended, or one that has been told nothing, reads as"
 )
 
+# What a page that is not the whole of a listing says, on stderr,
+# because it is about this invocation rather than about the artifact:
+# this page ended here and there is more, and what to type for the rest.
+#
+# The record's two nouns print no such notice and take no cursor, and
+# the difference is what each listing is of. A session list is a window
+# onto a log that only grows, where the newest page is the reading
+# somebody opened it for. A memory is a bounded thing being audited: an
+# agent may hold a thousand facts, a page holds two hundred, and a
+# listing whose rest could not be reached would make this verb's own
+# help a claim the grammar cannot keep.
+MORE_PAGES = "this is one page and there is more; the next one is --cursor"
+
 # What a held fact's line says, and what an active one's does not say at
 # all. A word rather than a column, because held is the rare state and a
 # column of blanks would be a column nobody reads.
@@ -966,9 +979,19 @@ class Invocation:
     #
     # `all_of_it` is the flag that stands in for an absent id on the
     # deletions, so a mistyped number can never mean everything.
+    #
+    # `cursor` is where a listing carries on from, which this noun has
+    # and the record's two do not. The difference is what the listings
+    # are of: a session list is a window onto a log that only grows, and
+    # what an operator wants of it is the newest page; a memory is a
+    # bounded thing being audited, and a page of it that could not be
+    # followed would make `list` a claim this grammar cannot keep. Text
+    # and not read here, for the reason `limit` is not: what a cursor
+    # has to be is the API's rule, said in the API's own fixed sentence.
     scope: str = ""
     fact: str = ""
     all_of_it: bool = False
+    cursor: str = ""
 
     # What narrows the live event stream beyond the board and the
     # session above, which `mac` and `session` carry for it: what
@@ -2482,6 +2505,37 @@ def _memory_fact_line(fact: Mapping[str, Any]) -> str:
     it. One rendering rather than two, so what a correction answers and
     what the listing shows are the same shape."""
     return _memory_fact_blocks({"items": [fact]})
+
+
+def _paged(listing: Callable[[Any], str]) -> Callable[[Any], None]:
+    """A listing, and what to type for the page after it.
+
+    The continuation goes to stderr, which is where everything about
+    this invocation goes and where the practice puts "what to run next"
+    by name. Two things follow from that and both are the reason. A
+    redirected `> facts.txt` holds the facts and nothing else, so the
+    one-entry-per-line property the tables have survives the page being
+    followed; and a script reads the same bytes on the same stream
+    whatever the terminal is, so nothing here is an interactive
+    affordance.
+
+    The value is the API's own answer rather than anything typed, and it
+    is bounded on the way out like every other value an answer carries.
+
+    Stdout is flushed first, for the reason `_acknowledged` flushes it:
+    stderr is unbuffered and stdout is not, so the notice would
+    otherwise land above the page it is about.
+    """
+
+    def render(answer: Any) -> None:
+        print(listing(answer), end="")
+        after = answer["next_cursor"]
+        if after is None:
+            return
+        sys.stdout.flush()
+        print(f"{MORE_PAGES} {_cell(after)}", file=sys.stderr)
+
+    return render
 
 
 def _stored(value: object) -> str:
@@ -4450,11 +4504,20 @@ def _memory_state_path(args: Invocation) -> str:
 
 
 def _memory_page(args: Invocation) -> dict[str, str]:
-    """What bounds a memory listing. The rule the record's filters
-    follow: only what was written, so the API's own default is the
-    default, said once. No cursor flag, for the reason there is none
-    there: one invocation prints one page."""
-    return {"limit": args.limit} if args.limit else {}
+    """Which page of a memory listing, and how big.
+
+    Only what was written, so the API's own defaults are the defaults,
+    said once. One invocation is still one request, which is what keeps
+    every wait here bounded by the endpoint's own timeout: the
+    alternative is a command that walks a listing whose length nothing
+    bounds, since conversations hold memory at thread-creation pace and
+    no finite number could be derived for it.
+    """
+    return {
+        name: value
+        for name, value in (("limit", args.limit), ("cursor", args.cursor))
+        if value
+    }
 
 
 def _correction(args: Invocation) -> object:
@@ -4482,7 +4545,7 @@ LIST_AGENT_MEMORIES = Act(
     path=_memory_owners_path,
     query=_memory_page,
     answers=MemoryOwners,
-    render=_printed(_memory_owner_listing),
+    render=_paged(_memory_owner_listing),
 )
 
 LIST_DEVICE_MEMORIES = Act(
@@ -4490,7 +4553,7 @@ LIST_DEVICE_MEMORIES = Act(
     path=_memory_devices_path,
     query=_memory_page,
     answers=MemoryOwners,
-    render=_printed(_memory_owner_listing),
+    render=_paged(_memory_owner_listing),
 )
 
 LIST_CONVERSATION_MEMORIES = Act(
@@ -4498,7 +4561,7 @@ LIST_CONVERSATION_MEMORIES = Act(
     path=_memory_conversations_path,
     query=_memory_page,
     answers=MemoryConversations,
-    render=_printed(_memory_conversation_listing),
+    render=_paged(_memory_conversation_listing),
 )
 
 READ_AGENT_MEMORY = Act(
@@ -4506,7 +4569,7 @@ READ_AGENT_MEMORY = Act(
     path=_agent_memory_path,
     query=_memory_page,
     answers=MemoryFacts,
-    render=_printed(_memory_fact_blocks),
+    render=_paged(_memory_fact_blocks),
 )
 
 READ_DEVICE_MEMORY = Act(
@@ -4514,7 +4577,7 @@ READ_DEVICE_MEMORY = Act(
     path=_device_memory_path,
     query=_memory_page,
     answers=MemoryFacts,
-    render=_printed(_memory_fact_blocks),
+    render=_paged(_memory_fact_blocks),
 )
 
 READ_STATE = Act(
@@ -5675,6 +5738,11 @@ MEMORY_ID_HELP = "the fact's number, as the listing prints it beside the fact"
 
 MEMORY_ALL_HELP = "the whole of that memory rather than one fact of it"
 
+MEMORY_CURSOR_HELP = (
+    "carry on after this, as the previous page's own notice printed it (default: the "
+    "first page)"
+)
+
 # The two that follow `schema provider`. A provider type is addressed by
 # its stage and its name together everywhere else in this command group,
 # and its options are addressed the same way for the same reason: one
@@ -6535,6 +6603,9 @@ def _memory_read(row: Command) -> Callable[..., None]:
         limit: Annotated[
             str | None, typer.Option("--limit", metavar="N", help=LIMIT_HELP)
         ] = None,
+        cursor: Annotated[
+            str | None, typer.Option("--cursor", metavar="AFTER", help=MEMORY_CURSOR_HELP)
+        ] = None,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
         force: ForceOption = None,
@@ -6543,7 +6614,8 @@ def _memory_read(row: Command) -> Callable[..., None]:
         row.perform(
             _invocation(
                 row, context, config, api_url, force, no_input,
-                scope=scope, limit=limit or "", **_addressing(scope, owner),
+                scope=scope, limit=limit or "", cursor=cursor or "",
+                **_addressing(scope, owner),
             )
         )
 
@@ -7321,7 +7393,8 @@ COMMANDS: tuple[Command, ...] = (
         help=(
             "with no owner, who is remembering anything in that scope and how much; "
             "with one, what that agent, board or conversation holds, oldest first, "
-            "with the number each fact is addressed by"
+            "with the number each fact is addressed by; one page at a time, and a page "
+            "that is not the last says what to give --cursor for the rest"
         ),
     ),
     Command(

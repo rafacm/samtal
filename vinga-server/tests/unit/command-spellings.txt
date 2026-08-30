@@ -868,36 +868,36 @@ docs/reference/cli.md:2215  generated  vinga conversation delete
 docs/reference/cli.md:2218  generated  vinga conversation delete
 docs/reference/cli.md:2240  generated  vinga memory
 docs/reference/cli.md:2243  generated  vinga memory
-docs/reference/cli.md:2262  generated  vinga memory list
-docs/reference/cli.md:2265  generated  vinga memory list
-docs/reference/cli.md:2290  generated  vinga memory set
-docs/reference/cli.md:2293  generated  vinga memory set
-docs/reference/cli.md:2321  generated  vinga memory delete
-docs/reference/cli.md:2324  generated  vinga memory delete
-docs/reference/cli.md:2350  generated  vinga events
-docs/reference/cli.md:2353  generated  vinga events
-docs/reference/cli.md:2365  generated  vinga events tail
-docs/reference/cli.md:2368  generated  vinga events tail
-docs/reference/cli.md:2393  generated  vinga reload
-docs/reference/cli.md:2396  generated  vinga reload
-docs/reference/cli.md:2414  generated  vinga ota-url
-docs/reference/cli.md:2417  generated  vinga ota-url
-docs/reference/cli.md:2428  generated  vinga simulator
-docs/reference/cli.md:2431  generated  vinga simulator
-docs/reference/cli.md:2446  generated  vinga simulator check-in
-docs/reference/cli.md:2449  generated  vinga simulator check-in
-docs/reference/cli.md:2455  generated  vinga ota-url
-docs/reference/cli.md:2578  generated  vinga simulator run
-docs/reference/cli.md:2581  generated  vinga simulator run
-docs/reference/cli.md:2588  generated  vinga ota-url
-docs/reference/cli.md:2711  generated  vinga schema
-docs/reference/cli.md:2714  generated  vinga schema
-docs/reference/cli.md:2728  generated  vinga reference
-docs/reference/cli.md:2731  generated  vinga reference
-docs/reference/cli.md:2739  generated  vinga openapi
-docs/reference/cli.md:2742  generated  vinga openapi
-docs/reference/cli.md:2750  generated  vinga cli-reference
-docs/reference/cli.md:2753  generated  vinga cli-reference
+docs/reference/cli.md:2263  generated  vinga memory list
+docs/reference/cli.md:2266  generated  vinga memory list
+docs/reference/cli.md:2294  generated  vinga memory set
+docs/reference/cli.md:2297  generated  vinga memory set
+docs/reference/cli.md:2325  generated  vinga memory delete
+docs/reference/cli.md:2328  generated  vinga memory delete
+docs/reference/cli.md:2354  generated  vinga events
+docs/reference/cli.md:2357  generated  vinga events
+docs/reference/cli.md:2369  generated  vinga events tail
+docs/reference/cli.md:2372  generated  vinga events tail
+docs/reference/cli.md:2397  generated  vinga reload
+docs/reference/cli.md:2400  generated  vinga reload
+docs/reference/cli.md:2418  generated  vinga ota-url
+docs/reference/cli.md:2421  generated  vinga ota-url
+docs/reference/cli.md:2432  generated  vinga simulator
+docs/reference/cli.md:2435  generated  vinga simulator
+docs/reference/cli.md:2450  generated  vinga simulator check-in
+docs/reference/cli.md:2453  generated  vinga simulator check-in
+docs/reference/cli.md:2459  generated  vinga ota-url
+docs/reference/cli.md:2582  generated  vinga simulator run
+docs/reference/cli.md:2585  generated  vinga simulator run
+docs/reference/cli.md:2592  generated  vinga ota-url
+docs/reference/cli.md:2715  generated  vinga schema
+docs/reference/cli.md:2718  generated  vinga schema
+docs/reference/cli.md:2732  generated  vinga reference
+docs/reference/cli.md:2735  generated  vinga reference
+docs/reference/cli.md:2743  generated  vinga openapi
+docs/reference/cli.md:2746  generated  vinga openapi
+docs/reference/cli.md:2754  generated  vinga cli-reference
+docs/reference/cli.md:2757  generated  vinga cli-reference
 docs/reference/conversations-schema.md:134  respell  vinga session delete
 docs/reference/conversations-schema.md:134  respell  vinga session purge
 docs/reference/domain-config.md:3  generated  vinga reference
@@ -1084,12 +1084,12 @@ vinga-server/src/vinga_server/config/api.py:443  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:462  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:562  respell  vinga-server config reload
 vinga-server/src/vinga_server/config/api.py:563  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:594  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:756  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:2944  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:2976  respell  config list
-vinga-server/src/vinga_server/config/cli.py:7493  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:7493  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:607  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:769  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:2998  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:3030  respell  config list
+vinga-server/src/vinga_server/config/cli.py:7566  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:7566  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:588  respell  config schema
 vinga-server/src/vinga_server/config/loader.py:79  respell  vinga simulator run
