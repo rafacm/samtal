@@ -1582,7 +1582,7 @@ async def drive_mcp_reload_applied(_: Path) -> None:
 
 
 def drive_memory_unreadable(_: Path) -> None:
-    assert memory_that_cannot_read().read("poet") == ""
+    assert memory_that_cannot_read().read_for_prompt("poet", None, None).agent == ""
 
 
 async def drive_memory_unwritable(_: Path) -> None:

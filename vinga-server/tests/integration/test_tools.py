@@ -187,7 +187,7 @@ async def test_a_fact_remembered_in_one_conversation_reaches_the_next(
         # here as a second process would open it.
         store = open_memory(DatabaseConfig())
         try:
-            stored = store.read("assistant")
+            stored = store.read_for_prompt("assistant", None, None).agent
         finally:
             store.close()
         second, _ = await simulate(port, DEVICE_MAC)
