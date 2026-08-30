@@ -65,3 +65,13 @@ prompt_includes:
 #   phrases:
 #     - "Hmm, let me see..."
 #     - "Good question..."
+
+# Whether agents remember anything, which they do unless this says
+# otherwise. Written here it is the deployment-wide answer, and an agent
+# that names its own memory section replaces this one wholly, like the
+# stage fields above. Off withholds the whole family at once: no memory
+# tools are offered and nothing remembered is injected into the prompt,
+# not the agent's own facts, not the board's notes and not what the
+# conversation is keeping. Nothing already stored is deleted by it.
+# memory:
+#   enabled: true

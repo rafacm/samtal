@@ -331,15 +331,23 @@ vinga agent set <name> -f fragment.yaml
 | `asr` | `str \| null` | `null` | The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry. |
 | `tts` | `str \| null` | `null` | The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry. |
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
-| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
+| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this list: the memory family is offered wherever the memory section leaves it on, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
+| `memory` | `MemoryPolicy \| null` | `null` | Whether this layer may remember anything. Unset inherits the agent_defaults section, and an agent under neither may remember, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `memory: {enabled: false}` opts an agent out of the memory tools and the injected scope blocks together. |
 | `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments this agent's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts this agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch. Leaving it unset inherits the agent_defaults list, whose edits reach this agent at the same moment. |
 | `prompt` | `str` | `""` | The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
 
-An agent's name is also the key its remembered facts are stored under, so
-renaming an agent orphans its memory: the rows stay in the database under the
-old name and the renamed agent starts empty. Rename an agent that has been
-accumulating facts for months only if you mean to lose them.
+An agent's name is also the key its remembered facts and its held removals are
+stored under, so renaming an agent orphans its own scope of memory whole: the
+rows stay in the database under the old name and the renamed agent starts
+empty. What the device it is bound to knows is keyed by the board and survives
+the rename. Rename an agent that has been accumulating facts for months only
+if you mean to lose them; `vinga memory list agent` is what shows the orphaned
+name.
+
+Whether an agent remembers at all is its `memory` section, which is on unless
+it says otherwise. Switched off, the agent is offered no memory tools and is
+read no scope, its board's included.
 
 Examples:
 
@@ -363,8 +371,9 @@ vinga agent-defaults set -f fragment.yaml
 | `asr` | `str \| null` | `null` | The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry. |
 | `tts` | `str \| null` | `null` | The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry. |
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
-| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
+| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this list: the memory family is offered wherever the memory section leaves it on, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
+| `memory` | `MemoryPolicy \| null` | `null` | Whether this layer may remember anything. Unset inherits the agent_defaults section, and an agent under neither may remember, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `memory: {enabled: false}` opts an agent out of the memory tools and the injected scope blocks together. |
 | `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments every agent's system prompt carries unless the agent names a list of its own, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. An agent naming a list replaces this one rather than extending it, so an empty list there opts that agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, along with an agent's own and the text of a fragment either layer names, so a change here reaches every agent that inherits it at that agent's next activation, which is a new session or an agent switch. |
 
 This entry is a singleton. There is one of it, writing it replaces it whole,
@@ -374,8 +383,8 @@ re-keying the table is what it will do.
 An agent that names no provider for a stage inherits this entry's provider for
 that stage. A list field replaces rather than extends: an agent naming `mcp`
 names all of its MCP servers, and `mcp: []` opts it out of the tools its
-siblings have. A `filler` section behaves the same way, replacing this one
-wholly rather than merging with it.
+siblings have. The `filler` and `memory` sections behave the same way, each
+replacing this one wholly rather than merging with it.
 
 Examples:
 
@@ -423,6 +432,30 @@ provider is the thing being slow.
 | `enabled` | `bool` | `false` | Whether a filled pause is played while a slow reply is prepared. Off by default. |
 | `delay_ms` | `float` | `1800.0` | How long the user hears silence before the filler starts, in milliseconds, counted from the transcription of their utterance. |
 | `phrases` | `list[str]` | `[]` | The phrases to play, written in the agent's own language; the player rotates through them rather than always playing the same one. At least one is required when the feature is enabled. |
+
+### Memory
+
+`agent_defaults.memory, agents.<name>.memory`
+
+Whether an agent remembers anything at all. Nested inside an agent or the
+agent defaults rather than written on its own, and on unless it says
+otherwise. Off is the whole family at once: the agent is offered none of the
+memory tools and its prompt carries none of the scope blocks, so it can
+neither write what it is told nor read what it or its board was told before.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `true` | Whether this agent may remember anything. On by default. Off withholds the whole family at once: the memory tools are not offered and no remembered facts, device notes or conversation state are injected into the prompt, so the agent can neither write memory nor read it. Nothing already stored is deleted. |
+
+The device scope goes with the switch. An agent that may not remember is not
+read the notes its siblings on the same board accrued either, because an agent
+told what the room knows and unable to write any of it down is a half-off
+agent rather than an off one.
+
+Nothing stored is deleted by switching this off. The rows stay under the
+agent's name, the operator surface still shows them, and switching it back on
+is an agent that remembers what it remembered before; `vinga memory delete` is
+what takes rows away.
 
 ## Domain-level settings
 

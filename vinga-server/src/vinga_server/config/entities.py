@@ -56,6 +56,7 @@ from vinga_server.config.models import (
     FillerConfig,
     McpGrant,
     McpServerConfig,
+    MemoryPolicy,
     PromptFragmentConfig,
     ProviderConfig,
     is_mcp_secret_key,
@@ -473,11 +474,16 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         command=f"{PROGRAM} agent set <name> -f fragment.yaml",
         examples=("agent.yaml",),
         notes=(
-            "An agent's name is also the key its remembered facts are stored under, "
-            "so renaming an agent orphans its memory: the rows stay in the database "
-            "under the old name and the renamed agent starts empty. Rename an agent "
-            "that has been accumulating facts for months only if you mean to lose "
-            "them.",
+            "An agent's name is also the key its remembered facts and its held "
+            "removals are stored under, so renaming an agent orphans its own scope "
+            "of memory whole: the rows stay in the database under the old name and "
+            "the renamed agent starts empty. What the device it is bound to knows "
+            "is keyed by the board and survives the rename. Rename an agent that "
+            "has been accumulating facts for months only if you mean to lose them; "
+            f"`{PROGRAM} memory list agent` is what shows the orphaned name.",
+            "Whether an agent remembers at all is its `memory` section, which is on "
+            "unless it says otherwise. Switched off, the agent is offered no memory "
+            "tools and is read no scope, its board's included.",
         ),
         route="/agents",
         addressing=("name",),
@@ -506,8 +512,9 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "An agent that names no provider for a stage inherits this entry's "
             "provider for that stage. A list field replaces rather than extends: an "
             "agent naming `mcp` names all of its MCP servers, and `mcp: []` opts it "
-            "out of the tools its siblings have. A `filler` section behaves the same "
-            "way, replacing this one wholly rather than merging with it.",
+            "out of the tools its siblings have. The `filler` and `memory` sections "
+            "behave the same way, each replacing this one wholly rather than merging "
+            "with it.",
         ),
         route="/agent-defaults",
         addressing=(),
@@ -558,6 +565,30 @@ NESTED: tuple[NestedShape, ...] = (
             "voice ahead of time, at a start and again at every reload that moves "
             "them, and cached, so the clip costs nothing at the moment it "
             "masks and keeps working when the TTS provider is the thing being slow."
+        ),
+    ),
+    NestedShape(
+        name="memory",
+        title="Memory",
+        location="agent_defaults.memory, agents.<name>.memory",
+        model=MemoryPolicy,
+        purpose=(
+            "Whether an agent remembers anything at all. Nested inside an agent or "
+            "the agent defaults rather than written on its own, and on unless it "
+            "says otherwise. Off is the whole family at once: the agent is offered "
+            "none of the memory tools and its prompt carries none of the scope "
+            "blocks, so it can neither write what it is told nor read what it or "
+            "its board was told before."
+        ),
+        notes=(
+            "The device scope goes with the switch. An agent that may not remember "
+            "is not read the notes its siblings on the same board accrued either, "
+            "because an agent told what the room knows and unable to write any of "
+            "it down is a half-off agent rather than an off one.",
+            "Nothing stored is deleted by switching this off. The rows stay under "
+            "the agent's name, the operator surface still shows them, and switching "
+            "it back on is an agent that remembers what it remembered before; "
+            f"`{PROGRAM} memory delete` is what takes rows away.",
         ),
     ),
 )
