@@ -35,12 +35,17 @@ from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import insert
 
 from tests.support.config_cli import answering, runner
 from tests.support.stores import memory, memory_rows
 from vinga_server import logs
 from vinga_server.config import cli
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.db import write_engine
+from vinga_server.memory import schema
 from vinga_server.memory.scopes import MemoryScope
+from vinga_server.memory.store import MEMORY_CHAIN
 
 AGENT = "poet"
 
@@ -86,6 +91,37 @@ def through_a_pipe(monkeypatch: pytest.MonkeyPatch, piped: str = "") -> None:
 def told(scope: MemoryScope, owner: str, *facts: str) -> list[int]:
     store = memory()
     return [asyncio.run(store.add(scope, owner, fact, agent=AGENT)) for fact in facts]
+
+
+def a_scope_of(count: int, owner: str = AGENT) -> list[str]:
+    """One agent's memory with more facts in it than a page holds,
+    written in one statement.
+
+    Through the table rather than through the store's own door, and the
+    reason is what is under test: this is about the command walking a
+    listing, not about how the rows got there, and two hundred and fifty
+    transactions with a prune apiece would be a slow test of something
+    else. What the rows are is exactly what a `remember` writes.
+    """
+    facts = [f"fact number {index:03d}" for index in range(count)]
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                insert(schema.facts),
+                [
+                    {
+                        "scope": MemoryScope.AGENT,
+                        "owner": owner,
+                        "at": "2026-08-30T10:00:00+00:00",
+                        "fact": fact,
+                    }
+                    for fact in facts
+                ],
+            )
+    finally:
+        engine.dispose()
+    return facts
 
 
 def kept(conversation: str, **entries: str) -> None:
@@ -204,10 +240,70 @@ def test_the_limit_is_the_apis_rule_and_the_apis_sentence(run, capsys) -> None:
     code, printed, err = out(run, capsys, "memory", "list", "agent", AGENT, "--limit", "1")
     refused = out(run, capsys, "memory", "list", "agent", "--limit", "0")
 
-    assert (code, err) == (0, "")
+    assert code == 0
     assert len(printed.splitlines()) == 2
+    # One of the two, so the page is not the listing and says so.
+    assert err.startswith(cli.MORE_PAGES)
     assert refused[0] == 1
     assert "limit has to be a whole number" in refused[2]
+
+
+def test_a_listing_longer_than_a_page_is_walked_by_its_own_notice(
+    run, capsys
+) -> None:
+    """The audit door's whole claim: `list` says what an owner holds,
+    and an agent may hold a thousand facts while a page holds two
+    hundred.
+
+    Walked the way an operator walks it: the notice on stderr says what
+    to give `--cursor`, and it is fed back verbatim. What is asserted is
+    the union, in order, with nothing repeated and nothing skipped, and
+    that the last page says nothing about a next one.
+    """
+    facts = a_scope_of(250)
+
+    walked: list[str] = []
+    cursor: str | None = None
+    for _ in range(4):
+        following = ("--cursor", cursor) if cursor else ()
+        code, printed, err = out(
+            run, capsys, "memory", "list", "agent", AGENT, "--limit", "200", *following
+        )
+
+        assert code == 0
+        walked.extend(_facts_in(printed))
+        if not err:
+            cursor = None
+            break
+        assert err.startswith(cli.MORE_PAGES)
+        cursor = err.split()[-1]
+
+    assert cursor is None
+    assert walked == facts
+
+
+def _facts_in(printed: str) -> list[str]:
+    """The facts a page printed, in the order it printed them. A block
+    is a fact line and an indented line about it, so the facts are the
+    lines that are not indented."""
+    return [
+        line.split(": ", 1)[1]
+        for line in printed.splitlines()
+        if not line.startswith(" ")
+    ]
+
+
+def test_a_page_that_ends_a_listing_says_nothing_about_a_next_one(
+    run, capsys
+) -> None:
+    """The other half of the same property: stdout is the page and
+    stderr is empty, so a redirect holds the facts and nothing else."""
+    told(MemoryScope.AGENT, AGENT, "the user likes rain")
+
+    code, printed, err = out(run, capsys, "memory", "list", "agent", AGENT)
+
+    assert (code, err) == (0, "")
+    assert printed.endswith("+00:00\n")
 
 
 def test_a_stored_fact_is_printed_whole(run, capsys) -> None:

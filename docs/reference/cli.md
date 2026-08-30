@@ -2250,7 +2250,8 @@ Options:
 Commands:
   list    with no owner, who is remembering anything in that scope and how much;
           with one, what that agent, board or conversation holds, oldest first,
-          with the number each fact is addressed by
+          with the number each fact is addressed by; one page at a time, and a
+          page that is not the last says what to give --cursor for the rest
   set     correct one remembered fact in place, keeping its number, reading the
           corrected text from a file named with -f or from standard input and
           never from an argument
@@ -2266,7 +2267,8 @@ Usage: vinga memory list [OPTIONS] {SCOPE} [OWNER]
 
   with no owner, who is remembering anything in that scope and how much; with
   one, what that agent, board or conversation holds, oldest first, with the
-  number each fact is addressed by
+  number each fact is addressed by; one page at a time, and a page that is not
+  the last says what to give --cursor for the rest
 
 Arguments:
   SCOPE  which memory: agent, device or conversation  [required]
@@ -2274,17 +2276,19 @@ Arguments:
          uuid hex
 
 Options:
-  --limit N      how many rows this page may hold (default: the API's own, 50)
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --force        answer the confirmation a destructive command asks at a
-                 terminal, so it does not ask (default: it asks)
-  --no-input     never prompt: a destructive command refuses rather than asking,
-                 and a secret is read from stdin or --from-env (default: prompt
-                 at a terminal)
-  -h, --help     Show this message and exit.
+  --limit N       how many rows this page may hold (default: the API's own, 50)
+  --cursor AFTER  carry on after this, as the previous page's own notice printed
+                  it (default: the first page)
+  --config PATH   path to the YAML config file naming server.port and
+                  server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
+                  then http://127.0.0.1:<server.port>/api)
+  --force         answer the confirmation a destructive command asks at a
+                  terminal, so it does not ask (default: it asks)
+  --no-input      never prompt: a destructive command refuses rather than
+                  asking, and a secret is read from stdin or --from-env
+                  (default: prompt at a terminal)
+  -h, --help      Show this message and exit.
 ```
 
 ### `vinga memory set`
