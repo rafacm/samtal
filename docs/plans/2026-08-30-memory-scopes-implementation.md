@@ -490,3 +490,115 @@ Four, and none of them changes what the milestone ships.
   called, and called where threads are recorded; the exit callbacks
   registered in the other order; and the boot sweep removed.
 - Not verified: the `image` job, which builds and smokes the container.
+
+### PR review round
+
+External review of the branch as pushed to PR #360, at `06e4f692`
+against `origin/main`: backend codex (codex-cli 0.151.0), model
+gpt-5.6-sol, read-only sandbox, 2026-08-30, runtime 6m26s. Five
+findings, one P1, three P2 and one P3, verdict as received: mergeable
+after the listed fixes. Condensed below as received, each with its
+resolution and the commit that landed it.
+
+Two of them are the same mistake in two places: a milestone that made
+the order of things load-bearing and then left an order to somebody
+else. The reply loop let the database decide which of two ledger writes
+was last, and the composition asked the record a question before
+anything had built the record. The other three are things the plan asked
+for and this milestone did not deliver: a test that tested the wiring
+rather than the shape around it, a disclosure, and a count.
+
+1. **P1: same-round state mutations could commit in reverse order.**
+   The loop declares everything that is not a move independent and
+   dispatches it with `asyncio.gather`, and both state tools ride that
+   path. The database serializes the two transactions, but lock arrival
+   is not issue order, so a `set` followed by a `clear` of one key, or
+   two sets of it, could leave either result current.
+
+   *Resolution* (`1ea58132`): adopted whole. The names are declared
+   beside the builtins as `ORDERED_TOOL_NAMES`, where every other
+   name-based routing rule already lives and with the reason on them:
+   both write one conversation's ledger by a key the model chose, and
+   nothing else in the set has that property (`remember` appends, the
+   moves are resolved by the loop in issue order, and device and server
+   tools touch different worlds). They run first and one at a time;
+   everything else keeps its concurrency; the results are reassembled
+   into the order the model asked in. Before the rest rather than beside
+   them, which costs a round trip nothing was waiting on and leaves no
+   dispatch running that nobody awaits when a barge-in lands. Both
+   interleavings are forced with a first write parked until the second
+   arrives, bounded so the ordered implementation is not deadlocked by
+   its own correctness, and each was run against the mutation that
+   restores the concurrent dispatch.
+
+2. **P2: the boot sweep ran before the record schema it anti-joins was
+   migrated.** On a blank database it therefore met a table that is not
+   there, the containment turned that into `memory_cleanup_failed`, and
+   the boot carried on having advertised a heal it had silently skipped.
+
+   *Resolution* (`579c151a`): adopted whole. The sweep moved behind
+   whichever branch materializes the record (the writer's constructor,
+   or the migrate-and-dispose recording-off does) and in front of the
+   writer's start, so the sweep and the writer's first retention pass do
+   not reach for the same rows at once. Every ordering M2 already
+   promised still holds and the comments now say which. The
+   blank-database boot is what makes the ordering observable, so that is
+   the test: no cleanup failure fires, and the mutation that puts the
+   sweep back in front of the record is caught by it.
+
+3. **P2: the teardown-retention tests did not exercise retention or the
+   production wiring.** They recorded which store was let go first and
+   nothing else, so removing `purge_memory=purge` from the composition
+   left them green, and the retention coverage that did exist
+   constructed its own store with the purge handed in.
+
+   *Resolution* (`93cf58a2`): adopted whole. Both tests drive the
+   composition a deployment runs. One makes a thread retention-eligible
+   after the boot has finished, so the pass that can take it is the pass
+   on a close marker the drain has to reach; the other plants it before
+   a boot that then refuses, so the pass is the writer's own at start
+   and the unwind follows. Each asserts the thread's ledger and the fact
+   it forgot are already gone at the instant the memory store is closed,
+   which is the only moment the question can be answered from. The
+   watcher is scoped to the store the boot opened, because this file
+   writes rows through stores of its own. Run against the purge wiring
+   dropped, the exit callbacks reversed, and both at once.
+
+4. **P2: the promised memory-egress disclosure was missing.** The plan
+   requires the concepts Memory section and the README's security prose
+   to say that storage is local while injected content follows the
+   active LLM provider, with `server.local_only` as the guard; neither
+   said it.
+
+   *Resolution* (`ac4ba5e6`): adopted, scoped to what this milestone
+   ships. Both places carry the same two-part answer: as storage, memory
+   never leaves the deployment's own database; as prompt content, it is
+   read into every reply and follows the provider's egress exactly as
+   the transcript and the persona do, under the same `local_only` guard.
+   The plan's fuller statement also covers the lookup and the
+   sibling-agent consequence of device scope, and neither exists yet:
+   those sentences arrive in M3 with the tools they describe, which is
+   the one place this resolution is narrower than the finding.
+
+5. **P3: the README still counted three unconditional builtins.** There
+   are five since the state tools landed.
+
+   *Resolution* (`9a8b51c1`): adopted whole, count and explanation
+   both: the three memory tools are unconditional together, because an
+   agent offered a ledger it cannot write would be read one it had no
+   way to change.
+
+### Verification after the review round
+
+- `uv run ruff check .`: clean. `uv run mypy`: clean.
+- `uv run pytest tests/unit -q`: 4689 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: the same.
+- `uv run pytest tests/integration -q`: 228 passed.
+- The five generated documents regenerate to their committed bytes, the
+  census was regenerated after each README edit, and
+  `python scripts/check_doc_links.py .` checked 172 files with no
+  failures.
+- Every guard above was run against its mutation before being trusted:
+  the concurrent dispatch restored for the two state tools; the sweep
+  put back in front of the record; and the purge wiring dropped, the
+  exit callbacks reversed, and both at once.
