@@ -1631,7 +1631,7 @@ def _runtime(api: FastAPI) -> None:
         """The system prompt a session opening now as this agent would
         be sent, block by block.
 
-        A runtime read rather than a database one: it is assembled from
+        A runtime read rather than a stored one: it is assembled from
         the agents this server loaded, the MCP slice its registry is
         running and the memory store it writes, so it cannot disagree
         with what a session would be given, which is the whole point of
@@ -1646,7 +1646,9 @@ def _runtime(api: FastAPI) -> None:
         `async def`, like the status read beside it: the MCP slice is
         read on the loop that mutates it, so the answer cannot be half
         of one world and half of another. The memory read that follows
-        is a file read and happens in a worker thread.
+        is a database round trip and happens in a worker thread, which
+        is what keeps an inspection request off the loop every live
+        conversation is on.
 
         An agent this server is not serving is a 404 naming the reload,
         since that is what installs one; an application with no server

@@ -341,8 +341,10 @@ regenerated event reference, the documents.
   and the agent entity note in `entities.py` (rows under the old name,
   not a file on disk) plus the `mcp` field description, which had
   called `remember` conditional; `docs/reference/events.md` from the
-  catalog; `docs/reference/api-openapi.json`, which moved only because
-  it embeds the same field description.
+  catalog; `docs/reference/api-openapi.json`, which embeds that field
+  description and the route descriptions both, and which the review
+  round below found had moved for one of the two and should have moved
+  for the other.
 - **The documents.** The server README's builtins row and memory
   paragraph, the inverted backup sentence, the capture-budget sentence,
   the three rename-orphan sentences, and the cutover paragraph in the
