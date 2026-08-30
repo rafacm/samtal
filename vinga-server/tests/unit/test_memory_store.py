@@ -498,6 +498,109 @@ async def test_a_fact_forgotten_in_another_conversation_stays_forgotten() -> Non
     assert _rows("poet") == []
 
 
+# Looking something up
+#
+# The lookup is what makes a memory bigger than a prompt usable at all,
+# and it is also how the model learns the number of a fact it wants to
+# correct: the injected block shows no ids and this does.
+
+
+async def test_a_lookup_answers_both_scopes_newest_first_with_their_ids() -> None:
+    store = memory()
+    first = await store.add(MemoryScope.AGENT, "poet", "the user likes cheese", agent="poet")
+    second = await store.add(MemoryScope.DEVICE, "aa:bb", "the CHEESE drawer sticks", agent="poet")
+    await store.add(MemoryScope.AGENT, "poet", "the user is called Rafael", agent="poet")
+
+    found = store.recall("poet", "aa:bb", "cheese")
+
+    # Case-insensitive, newest first, and each line carries the number
+    # the fact is addressed by.
+    assert found.splitlines() == [
+        f"- [{second}] the CHEESE drawer sticks",
+        f"- [{first}] the user likes cheese",
+    ]
+
+
+async def test_a_lookup_reaches_no_other_owner_and_no_held_fact() -> None:
+    store = memory()
+    mine = await store.add(MemoryScope.AGENT, "poet", "the user likes cheese", agent="poet")
+    await store.add(MemoryScope.AGENT, "tutor", "the user likes cheese too", agent="tutor")
+    await store.add(MemoryScope.DEVICE, "cc:dd", "the cheese drawer sticks", agent="poet")
+    forgotten = await store.add(MemoryScope.AGENT, "poet", "the user hates cheese", agent="poet")
+    await store.forget(MemoryScope.AGENT, "poet", forgotten, THREAD, agent="poet")
+
+    assert store.recall("poet", "aa:bb", "cheese").splitlines() == [
+        f"- [{mine}] the user likes cheese"
+    ]
+
+
+async def test_a_lookup_that_matches_nothing_answers_nothing() -> None:
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user likes cheese", agent="poet")
+
+    assert store.recall("poet", "aa:bb", "sourdough") == ""
+    with pytest.raises(ValueError) as refusal:
+        store.recall("poet", "aa:bb", "   ")
+    assert str(refusal.value) == store_module.NOTHING_TO_LOOK_FOR
+
+
+async def test_a_wildcard_in_the_query_is_looked_for_rather_than_obeyed() -> None:
+    """The query is the model's own text. Read as pattern syntax, a
+    lookup for `%` would answer with every fact the agent has."""
+    store = memory()
+    marked = await store.add(MemoryScope.AGENT, "poet", "the battery is at 40%", agent="poet")
+    await store.add(MemoryScope.AGENT, "poet", "the user is called Rafael", agent="poet")
+
+    assert store.recall("poet", "aa:bb", "%").splitlines() == [
+        f"- [{marked}] the battery is at 40%"
+    ]
+
+
+async def test_a_lookup_says_so_where_more_matched_than_fits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The line bound at an exact boundary: two matches fit, the third
+    is left out, and the fixed sentence is what says so."""
+    monkeypatch.setattr(store_module, "RECALL_LINES", 2)
+    store = memory()
+    ids = [
+        await store.add(MemoryScope.AGENT, "poet", f"a cheese fact {index}", agent="poet")
+        for index in range(3)
+    ]
+
+    found = store.recall("poet", "aa:bb", "cheese")
+
+    assert found.splitlines() == [
+        f"- [{ids[2]}] a cheese fact 2",
+        f"- [{ids[1]}] a cheese fact 1",
+        store_module.MORE_MATCHED,
+    ]
+    # And exactly at the bound, with nothing left out, it says nothing.
+    monkeypatch.setattr(store_module, "RECALL_LINES", 3)
+    assert store.recall("poet", "aa:bb", "cheese").splitlines()[-1] != store_module.MORE_MATCHED
+
+
+async def test_a_lookup_is_bounded_by_bytes_as_well_as_by_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store_module, "RECALL_LINES", 10)
+    store = memory()
+    ids = [
+        await store.add(MemoryScope.AGENT, "poet", f"a cheese fact {index}", agent="poet")
+        for index in range(3)
+    ]
+    newest = f"- [{ids[2]}] a cheese fact 2"
+    middle = f"- [{ids[1]}] a cheese fact 1"
+    # Room for the two newest lines and not the third.
+    monkeypatch.setattr(
+        store_module, "RECALL_BYTES", len(f"{newest}\n{middle}".encode())
+    )
+
+    found = store.recall("poet", "aa:bb", "cheese")
+
+    assert found.splitlines() == [newest, middle, store_module.MORE_MATCHED]
+
+
 # The cap invariant, across every mutation
 #
 # Held rows are outside all of it: never counted, never pruned, still

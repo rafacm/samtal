@@ -38,7 +38,7 @@ from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import TypeVar
 
-from sqlalchemy import Connection, Engine, delete, select
+from sqlalchemy import Connection, Engine, and_, delete, or_, select
 from sqlalchemy import update as sql_update
 
 from vinga_server.config.loader import DatabaseBusyError, StorageError
@@ -79,6 +79,13 @@ MAX_LINES = 200
 # because the whole of it is injected rather than searched.
 DEVICE_BYTES = 2048
 DEVICE_LINES = 30
+
+# What a lookup answers with. Bounded because a match set is unbounded
+# by nature and a tool result is read by a model with a context window:
+# twenty lines inside two kilobytes, and a fixed sentence saying so
+# where more matched than fit.
+RECALL_BYTES = 2048
+RECALL_LINES = 20
 
 # What a write that the database refused answers with, as fixed
 # sentences carrying no value at all.
@@ -136,6 +143,17 @@ NO_FACT_TO_RESTORE = (
     "there is nothing to bring back: nothing was forgotten in this conversation "
     "under that number, and a fact forgotten in another conversation cannot be "
     "brought back from this one. Nothing was changed"
+)
+
+NOTHING_TO_LOOK_FOR = "there is nothing to look for"
+
+# What a bounded lookup ends with when it left something out. Fixed and
+# value-free like every other sentence here: it says that more matched
+# and what to do about it, and quotes neither the query nor a count,
+# because a count of somebody's private facts is itself something to
+# say out loud.
+MORE_MATCHED = (
+    "More was remembered than fits here. Ask for something narrower to see the rest"
 )
 
 
@@ -482,6 +500,40 @@ class MemoryStore:
 
         return self._written(agent, scope, work)
 
+    def recall(self, agent: str, device: str, query: str) -> str:
+        """Every active fact this agent can reach whose words contain
+        the query, newest first, each with the id it is addressed by.
+
+        Both scopes, because both are this agent's to reach on this
+        device, and the whole of each of them rather than the part the
+        prompt did not inject: the injected core shows no ids, so this
+        is also how the model finds the number of a fact it needs to
+        correct or forget, core facts included. A lookup that searched
+        only what was not injected could not answer that at all.
+
+        Case-insensitive substring and nothing cleverer. What a person
+        says is not what a fact was stored as, and matching on the words
+        themselves is a rule a model can predict; fuzzy matching was
+        rejected where the ids were decided.
+
+        The query is a substring even where it is punctuation: its
+        wildcards are escaped, so a lookup for `%` finds the facts with
+        a per cent sign in them rather than every fact there is.
+
+        Bounded, and it says when it was: a match set is unbounded by
+        nature, and a tool result that ran past the model's context
+        would cost the reply it was meant to serve.
+        """
+        wanted = _one_line(query)
+        if not wanted:
+            raise ValueError(NOTHING_TO_LOOK_FOR)
+        return self._read(
+            agent,
+            (MemoryScope.AGENT, MemoryScope.DEVICE),
+            lambda connection: _bounded(_matching(connection, agent, device, wanted)),
+            "",
+        )
+
     async def update(
         self, scope: MemoryScope, owner: str, fact_id: int, text: str, *, agent: str
     ) -> None:
@@ -782,6 +834,70 @@ def _over_the_cap(
     return [row_id for row_id, _ in stored if row_id not in surviving]
 
 
+def _matching(
+    connection: Connection, agent: str, device: str, wanted: str
+) -> list[tuple[int, str]]:
+    """The active facts of this agent and this device whose words
+    contain `wanted`, newest first, each rendered with its id.
+
+    Newest first because a lookup answers a question asked now, and
+    because the bound below cuts from the far end: what is dropped
+    should be the oldest thing that matched rather than the most recent.
+    """
+    rows = connection.execute(
+        select(schema.facts.c.id, schema.facts.c.fact)
+        .where(
+            or_(
+                and_(
+                    schema.facts.c.scope == MemoryScope.AGENT,
+                    schema.facts.c.owner == agent,
+                ),
+                and_(
+                    schema.facts.c.scope == MemoryScope.DEVICE,
+                    schema.facts.c.owner == device,
+                ),
+            ),
+            _ACTIVE,
+            schema.facts.c.fact.ilike(_containing(wanted), escape="\\"),
+        )
+        .order_by(schema.facts.c.id.desc())
+    ).all()
+    return [(row_id, f"- [{row_id}] {fact}") for row_id, fact in rows]
+
+
+def _containing(wanted: str) -> str:
+    """One substring as a LIKE pattern, with the pattern language
+    escaped out of the caller's words.
+
+    Without this a query of `%` matches every fact an agent has, and one
+    of `_` matches every single-character one: the model chose those
+    characters as text, and a search that read them as syntax would
+    answer a question nobody asked.
+    """
+    escaped = wanted.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _bounded(matches: Sequence[tuple[int, str]]) -> str:
+    """As many matches as the bound allows, and a fixed sentence when
+    that was not all of them.
+
+    The sentence rides outside the byte bound rather than inside it,
+    which is deliberate: it is this module's own constant, its length is
+    known, and letting it compete with the matches for room would mean a
+    lookup answering with one fact fewer the longer the sentence got.
+    """
+    kept: list[tuple[int, str]] = []
+    for match in matches[:RECALL_LINES]:
+        if len(_rendered([*kept, match]).encode("utf-8")) > RECALL_BYTES:
+            break
+        kept.append(match)
+    found = _rendered(kept)
+    if len(kept) == len(matches):
+        return found
+    return f"{found}\n{MORE_MATCHED}" if found else MORE_MATCHED
+
+
 def _rendered(stored: Sequence[tuple[int, str]]) -> str:
     return "\n".join(line for _, line in stored)
 
@@ -826,11 +942,15 @@ __all__ = [
     "MAX_BYTES",
     "MAX_LINES",
     "MEMORY_CHAIN",
+    "MORE_MATCHED",
+    "NOTHING_TO_LOOK_FOR",
     "NOTHING_TO_REMEMBER",
     "NO_FACT_TO_FORGET",
     "NO_FACT_TO_RESTORE",
     "NO_FACT_TO_UPDATE",
     "QUIET_TIMEOUT_S",
+    "RECALL_BYTES",
+    "RECALL_LINES",
     "TOO_LONG",
     "UNWRITABLE",
     "MemoryScope",
