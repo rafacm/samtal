@@ -471,10 +471,10 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
     ) -> dict[str, Any]:
         """Which boards have notes about them, and how many.
 
-        A device's notes are shared by every agent bound to it, so this
-        is also the listing that says which places a household's facts
-        have accrued in. A board that has been replaced leaves its notes
-        behind, and they are answered here.
+        A device's notes are shared by every agent bound to it that may
+        remember, so this is also the listing that says which places a
+        household's facts have accrued in. A board that has been
+        replaced leaves its notes behind, and they are answered here.
         """
         return _owners(reader, MemoryScope.DEVICE, limit, cursor)
 
@@ -542,11 +542,13 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         """What is noted about one board and the place it stands in,
         oldest first.
 
-        Shared by every agent bound to that board, which is the whole
-        point of the scope and the thing worth auditing about it: a note
-        made in one agent's conversation is read into every sibling's
-        prompt on that device, and therefore reaches whatever provider
-        each of them is configured with.
+        Shared by every agent bound to that board that may remember,
+        which is the whole point of the scope and the thing worth
+        auditing about it: a note made in one agent's conversation is
+        read into every such sibling's prompt on that device, and
+        therefore reaches whatever provider each of them is configured
+        with. An agent whose `memory` section is off reads none of it,
+        and writes none of it either.
         """
         return _facts(reader, MemoryScope.DEVICE, _mac(mac), limit, cursor)
 

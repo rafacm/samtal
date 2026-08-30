@@ -110,9 +110,11 @@ def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
 
 def remember_tool() -> ToolDef:
     """Keep one fact across conversations, about the user or about the
-    place. Offered to every agent: remembered facts live in a schema this
-    server migrates at every boot, so there is no deployment without a
-    store (#314).
+    place. Offered to every agent whose `memory` section leaves it on,
+    which is every agent that says nothing: remembered facts live in a
+    schema this server migrates at every boot, so there is no deployment
+    without a store (#314), and switching an agent off withholds this
+    tool with the other six (#83).
 
     The scope is steered rather than enforced, which is the decision this
     description carries out: what belongs to the device is the place and

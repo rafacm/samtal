@@ -3724,7 +3724,7 @@
     "/memory/devices": {
       "get": {
         "summary": "Read Device Owners",
-        "description": "Which boards have notes about them, and how many.\n\nA device's notes are shared by every agent bound to it, so this\nis also the listing that says which places a household's facts\nhave accrued in. A board that has been replaced leaves its notes\nbehind, and they are answered here.",
+        "description": "Which boards have notes about them, and how many.\n\nA device's notes are shared by every agent bound to it that may\nremember, so this is also the listing that says which places a\nhousehold's facts have accrued in. A board that has been\nreplaced leaves its notes behind, and they are answered here.",
         "operationId": "read_device_owners_memory_devices_get",
         "parameters": [
           {
@@ -4062,7 +4062,7 @@
     "/memory/devices/{mac}/facts": {
       "get": {
         "summary": "Read Device Facts",
-        "description": "What is noted about one board and the place it stands in,\noldest first.\n\nShared by every agent bound to that board, which is the whole\npoint of the scope and the thing worth auditing about it: a note\nmade in one agent's conversation is read into every sibling's\nprompt on that device, and therefore reaches whatever provider\neach of them is configured with.",
+        "description": "What is noted about one board and the place it stands in,\noldest first.\n\nShared by every agent bound to that board that may remember,\nwhich is the whole point of the scope and the thing worth\nauditing about it: a note made in one agent's conversation is\nread into every such sibling's prompt on that device, and\ntherefore reaches whatever provider each of them is configured\nwith. An agent whose `memory` section is off reads none of it,\nand writes none of it either.",
         "operationId": "read_device_facts_memory_devices__mac__facts_get",
         "parameters": [
           {

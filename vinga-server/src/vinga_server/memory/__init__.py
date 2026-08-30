@@ -20,19 +20,20 @@ The pieces, in the order they are met:
 - `store.py`: `MEMORY_CHAIN`, the two engines, `open_memory`, and the
   sentences a caller speaks, from `read_for_prompt` down to the purge.
 
-Memory is on whenever the server runs (#314). There is no section to
-configure and no store to build: the schema is migrated at every boot,
-an agent that has been told nothing reads as the empty string, and the
-`remember` tool is always offered. Per-agent control over what an agent
-may remember is #83's, and so is everything above the store: the tools,
-the injected blocks, the lifecycle coupling and the operator surface.
+Memory is available whenever the server runs (#314). There is no store
+to build and nothing to switch on: the schema is migrated at every boot
+and an agent that has been told nothing reads as the empty string.
+Whether a particular agent may reach any of it is that agent's own
+`memory` section (#83), which is on unless it says otherwise; an agent
+switched off is offered none of the memory tools and is read none of
+the scopes, and nothing under this package knows about it, because the
+policy is resolved once per reply where the tools are offered.
 
 Nobody but the server reads this schema. `deploy/postgres-init.sql`
 creates it with `AUTHORIZATION` to the server role and grants the
-read-only analyst role nothing on it, because the operator read surface
-for remembered facts is #83's deliberate design (addressed by scope,
-over the API) and granting the raw tables early would freeze a contract
-#83 is about to reshape.
+read-only analyst role nothing on it, because what an operator reads is
+the addressed surface over the API (`/api/memory`, `vinga memory`)
+rather than the raw tables.
 
 Deliberately without the store, which is the same discipline
 `vinga_server.config` keeps about its boot path: importing this package
