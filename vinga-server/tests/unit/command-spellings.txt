@@ -1081,13 +1081,13 @@ vinga-server/src/vinga_server/doctor.py:29  respell  vinga simulator
 vinga-server/src/vinga_server/doctor.py:183  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/doctor.py:191  respell  config ota-url
 vinga-server/src/vinga_server/doctor.py:310  respell  vinga simulator
-vinga-server/src/vinga_server/events/catalog.py:986  respell  vinga-server config reload
-vinga-server/src/vinga_server/events/catalog.py:1899  respell  vinga-server config device pending claim
-vinga-server/src/vinga_server/events/catalog.py:1945  respell  vinga-server config reload
-vinga-server/src/vinga_server/events/catalog.py:2034  respell  vinga-server config device bind
-vinga-server/src/vinga_server/events/catalog.py:2183  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:2212  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:2228  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:987  respell  vinga-server config reload
+vinga-server/src/vinga_server/events/catalog.py:1900  respell  vinga-server config device pending claim
+vinga-server/src/vinga_server/events/catalog.py:1946  respell  vinga-server config reload
+vinga-server/src/vinga_server/events/catalog.py:2035  respell  vinga-server config device bind
+vinga-server/src/vinga_server/events/catalog.py:2184  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:2213  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:2229  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/__init__.py:30  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:37  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:105  respell  vinga-server config ota-url

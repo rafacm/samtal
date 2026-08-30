@@ -270,7 +270,9 @@ class MemoryStore:
             failure = exc
             events.emit(
                 lambda: MemoryUnreadable(
-                    agent=Identifier(agent), error=ClassName.of(failure)
+                    agent=Identifier(agent),
+                    scope=schema.MemoryScope.AGENT,
+                    error=ClassName.of(failure),
                 )
             )
             return ""
@@ -331,7 +333,9 @@ class MemoryStore:
             failure = exc
             events.emit(
                 lambda: MemoryUnwritable(
-                    agent=Identifier(agent), error=ClassName.of(failure)
+                    agent=Identifier(agent),
+                    scope=schema.MemoryScope.AGENT,
+                    error=ClassName.of(failure),
                 )
             )
             # By class and never by message, through the one classifier
