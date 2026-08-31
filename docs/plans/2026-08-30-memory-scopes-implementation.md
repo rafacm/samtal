@@ -1453,3 +1453,96 @@ Run on the rebased tree, which is the tree this milestone ships.
   `memory_for_agent` ignoring the agent's own section, which is the
   whole-replacement case.
 - Not verified: the `image` job, which builds and smokes the container.
+
+### PR review round
+
+External review of the branch as pushed to PR #363, at `f285d712`
+against `origin/main`: backend codex (codex-cli 0.151.0), model
+gpt-5.6-sol, read-only sandbox, 2026-08-30, runtime 6m28s. Four
+findings, two P2 and two P3, verdict as received: mergeable after the
+listed fixes. Condensed below as received, each with its resolution and
+the commit that landed it.
+
+Three of the four are the same mistake in three places, and it is the
+one a milestone about withholding something is most exposed to: a rule
+stated once and then left with a second way in. The dispatch had an
+answer in front of the refusal, the sentence had a second copy, and the
+prose had six paragraphs still describing the world before the switch
+existed. The fourth is a test that asserted a rule it could not have
+caught the loss of.
+
+1. **P2: a malformed call told a withheld tool from an invented one.**
+   The dispatch answered the malformed-arguments sentence before
+   reaching the policy check, so a disabled agent could distinguish one
+   of its withheld seven from a name nobody publishes by mangling the
+   arguments, against the fixed sentence's whole purpose. Check
+   availability first, and cover all seven with malformed calls.
+
+   *Resolution* (`53451bd8`): adopted whole. The check is the first line
+   of the dispatch now, so nothing below it is an answer about a tool
+   that exists for this reply, and no warning is logged about a call
+   that was never a call: the line that said a builtin got unparseable
+   arguments was itself the difference, since it named a tool this
+   agent does not have. The condition gets one home,
+   `withheld(name, remembers)`, asked by the runtime about every call
+   and by the source again about the calls it is handed, with the
+   policy travelling as the callable both already hold rather than as
+   its answer, so a device or MCP name never asks a reply for a policy
+   it has nothing to do with. All seven are driven through a malformed
+   call and the agent that may remember still hears about its own bad
+   arguments; the mutation that restores the old order fails seven of
+   the eight.
+
+2. **P2: six places still said memory is unconditional.** The memory
+   package's overview said there is no section to configure and that
+   `remember` is always offered; the tool's own docstring repeated it;
+   both device routes said a note reaches every sibling on the board,
+   which the committed OpenAPI document carried; and the README's
+   egress paragraph, the glossary's Memory entry and the surfaces
+   page's memory row each claimed unconditional injection or egress.
+
+   *Resolution* (`d4e6674f`): adopted whole. Each claim is qualified by
+   the agent's policy rather than rewritten around it, since the
+   default has not moved: an agent that says nothing remembers, and
+   what changed is that one can say otherwise. The package overview
+   also drops the future tense it was written in, because the control
+   and the operator surface it deferred to #83 for are both here. The
+   OpenAPI document and the census were regenerated.
+
+3. **P3: the shared sentence had a second copy.** `no_such_tool` was
+   given one home and the runtime's own fallback went on restating the
+   message, so the claim that a withheld tool and an invented name are
+   answered alike rested on two literals agreeing.
+
+   *Resolution* (`8a54e832`): adopted. The fallback calls it, and the
+   proof is that moving the sentence in its one home now moves the
+   unknown-name case and the withheld cases together.
+
+4. **P3: the replacement case could not tell replacement from
+   merging.** It wrote `memory: {enabled: true}` over disabled
+   defaults, which both rules answer the same way.
+
+   *Resolution* (`5fd3600f`): adopted. The agent writes `memory: {}`,
+   the one shape that separates them: replacement answers with a
+   section whose `enabled` is the declared default, on, while a merge
+   would keep the inherited `false`. Run against a merging
+   `memory_for_agent`, which is the mutation this case exists for.
+
+### Verification after the review round
+
+- `uv run ruff check .`: clean. `uv run mypy`: clean (5 source files,
+  the events package).
+- `uv run pytest tests/unit -q`: 4926 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: the same.
+- `uv run pytest tests/integration -q`: 233 passed.
+- The five generated documents regenerate to their committed bytes
+  (`api-openapi.json` is regenerated in this round and the other four
+  are unchanged), the command-spellings census was regenerated after
+  the prose edits, and `python scripts/check_doc_links.py .` checked
+  172 files with no failures.
+- Every guard above was run against its mutation before being trusted:
+  the availability check put back behind the malformed answer; the
+  shared sentence changed in its one home, which now moves both cases;
+  and `memory_for_agent` merging the agent's section into the
+  inherited one instead of replacing it.
+- Not verified: the `image` job, which builds and smokes the container.
