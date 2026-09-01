@@ -423,6 +423,50 @@ def test_a_mid_session_read_stops_at_the_last_completed_turn(
             assert len(heard) == 1, "the open turn's utterance was already visible"
 
 
+async def test_a_turn_is_visible_before_its_events_are(tmp_path: Path) -> None:
+    """The interval the read above waits out, pinned where it is not a
+    matter of timing.
+
+    A marker commits twice and holds no lock in between, so a turn row
+    is durable while its events are not yet written. That is why the
+    read above waits on the events and not on the turns: a wait on the
+    turns returns inside this window, where the `heard` it is about to
+    count is not there at all. Left to scheduling that window is narrow
+    enough to pass by luck on a fast disk and to fail on a loaded runner
+    (#367), so it is opened here on purpose, with the writer parked in
+    front of the events half.
+    """
+    gate = Gate(Half.EVENTS)
+    store = ConversationStore(DatabaseConfig(), gate=gate)
+    store.start()
+    try:
+        session, websocket, task = await open_session(recording_config(tmp_path), store)
+        await drive_reply(session, UTTERANCE)
+        # The first events half of the session, which is the turn's: a
+        # gate for `Half.EVENTS` is not called in front of the open's
+        # marker, because that marker carries no events to write.
+        gate.wait()
+
+        # The durable half of the turn's marker has committed and the
+        # events half has not begun: exactly the state a wait on
+        # `record.turns` is free to return in.
+        assert len(read("select * from record.turns")) == 1
+        assert read("select * from record.events where name = 'heard'") == [], (
+            "the events half committed before the gate let it"
+        )
+
+        gate.open_forever()
+        await websocket.close(1000, "goodbye")
+        await asyncio.wait_for(task, timeout=TIMEOUT_S)
+    finally:
+        gate.open_forever()
+        store.stop()
+
+    # And released, they land, so what the window holds back is delay
+    # and not loss.
+    assert len(read("select * from record.events where name = 'heard'")) == 1
+
+
 # The switches, on the file
 
 
