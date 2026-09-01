@@ -1171,14 +1171,23 @@ Run from `vinga-server/`, at the last commit of the round.
 
 ## M5: the OpenAPI client spike
 
+The code this milestone wrote is no longer in the tree. It was
+throwaway by its own README, so once the evaluation below was written
+down the code stopped being the artifact of record; it was archived on
+2026-09-01 under the annotated tag `spike/openapi-ts-client`, on the
+last commit that contains it, and it is also in PR #222. Recover it
+with `git checkout spike/openapi-ts-client --
+spikes/2026-08-20-openapi-ts-client`. The paths named below are the
+paths it had, and this section is otherwise unedited: it is a record of
+what was true on 2026-08-20.
+
 ### What was done
 
 Four commits, and no Python. Nothing under `vinga-server/` is touched
 by this milestone: it reads `docs/reference/api-openapi.json` and
 writes only under `spikes/`.
 
-The spike lives at
-[`spikes/2026-08-20-openapi-ts-client/`](../../spikes/2026-08-20-openapi-ts-client/),
+The spike lived at `spikes/2026-08-20-openapi-ts-client/`,
 with its own README saying what it is, that none of it ships, and how
 to re-run it. Two sub-projects, each a self-contained npm project with
 exact pinned versions, a committed lockfile, a generation script and a

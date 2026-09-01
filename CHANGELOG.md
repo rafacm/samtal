@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-01
+
+### Removed
+
+- **The OpenAPI TypeScript client spike is no longer in the tree.**
+  `spikes/2026-08-20-openapi-ts-client/` was written to answer one
+  question for #129, said in its own README that none of it ships, and
+  is answered: the per-criterion evaluation, the findings and the
+  recommendation are the M5 section of
+  `docs/plans/2026-08-19-governance-simplification-implementation.md`,
+  and they are what the admin UI will build on. The code stays
+  recoverable from the annotated tag `spike/openapi-ts-client` and from
+  PR #222. With it goes the `spikes/` directory, whose other occupant
+  was archived the same way in 2026-08.
+
 ## 2026-08-31
 
 ### Added
