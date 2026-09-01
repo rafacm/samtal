@@ -71,6 +71,14 @@ Eight steps, numbered from zero. The device runs upstream's prebuilt xiaozhi fir
 - **A board** from the Hardware table, and a USB cable for the ones whose image has no Custom OTA URL field.
 - **`curl`, `openssl` and `git`**, which steps 1 and 2 invoke directly. macOS ships all three, which is why they went unnoticed while this was being walked rather than read; a stripped-down Linux may not have them.
 
+**0. Pull the model.** The stack in step 3 is fully local, and the one piece of it that does not ship in the server image is the language model. Ollama serves it on this machine, and the server dials it from inside its container.
+
+```bash
+ollama pull qwen3:8b
+```
+
+Any model Ollama serves works, and any endpoint that speaks the OpenAI chat completions API does too, llama.cpp and vLLM among them; `qwen3:8b` is the one this walkthrough was run with. What each field of a provider entry means is in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), and [`vinga-server/examples/`](vinga-server/examples/) holds a commented fragment per provider type.
+
 **1. Start the server.** It is two containers, the server and the one Postgres database it keeps everything in, and they come up together from the compose file this repository publishes. No checkout is needed: fetch that file and the provisioning script beside it into a directory of its own, mint the two secrets, and start it.
 
 ```bash
