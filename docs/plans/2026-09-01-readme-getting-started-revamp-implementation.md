@@ -219,3 +219,15 @@ again.
 was started and no board was flashed; the walkthrough and the device
 half belong to M2 and are its obligation, not a box this milestone
 could tick.
+
+**The census counts this document too, including the failure output
+quoted in it.** The block above pastes two lines of a census diff, and
+those lines carry a command spelling, so pasting them added two entries
+to the manifest and staled it again. That is not a quirk of this
+milestone: any implementation doc that quotes census output does it, and
+the loop only terminates because the second regeneration's output is not
+pasted anywhere. The rule the plan already states, regenerate last,
+covers it only if "last" means after the implementation doc is written
+and not merely after the code is. The manifest committed here was
+regenerated after this paragraph existed.
+
