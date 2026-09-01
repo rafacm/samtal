@@ -429,7 +429,7 @@ orphaned diagram reference) came from grep rather than from reading.
       sections that now exist; `vinga-esp32/README.md`'s table moved to
       match. Touches the root README, that firmware README, one new
       asset and the census manifest, so both workflows run.
-- [ ] **M2: Getting Started, executed.** The destination paragraph, the
+- [x] **[M2: Getting Started, executed](2026-09-01-readme-getting-started-revamp-implementation.md#m2-getting-started-executed)** (PR [#370](https://github.com/rafacm/vinga/pull/370)). The destination paragraph, the
       Prerequisites subsection, step 0 for Ollama and `qwen3:8b`, step 3
       as a linear `key=value` sequence ending in one `vinga reload`, the
       simulator block removed, and the inline spelling added beside the

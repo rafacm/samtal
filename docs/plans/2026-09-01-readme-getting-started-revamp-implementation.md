@@ -269,3 +269,138 @@ statement about two milestones, and a record written mid-milestone
 describes a tree that no longer exists by the time it is pushed. What
 survives an amendment is what a later reader can check against the tree,
 which is the list of files, never a tally of commits.
+
+## M2: Getting Started, executed
+
+### What was done
+
+The section reached by a reader who has nothing: a destination
+paragraph, a Prerequisites list, a step 0 that pulls the model, step 3
+rewritten as eight command lines, and the simulator block out. Plus the
+inline spelling beside the one short-entity `-f` example in
+`vinga-server/README.md`. What it touches: the root README, that server
+README, `CHANGELOG.md`, this document, the plan and the census manifest.
+
+The plan's milestone line said M2 "touches `vinga-server/README.md` and
+the census manifest", which omitted the root README that carries the
+whole section being rewritten. Read against the Page layout table two
+sections above it, which assigns Getting Started to M2, the omission is
+plainly a slip in the checklist rather than a scoping decision, and the
+root README is edited.
+
+### The walkthrough, as run
+
+Every command below was executed, in order, against a deployment created
+empty for the purpose: compose project `vingawalk`, its own volumes,
+started after the development Postgres was stopped so nothing contended
+for 5432. The stack ran `ghcr.io/rafacm/vinga-server:latest` at revision
+`8eb7b553`, the head of `main`, and the CLI was installed by the
+walkthrough's own step 2 from the same commit.
+
+Step 0 `ollama pull qwen3:8b`, step 1 the compose fetch and the two
+minted secrets, step 2 `uv tool install` and `vinga list` (which
+answered an entirely empty configuration, confirming the starting
+state), step 3 the eight lines, step 5 `vinga info`.
+
+`vinga reload` took 11 to 15 seconds on the first run of a fresh data
+volume, downloading the faster-whisper `small` weights and the
+`en_US-lessac-medium` Piper voice inside it. The page says the first
+reload is the slow one and no longer says how slow: the "few minutes"
+the old step 3 claimed was not what a first run cost here, and a number
+measured on one machine's network is not a promise the page can keep.
+
+### The comparison against the preset
+
+`vinga export` after the sequence, compared field by field against
+`vinga-server/examples/presets/local-stack.yaml` with both documents
+parsed rather than diffed as text, since the preset is mostly comments
+and the export writes none. Empty containers the export emits for
+sections nobody configured (`mcp_servers`, `prompt_fragments`,
+`devices`) were treated as structure rather than content.
+
+Three differences, where the plan's Tests section predicted two:
+
+| Field | Preset | Stored |
+| --- | --- | --- |
+| `providers.llm.local.base_url` | `http://localhost:11434/v1` | `http://host.docker.internal:11434/v1` |
+| `default_agent` | absent | `assistant` |
+| `agents.assistant.prompt` | `...speakable: one or two sentences...` | `...speakable. One or two sentences...` |
+
+The third is not a finding. The plan's own "The step 3 sequence" section
+names exactly this prompt difference and gives the reason: a colon
+followed by a space inside an unquoted `key=value` makes the value parse
+as a YAML mapping rather than a string. The Tests section, written
+later, counted two where its own plan had already described three. The
+sequence is correct and the plan's count was wrong.
+
+### Discoveries
+
+**`host.docker.internal` reaches a loopback-only Ollama on macOS.** The
+plan resolved that the base URL could name it but flagged that
+resolution is not reachability. Measured rather than assumed: Ollama
+listens on `127.0.0.1:11434` only, and a container on this host reaches
+`http://host.docker.internal:11434/api/tags` with a 200 all the same,
+because Docker Desktop's VM routes that name into the host's loopback.
+The page says the macOS part of that plainly and claims nothing about
+Linux, where a service bound to `127.0.0.1` behind
+`host-gateway` is a different question.
+
+**A stale `latest` is invisible.** `docker compose up` uses a locally
+cached image if the tag resolves to one, so a machine that pulled
+`ghcr.io/rafacm/vinga-server:latest` weeks ago keeps running that. This
+cost an hour here: `vinga info` returned a 404 against a five-day-old
+image while the CLI came from `main`, and the walkthrough looked broken
+at step 5 when nothing was. `docker pull` first, then the whole
+sequence, and the walkthrough above was re-run from empty on the correct
+image. Not written into the page, which is addressed to a reader who has
+no cached image at all, but recorded here because the failure looks
+exactly like a bug in the CLI.
+
+**The simulator refuses a board the server admits, when device auth is
+off.** Filed as #369. The trial `.env` of step 1 sets
+`VINGA_SERVER__AUTH__ENABLED=false`, and on that setting the simulator
+reports "this board is not admitted" while the server's own log records
+the same device resolving to `assistant`; its `--claim` and no-`--claim`
+messages each advise the other. With the variable set to `true` and
+nothing else changed, the same command holds a whole conversation. This
+is independent of M2's edit: the simulator block leaves Getting Started
+either way, and the Features bullet that keeps it is true on the default
+setting, which is authentication on.
+
+### Verified end to end
+
+With device auth on, one conversation over the websocket, which is what
+proves the step 3 sequence built a working deployment and not merely a
+storable one:
+
+```
+saying: Hello, can you hear me?
+heard: Hello, can you hear me?
+said: I can hear you!
+said: How can I assist you today?
+reply: 44 frames, 19361 bytes, about 2640 ms of audio
+the conversation reached: closed
+```
+
+That is faster-whisper transcribing, `qwen3:8b` answering over
+`host.docker.internal`, and Piper speaking, all from the configuration
+the eight published lines wrote.
+
+The inline spelling added to `vinga-server/README.md` was executed too,
+against the same deployment, and read back with `vinga provider show llm
+claude`: it stores `type: anthropic`, `model: claude-sonnet-5` and
+`api_key_env: ANTHROPIC_API_KEY`, which is what
+`examples/llm-anthropic.yaml` holds. The model name in the first draft
+of that line was invented and wrong; it was corrected against the
+fragment before the command was run.
+
+### Not verified here
+
+**The board half was not walked.** No ESP32 was attached to the machine
+this ran on (`ls /dev/cu.*` shows only the Bluetooth and debug consoles),
+so steps 4, 6 and 7 (flash, NVS write, captive portal, pressing the
+button and speaking) were not carried out, and the folded-in #308
+obligation is not discharged. The PR carries them as unchecked boxes
+rather than ticks. Everything the server side of that path depends on
+was exercised through the simulator instead, which is a board's protocol
+and not a board.
