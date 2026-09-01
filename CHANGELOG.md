@@ -7,6 +7,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-09-01
 
+### Changed
+
+- **The front page opens with the board rather than a block diagram**
+  (#346). "What is vinga?" now leads with a photograph of a
+  Touch-LCD-1.54 running stock upstream firmware, waiting on its own
+  access point; the architecture diagram it replaces stays where it is
+  explained, in `docs/system-overview.md` and the diagram index.
+  Features is seven bullets rather than nine, each saying what a reader
+  can do or why this beats the obvious alternative, and the thin-fork
+  bullet, an implementation fact carrying a 🚧, is the one that left.
+  Project Layout is gone: it was a second index beside
+  `docs/README.md`, and nothing outside the page linked to it. A
+  Documentation section in its place points at the four doors into
+  `docs/`, and Credits links the neighbouring-projects survey. The
+  `#getting-started` and `#credits` anchors are untouched, because
+  three pages link into them from outside.
+- **Both hardware tables lead with the board vinga is tested on**
+  (#346). The Touch-LCD-1.54 first, then the Touch-AMOLED-2.16 and the
+  ePaper-1.54, both marked `planned 🚧`, in the project README and in
+  `vinga-esp32/README.md` alike. The sentence above the project
+  README's table called all three boards ones vinga "targets and
+  tests", which stopped being true once two of the rows became
+  planned; it now distinguishes the one board this project is
+  developed and tested on from the two it targets.
+
 ### Removed
 
 - **The OpenAPI TypeScript client spike is no longer in the tree.**
