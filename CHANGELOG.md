@@ -20,6 +20,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   PR #222. With it goes the `spikes/` directory, whose other occupant
   was archived the same way in 2026-08.
 
+### Fixed
+
+- **A conversation test no longer races the writer's two transactions**
+  (#367). A marker commits the durable half first (the session row, the
+  turns) and the events after it, holding no lock in between, so the
+  turn row is visible before its events are. The mid-session read test
+  waited on the turns and then asserted about the events, which on a
+  runner slow enough to widen that interval found no `heard` row at all.
+  It waits on the events half now, which the durable half strictly
+  precedes.
+
 ## 2026-08-31
 
 ### Added
