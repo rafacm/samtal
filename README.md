@@ -59,7 +59,17 @@ Any board xiaozhi-esp32 supports can work, since the device runs upstream's firm
 
 ## Getting Started
 
-Seven steps. The device runs upstream's prebuilt xiaozhi firmware; the server is vinga's and ships as a container image, configured over the API it serves with the `vinga` command line. [`vinga-server/README.md`](vinga-server/README.md) has every option, the security defaults, and the container details.
+At the end of this you press a button on a board across the room, say something, and a model running on your own machine answers out loud. Once it is set up, nothing you say leaves the house: the transcription, the model and the voice all run on your hardware, and no part of a conversation is sent anywhere.
+
+Eight steps, numbered from zero. The device runs upstream's prebuilt xiaozhi firmware; the server is vinga's and ships as a container image, configured over the API it serves with the `vinga` command line. [`vinga-server/README.md`](vinga-server/README.md) has every option, the security defaults, and the container details.
+
+### Prerequisites
+
+- **[Ollama](https://ollama.com)**, which serves the model in step 0.
+- **Docker** with Compose v2, for the two containers of step 1.
+- **[uv](https://docs.astral.sh/uv/)**, for the CLI of step 2.
+- **A board** from the Hardware table, and a USB cable for the ones whose image has no Custom OTA URL field.
+- **`curl`, `openssl` and `git`**, which steps 1 and 2 invoke directly. macOS ships all three, which is why they went unnoticed while this was being walked rather than read; a stripped-down Linux may not have them.
 
 **1. Start the server.** It is two containers, the server and the one Postgres database it keeps everything in, and they come up together from the compose file this repository publishes. No checkout is needed: fetch that file and the provisioning script beside it into a directory of its own, mint the two secrets, and start it.
 
