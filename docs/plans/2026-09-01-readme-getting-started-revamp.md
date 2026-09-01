@@ -147,6 +147,12 @@ such examples, at lines 1442 (`vinga apply -f examples/presets/cloud-stack.yaml`
 and 2722 (`vinga provider set llm claude -f examples/llm-anthropic.yaml`).
 The root README's is step 3. There is no third file.
 
+Only one of those two can gain an inline alternative. `apply` takes a
+whole document and has no `key=value` form at all, and the issue keeps
+`-f` for documents on purpose, so line 1442 is left exactly as it is.
+Line 2722 is a short entity and is the one that leads with the inline
+fields, keeping `-f` beside it as the fragment alternative.
+
 ## Smaller decisions
 
 - **The anchors `#getting-started` and `#credits` must survive.** Three
@@ -231,10 +237,10 @@ both milestones, with what each is for:
 | Credits | Gains the `docs/related-projects.md` link | M1 |
 | Changelog, License | Unchanged | |
 
-`vinga-server/README.md` gains the inline spelling beside its two
-`-f` examples in M2, and keeps both: the file form is the right one for
-a whole deployment, and showing the pair is what stops a reader
-reaching for a heredoc.
+`vinga-server/README.md` gains the inline spelling at its one short
+entity example in M2, and keeps `-f` beside it: showing the pair is what
+stops a reader reaching for a heredoc. Its whole-deployment example does
+not change, because `apply` has no inline form.
 
 ## Design footprint
 
@@ -331,7 +337,8 @@ orphaned diagram reference) came from grep rather than from reading.
       Prerequisites subsection, step 0 for Ollama and `qwen3:8b`, step 3
       as a linear `key=value` sequence ending in one `vinga reload`, the
       simulator block removed, and the inline spelling added beside the
-      two `-f` examples in `vinga-server/README.md`. Every command run
+      one short-entity `-f` example in `vinga-server/README.md`
+      (line 2722; the `apply` example at 1442 is left alone). Every command run
       before it is published, and the board half walked on the
       Touch-LCD-1.54. Touches `vinga-server/README.md`, so the server
       workflow is the lane that runs.
@@ -368,6 +375,12 @@ faithful; resolutions appended per amendment.
    `vinga-server/README.md:1442` should be left unchanged, and only the
    short provider at line 2722 should lead with inline fields while
    keeping `-f` as the fragment alternative.
+
+   *Resolution*: adopted, and the plan was simply wrong. `apply` takes a
+   document and has no inline form, so the whole-deployment example at
+   line 1442 is now explicitly left unchanged, and the sweep is one
+   example rather than two, in the resolved question, the page layout
+   and M2's own description.
 
 3. **P1: the photo is a no-leak surface, and the plan excludes it from
    no-leak verification.** The plan states the source carries GPS
