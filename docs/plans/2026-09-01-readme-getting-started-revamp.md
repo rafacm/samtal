@@ -81,13 +81,24 @@ conversation with a transcript on screen. If that photograph arrives,
 it takes the hero slot and this one moves to step 6; nothing else in
 the plan changes.
 
-**Preparation, which is not optional.** The original file carries EXIF
-GPS coordinates, the capture timestamp and the phone model. It is
-committed with all metadata stripped, at 1600px wide, quality 88,
-`assets/vinga-touch-lcd-1.54.jpg`, 133 KB. The visible four hex
-characters of the board's MAC in the access point name are the SSID
-upstream's firmware broadcasts while provisioning and are left as they
-are.
+**Preparation, which is not optional, and is a no-leak surface.** The
+original file carries EXIF GPS coordinates, the capture timestamp and
+the phone model. Publishing it as received would put the photographer's
+location in a public repository, so M1 treats the asset the way the
+no-leak lens treats a retained message: what it may not carry is stated,
+and the absence is verified rather than assumed.
+
+The committed file is `assets/vinga-touch-lcd-1.54.jpg`, 1600px wide,
+quality 88, about 133 KB. It is produced by auto-orienting **before**
+metadata removal, which is load-bearing rather than tidy: stripping the
+EXIF orientation tag from a file that relied on it publishes a rotated
+hero, and the rotation is invisible in any check that reads metadata
+instead of pixels. The verification is in the Tests section, and it
+includes looking at the result.
+
+The visible four hex characters of the board's MAC in the access point
+name are the SSID upstream's firmware broadcasts while provisioning, and
+are left as they are.
 
 ### Whether the agent write can be a `key=value` one-liner
 
@@ -280,6 +291,16 @@ There is no unit test for prose. What stands in for one:
   `vinga-server/`, which sweeps every tracked file. Both milestones move
   command text, so both run it, and a stale manifest is regenerated with
   `uv run python -m tests.unit.test_command_spellings`, never by hand.
+- **The committed photograph carries no metadata**, verified in M1 and
+  recorded in the implementation doc:
+  `magick identify -verbose assets/vinga-touch-lcd-1.54.jpg` matches no
+  line for EXIF, GPS, XMP, IPTC, a colour profile or a capture time
+  (ImageMagick's own `date:create` and `date:modify` are read from the
+  filesystem, not from the file, and do not count), the same probe on
+  the source file matches 66 such lines, `%[orientation]` is
+  `Undefined`, the geometry is 1600x767, and the rendered image was
+  looked at rather than merely measured, since a rotation is invisible
+  to every check above.
 - **Every command in the rewritten section is executed**, in order, from
   an empty deployment, against a stack started under its own compose
   project name so it collides with nothing already running. What the
@@ -293,9 +314,11 @@ There is no unit test for prose. What stands in for one:
   with a note saying why, per the unverified-claims practice; it is not
   ticked on the strength of the pieces having worked separately.
 
-The standing review lenses, dispositioned rather than skipped: no-leak
-does not apply, since nothing here writes a message, a field or an
-exception; pin-before-reshaping does not apply, since no behavior moves;
+The standing review lenses, dispositioned rather than skipped: **no-leak
+applies, to exactly one surface**, the committed photograph, whose
+verification is the bullet above; it does not apply anywhere else,
+because nothing here writes a message, a field or an exception.
+Pin-before-reshaping does not apply, since no behavior moves;
 closed sets and honest seams do not apply, since no code changes.
 Inventories by tooling does apply and is the reason every count in this
 plan (two `-f` examples in the server README, three inbound anchors, one
@@ -392,6 +415,14 @@ faithful; resolutions appended per amendment.
    device-model or thumbnail metadata, that the image was auto-oriented
    before metadata removal so stripping the orientation tag cannot
    publish a rotated hero, and that the result was inspected visually.
+
+   *Resolution*: adopted, and the contradiction was real: the plan said
+   the file carries GPS coordinates and then disposed of the lens that
+   covers it. No-leak now applies to M1 at exactly one surface, the
+   photo section says why auto-orienting has to precede stripping, and
+   the Tests section carries a named probe whose result is recorded in
+   the implementation doc, including looking at the image, because a
+   rotation is invisible to a metadata check.
 
 4. **P2: the readback does not prove field-for-field equivalence.**
    Reading back `agents.assistant` and `providers.llm.local` alone would
