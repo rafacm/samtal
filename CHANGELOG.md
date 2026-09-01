@@ -9,6 +9,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Getting Started reaches a working deployment by typing, not by
+  editing a file** (#346). Step 3 was `curl` a preset, edit its
+  `base_url` in an editor the page could not see, then `apply`. It is
+  now eight `vinga` lines that can be pasted in one go: four providers,
+  the defaults naming them, the agent, the default agent, and the one
+  `vinga reload` that installs all of it. A new step 0 pulls the model
+  the stack needs, a Prerequisites list names everything the walkthrough
+  invokes (`curl`, `openssl` and `git` among them, which macOS ships and
+  a stripped-down Linux may not), and the section opens by saying what a
+  reader ends up with rather than what they are about to configure. The
+  simulator block leaves Getting Started, keeping its Features bullet.
+  Every command was executed against an empty deployment before it was
+  published, and the stored configuration compared whole against
+  `local-stack.yaml`.
+- **The container section of `vinga-server/README.md` shows the inline
+  spelling beside `-f`** (#346), so a reader with a short entry to write
+  can see it is one line, with the reason a credential is never one of
+  those arguments.
 - **The front page opens with the board rather than a block diagram**
   (#346). "What is vinga?" now leads with a photograph of a
   Touch-LCD-1.54 running stock upstream firmware, waiting on its own
