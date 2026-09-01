@@ -388,11 +388,20 @@ def test_a_mid_session_read_stops_at_the_last_completed_turn(
 ) -> None:
     """The marker policy, from outside: a turn commits everything up to
     itself, and the utterance being answered right now is still in
-    memory. So a reader sees whole turns and never half of one.
+    memory. So a reader that waits for a turn to be wholly visible never
+    then sees part of the next one.
 
-    The second utterance is taken as far as its `heard`, which the spy
-    reports having been offered; the reply it starts then runs for the
-    length of a spoken answer, which is the window this reads in."""
+    Wholly visible is the narrow claim, and it is not atomicity across
+    the two transactions a marker writes: the turn row lands before its
+    events do, which
+    `test_a_turn_is_visible_before_its_events_are` pins. What this adds
+    is the far side of that window: once the first turn's events are
+    there, the second utterance's `heard` is still not, though the spy
+    reports it having been offered.
+
+    The second utterance is taken as far as that `heard`; the reply it
+    starts then runs for the length of a spoken answer, which is the
+    window this reads in."""
     with TestClient(create_app(recording_config(tmp_path))) as client:
         with connect(client) as websocket:
             shake_hands(websocket)
