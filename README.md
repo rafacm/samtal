@@ -39,13 +39,11 @@ The new thing is a self-hostable voice agent where the device talks to **your se
 
 The design premise is a [**thin device and a smart server**](docs/architecture/guidelines.md#thin-device-smart-server): the firmware's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Customization lives server-side, in Python, not in C++ you have to reflash.
 
-- **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server. Run it on a laptop or ship the published multi-arch container image to your own infrastructure. WebSocket is the only transport for v1; upstream's MQTT+UDP alternative may follow.
-- **No account, no vendor cloud, no phone app.** Point the device at your server once; it connects and talks.
+- **Your server is the only one it talks to.** The board speaks Opus over a WebSocket, the one transport v1 carries, to an address you chose. No account to create, no vendor cloud between the two, no phone app in the way: point the board at your server once and it connects. Run that server on a laptop while you are trying it, or ship the published multi-arch container image to your own infrastructure.
+- **A conversation that needs no API key at all.** Silero, faster-whisper, [Ollama](https://ollama.com) and Piper make a loop that [runs entirely on your own hardware](docs/architecture/product-promises.md#a-fully-local-deployment-is-first-class), works today, bills nothing per word, and is heard nowhere else.
+- **Every stage is swappable, the language model included.** Point the LLM at that local Ollama, at Anthropic, or at any OpenAI-compatible endpoint. Swap either half of the voice for a cloud engine when a better voice, or an ear that copes with a noisy room, is worth more to you than a fully private one.
 - **Configurable agents.** Define several, each with its own prompt, providers, and tools; bind devices to them, and switch mid-conversation by asking. One device can be a whole cast.
-- **Pluggable LLM.** Fully local via [Ollama](https://ollama.com), or Anthropic and any OpenAI-compatible endpoint.
-- **Pluggable voice.** Speech recognition and synthesis are swappable providers; a zero-API-key local pipeline (Silero VAD + faster-whisper + Piper) works today. Swap in a cloud engine for either half when a better voice, or an ear that copes with a noisy room, is worth more to you than a fully private one.
 - **Tools via MCP, on both sides.** Attach any MCP server as assistant tools; the device itself exposes its controls (volume, brightness, screen) as MCP tools over the same channel.
-- **Compiler-grade upstream, thin fork.** Device support, audio pipeline, and echo cancellation come from the actively maintained [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) project; vinga changes as little as possible on the device. 🚧
 - **Speech in, speech out, everything visible.** Recognized text and responses render on the device display as the conversation happens.
 - **Try it without hardware.** `vinga simulator` is a simulated board in the CLI: it checks in, claims itself, and holds a conversation, with the terminal standing in for the display.
 
