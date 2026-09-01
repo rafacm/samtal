@@ -698,21 +698,21 @@ docs/plans/2026-08-30-memory-scopes.md:359  historical  vinga memory delete conv
 docs/plans/2026-08-30-memory-scopes.md:363  historical  vinga memory list agent
 docs/plans/2026-09-01-readme-getting-started-revamp.md:20  historical  vinga info
 docs/plans/2026-09-01-readme-getting-started-revamp.md:112  historical  vinga agent set
-docs/plans/2026-09-01-readme-getting-started-revamp.md:157  historical  vinga apply
-docs/plans/2026-09-01-readme-getting-started-revamp.md:158  historical  vinga provider set llm claude
-docs/plans/2026-09-01-readme-getting-started-revamp.md:192  historical  vinga info
-docs/plans/2026-09-01-readme-getting-started-revamp.md:200  historical  vinga provider set llm local
-docs/plans/2026-09-01-readme-getting-started-revamp.md:201  historical  vinga provider set asr whisper
-docs/plans/2026-09-01-readme-getting-started-revamp.md:202  historical  vinga provider set tts voice
-docs/plans/2026-09-01-readme-getting-started-revamp.md:203  historical  vinga provider set vad ears
-docs/plans/2026-09-01-readme-getting-started-revamp.md:204  historical  vinga agent-defaults set
-docs/plans/2026-09-01-readme-getting-started-revamp.md:205  historical  vinga agent set assistant
-docs/plans/2026-09-01-readme-getting-started-revamp.md:206  historical  vinga default-agent set assistant
-docs/plans/2026-09-01-readme-getting-started-revamp.md:207  historical  vinga reload
-docs/plans/2026-09-01-readme-getting-started-revamp.md:313  historical  vinga export
-docs/plans/2026-09-01-readme-getting-started-revamp.md:369  historical  vinga reload
-docs/plans/2026-09-01-readme-getting-started-revamp.md:403  historical  vinga apply
-docs/plans/2026-09-01-readme-getting-started-revamp.md:445  historical  vinga export
+docs/plans/2026-09-01-readme-getting-started-revamp.md:173  historical  vinga apply
+docs/plans/2026-09-01-readme-getting-started-revamp.md:174  historical  vinga provider set llm claude
+docs/plans/2026-09-01-readme-getting-started-revamp.md:223  historical  vinga info
+docs/plans/2026-09-01-readme-getting-started-revamp.md:231  historical  vinga provider set llm local
+docs/plans/2026-09-01-readme-getting-started-revamp.md:232  historical  vinga provider set asr whisper
+docs/plans/2026-09-01-readme-getting-started-revamp.md:233  historical  vinga provider set tts voice
+docs/plans/2026-09-01-readme-getting-started-revamp.md:234  historical  vinga provider set vad ears
+docs/plans/2026-09-01-readme-getting-started-revamp.md:235  historical  vinga agent-defaults set
+docs/plans/2026-09-01-readme-getting-started-revamp.md:236  historical  vinga agent set assistant
+docs/plans/2026-09-01-readme-getting-started-revamp.md:237  historical  vinga default-agent set assistant
+docs/plans/2026-09-01-readme-getting-started-revamp.md:238  historical  vinga reload
+docs/plans/2026-09-01-readme-getting-started-revamp.md:373  historical  vinga export
+docs/plans/2026-09-01-readme-getting-started-revamp.md:434  historical  vinga reload
+docs/plans/2026-09-01-readme-getting-started-revamp.md:468  historical  vinga apply
+docs/plans/2026-09-01-readme-getting-started-revamp.md:510  historical  vinga export
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:6473  generated  vinga ota-url
 docs/reference/api-openapi.json:7434  generated  vinga provider secret set
