@@ -2723,6 +2723,18 @@ vinga provider set llm claude -f examples/llm-anthropic.yaml
 vinga reload
 ```
 
+An entry short enough to read on one line can be written on one, with no
+file to name and no directory to be in:
+
+```bash
+vinga provider set llm claude type=anthropic model=claude-sonnet-5 api_key_env=ANTHROPIC_API_KEY
+```
+
+The two spellings write the same entry. `-f` is what a long one wants,
+and a credential is never a `key=value` argument: arguments land in the
+shell's history and in the process list, which is why the field above
+names the variable holding the key rather than the key.
+
 - `/config/config.yaml` is the server half, and mounting it is optional.
   The image's entrypoint names that path when a file is there and names
   nothing when it is not, so an unmounted container boots on the
