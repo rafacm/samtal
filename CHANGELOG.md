@@ -20,9 +20,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   a stripped-down Linux may not), and the section opens by saying what a
   reader ends up with rather than what they are about to configure. The
   simulator block leaves Getting Started, keeping its Features bullet.
-  Every command was executed against an empty deployment before it was
-  published, and the stored configuration compared whole against
-  `local-stack.yaml`.
+  Every command of steps 0 to 3 and step 5 was executed against an empty
+  deployment before it was published, and the stored configuration
+  compared whole against `local-stack.yaml`; the board steps were not
+  walked, so what they say is unchanged from before.
 - **The container section of `vinga-server/README.md` shows the inline
   spelling beside `-f`** (#346), so a reader with a short entry to write
   can see it is one line, with the reason a credential is never one of

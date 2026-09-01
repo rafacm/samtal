@@ -429,15 +429,20 @@ orphaned diagram reference) came from grep rather than from reading.
       sections that now exist; `vinga-esp32/README.md`'s table moved to
       match. Touches the root README, that firmware README, one new
       asset and the census manifest, so both workflows run.
-- [x] **[M2: Getting Started, executed](2026-09-01-readme-getting-started-revamp-implementation.md#m2-getting-started-executed)** (PR [#370](https://github.com/rafacm/vinga/pull/370)). The destination paragraph, the
+- [ ] **[M2: Getting Started, executed](2026-09-01-readme-getting-started-revamp-implementation.md#m2-getting-started-executed)** (PR [#370](https://github.com/rafacm/vinga/pull/370), **the server half only**). The destination paragraph, the
       Prerequisites subsection, step 0 for Ollama and `qwen3:8b`, step 3
       as a linear `key=value` sequence ending in one `vinga reload`, the
       simulator block removed, and the inline spelling added beside the
       one short-entity `-f` example in `vinga-server/README.md`
       (line 2722; the `apply` example at 1442 is left alone). Every command run
       before it is published, and the board half walked on the
-      Touch-LCD-1.54. Touches `vinga-server/README.md` and the census
-      manifest, so both workflows run.
+      Touch-LCD-1.54. Touches the root README, `vinga-server/README.md`
+      and the census manifest, so both workflows run. **Unticked on
+      purpose**: the server half is done and merged as the PR above, and
+      the board half (flash, NVS write, captive portal, speaking) was
+      never walked, because no board was attached to the machine that
+      ran it. The folded-in #308 obligation is therefore undischarged,
+      and this box closes when a board has been walked, not before.
 
 ## Plan review round
 
