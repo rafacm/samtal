@@ -168,6 +168,8 @@ vinga is assembled on top of two MIT-licensed projects, and would be nothing wit
 
 License notices are preserved in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
+Those two are the foundation rather than the neighbourhood. [`docs/related-projects.md`](docs/related-projects.md) is the survey of the rest: what each nearby voice assistant is, where it overlaps, where vinga is deliberately different, and what vinga borrows. Several of them are older than vinga and better at what they set out to do, and the page says so.
+
 The word *sweded*, and the whole idea of remaking something you love with your own hands, comes from the film *Be Kind Rewind* (2008); its creators explain [How To Swede](https://youtu.be/i5Rd8x4OJoY) on YouTube.
 
 ## Changelog
