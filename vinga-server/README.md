@@ -2705,9 +2705,7 @@ default and every one of them is overridable with a `VINGA_`-prefixed
 variable, so a container started with nothing mounted at `/config`
 serves on those. Mount a YAML there and the image reads it, which is
 what a deployment past a handful of keys wants; the two lines after it
-write one provider into the domain half and install it, run from a
-checkout's `vinga-server/` directory, where the example fragments their
-`-f` paths name are:
+write one provider into the domain half and install it:
 
 ```bash
 docker run -d --name vinga \
@@ -2719,21 +2717,25 @@ docker run -d --name vinga \
   -v vinga-data:/data \
   ghcr.io/rafacm/vinga-server:latest
 
-vinga provider set llm claude -f examples/llm-anthropic.yaml
+vinga provider set llm claude type=anthropic model=claude-sonnet-5 api_key_env=ANTHROPIC_API_KEY
 vinga reload
 ```
 
-An entry short enough to read on one line can be written on one, with no
-file to name and no directory to be in:
+An entry that fits on a line is written on one, with no file to name and
+no directory to be in. A credential is never one of those arguments:
+arguments land in the shell's history and in the process list, which is
+why the field above names the variable holding the key rather than the
+key.
+
+Past a screenful, the same entry comes from a file instead, and the
+commented fragments under [`examples/`](examples/) are what those files
+look like. The two spellings write the same entry, and this one is run
+from a checkout's `vinga-server/` directory, where the fragment it names
+is:
 
 ```bash
-vinga provider set llm claude type=anthropic model=claude-sonnet-5 api_key_env=ANTHROPIC_API_KEY
+vinga provider set llm claude -f examples/llm-anthropic.yaml
 ```
-
-The two spellings write the same entry. `-f` is what a long one wants,
-and a credential is never a `key=value` argument: arguments land in the
-shell's history and in the process list, which is why the field above
-names the variable holding the key rather than the key.
 
 - `/config/config.yaml` is the server half, and mounting it is optional.
   The image's entrypoint names that path when a file is there and names
