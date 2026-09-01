@@ -237,3 +237,35 @@ covers it only if "last" means after the implementation doc is written
 and not merely after the code is. The manifest committed here was
 regenerated after this paragraph existed.
 
+
+### PR review round
+
+External review of the branch as pushed to PR #366, at `1b42b5be`
+against `origin/main`: backend codex (codex-cli 0.151.0), model
+gpt-5.6-terra, read-only sandbox, 2026-09-01, runtime 1m39s. The fast
+tier by the tiering rule's own words, a documentation-only diff being
+the case it names. One finding, P3, verdict as received: mergeable as
+is. Condensed below as received, with its resolution and the commit that
+landed it.
+
+1. **P3: the implementation record misstates the PR's scope.** The
+   document opened with "Six commits, touching four files", while
+   `origin/main...HEAD` was 23 commits over seven files. Correct the
+   counts or remove them, so a dated execution record reports what
+   actually landed.
+
+   *Resolution* (`953ec567`): confirmed, and worse than the finding
+   said. The milestone's own branch is ten commits over seven files;
+   the 23 is that plus the thirteen it inherits from the plan branch it
+   stacks on. Both halves of the sentence were wrong, not just the
+   arithmetic. Removed rather than corrected, per the finding's first
+   option: the file list that replaces it says the same thing about
+   scope and cannot be staled, where any number would have been staled
+   again by this very round.
+
+The finding is the same shape as the census trap recorded above, and
+worth naming as one: a stacked branch makes every whole-diff count a
+statement about two milestones, and a record written mid-milestone
+describes a tree that no longer exists by the time it is pushed. What
+survives an amendment is what a later reader can check against the tree,
+which is the list of files, never a tally of commits.

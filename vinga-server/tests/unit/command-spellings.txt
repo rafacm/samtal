@@ -696,8 +696,8 @@ docs/plans/2026-08-30-memory-scopes.md:355  historical  vinga memory delete devi
 docs/plans/2026-08-30-memory-scopes.md:358  historical  vinga memory list conversation
 docs/plans/2026-08-30-memory-scopes.md:359  historical  vinga memory delete conversation
 docs/plans/2026-08-30-memory-scopes.md:363  historical  vinga memory list agent
-docs/plans/2026-09-01-readme-getting-started-revamp-implementation.md:196  historical  vinga memory list agent
-docs/plans/2026-09-01-readme-getting-started-revamp-implementation.md:197  historical  vinga memory list agent
+docs/plans/2026-09-01-readme-getting-started-revamp-implementation.md:202  historical  vinga memory list agent
+docs/plans/2026-09-01-readme-getting-started-revamp-implementation.md:203  historical  vinga memory list agent
 docs/plans/2026-09-01-readme-getting-started-revamp.md:20  historical  vinga info
 docs/plans/2026-09-01-readme-getting-started-revamp.md:112  historical  vinga agent set
 docs/plans/2026-09-01-readme-getting-started-revamp.md:173  historical  vinga apply
