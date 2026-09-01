@@ -274,6 +274,19 @@ would disagree about a field's meaning, the README links
 - **M2** touches `vinga-server/README.md` in the sweep. It states the
   step-3 sequence as the front page's own path and does not restate
   field semantics, which belong to the generated reference.
+- **Both milestones restate the census manifest**,
+  `vinga-server/tests/unit/command-spellings.txt`. It records the file
+  and the line of every command spelling in the tree, so moving a
+  command line stales it even when the command itself is unchanged, and
+  both milestones move command lines. It is regenerated with
+  `uv run python -m tests.unit.test_command_spellings`, never by hand.
+  This plan's own commit staled it, and it is regenerated in the
+  amendment that records this.
+- **Both milestones therefore run both workflows.** The manifest lives
+  under `vinga-server/**`, a server-workflow path, and the README and
+  plan changes are docs-workflow paths, so both lanes run on both PRs
+  and both are the green a PR waits for. The plan's earlier claim that
+  M1 was a docs-only lane was wrong for this reason.
 - **Neither milestone edits a generated page.** `docs/reference/` changes
   only through its generators, and no generator changes here.
 - **Step 0's onward link** is `docs/reference/domain-config.md` plus the
@@ -291,6 +304,8 @@ There is no unit test for prose. What stands in for one:
   `vinga-server/`, which sweeps every tracked file. Both milestones move
   command text, so both run it, and a stale manifest is regenerated with
   `uv run python -m tests.unit.test_command_spellings`, never by hand.
+  It needs the development Postgres up, because the unit lane's conftest
+  provisions stores before any test in it runs.
 - **The committed photograph carries no metadata**, verified in M1 and
   recorded in the implementation doc:
   `magick identify -verbose assets/vinga-touch-lcd-1.54.jpg` matches no
@@ -362,8 +377,8 @@ orphaned diagram reference) came from grep rather than from reading.
       removed; a Documentation section added; Credits gaining its
       `docs/related-projects.md` link; the navigation line following the
       sections that now exist; `vinga-esp32/README.md`'s table moved to
-      match. Touches the root README, that firmware README and one new
-      asset, so the `docs` workflow is the lane that runs.
+      match. Touches the root README, that firmware README, one new
+      asset and the census manifest, so both workflows run.
 - [ ] **M2: Getting Started, executed.** The destination paragraph, the
       Prerequisites subsection, step 0 for Ollama and `qwen3:8b`, step 3
       as a linear `key=value` sequence ending in one `vinga reload`, the
@@ -371,8 +386,8 @@ orphaned diagram reference) came from grep rather than from reading.
       one short-entity `-f` example in `vinga-server/README.md`
       (line 2722; the `apply` example at 1442 is left alone). Every command run
       before it is published, and the board half walked on the
-      Touch-LCD-1.54. Touches `vinga-server/README.md`, so the server
-      workflow is the lane that runs.
+      Touch-LCD-1.54. Touches `vinga-server/README.md` and the census
+      manifest, so both workflows run.
 
 ## Plan review round
 
@@ -456,6 +471,14 @@ faithful; resolutions appended per amendment.
    plan itself. The plan should name the manifest in both milestone
    footprints, regenerate it for the plan commit and each milestone, and
    state that both workflows run for both milestones.
+
+   *Resolution*: adopted, and confirmed rather than accepted on
+   argument: running the census against the plan commit failed on four
+   lines the plan itself quotes. The manifest is regenerated in this
+   amendment, is named in both milestone footprints, and the CI claim is
+   corrected to both workflows on both PRs. The Tests section also gains
+   the note that the census needs the development Postgres up, since the
+   unit lane's conftest provisions stores before anything in it runs.
 
 6. **P2: the plan explicitly leaves the changelog unchanged** while
    AGENTS.md requires a `CHANGELOG.md` entry with every notable change.
