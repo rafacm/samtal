@@ -118,22 +118,26 @@ There is nothing to export. Run it from the directory step 1 made and it reads t
 
 [`docs/reference/cli.md`](docs/reference/cli.md) is the CLI's own page: the one-off `uvx` spelling, reaching a deployment you do not host, and every command's help.
 
-**3. Say what the agent is.** The other half of the configuration (which engines, which agents, which devices) is one document, written in one transaction and refused whole rather than half applied, so there is no creation order to get right ([Configuration](vinga-server/README.md#configuration)). This preset is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
+**3. Say what the agent is.** Which engines, which agents, which devices: this is the other half of the configuration, and it is written a line at a time. The preset this reproduces is fully local and needs no account anywhere: Silero listens for the end of a phrase, faster-whisper transcribes, [Ollama](https://ollama.com) answers and Piper speaks.
 
 ```bash
-curl -O https://raw.githubusercontent.com/rafacm/vinga/main/vinga-server/examples/presets/local-stack.yaml
-
-# The server dials the model from inside its container, so change the llm
-# base_url in that file from localhost to host.docker.internal, which the
-# compose file resolves to this machine on every platform.
-vinga apply -f local-stack.yaml
-
-# Which agent an unknown device reaches. Bind specific devices instead
-# with: vinga device bind aa:bb:cc:dd:ee:ff assistant
+vinga provider set llm local type=openai_compatible base_url=http://host.docker.internal:11434/v1 model=qwen3:8b egress=false
+vinga provider set asr whisper type=faster_whisper model=small vad_filter=true
+vinga provider set tts voice type=piper voice=en_US-lessac-medium
+vinga provider set vad ears type=silero
+vinga agent-defaults set llm=local asr=whisper tts=voice vad=ears
+vinga agent set assistant "prompt=You are a helpful voice assistant. Keep replies short, plain, and speakable. One or two sentences, no lists, no markdown. Always reply in the language the user spoke."
 vinga default-agent set assistant
+vinga reload
 ```
 
-`apply` writes the document and applies it: the engines are built and served without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)), which the first run spends a few minutes on because it downloads the speech models onto the data volume; later ones take seconds. `--no-reload` writes without applying, for the case where the two belong apart, and `vinga reload` is then the step that installs. The default agent needs neither: it is read as a device asks for it. [`vinga-server/examples/presets/`](vinga-server/examples/presets/) holds the same deployment on vendor APIs, [`vinga-server/examples/`](vinga-server/examples/) a commented fragment per entity to copy from, and every field of them is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
+Read top to bottom that is the whole deployment: four engines, the defaults that say which one each job uses, the one agent that inherits them, and which agent a board reaches when nothing has bound it. Bind a specific board instead, by the MAC on its sticker, with `vinga device bind aa:bb:cc:dd:ee:ff assistant`.
+
+`host.docker.internal` rather than `localhost`, because the server dials the model from inside its container and localhost there is the container. The compose file resolves that name to this machine, and on macOS it reaches Ollama even though Ollama listens only on loopback.
+
+The last line is the only one that installs anything. Writing an entry stores it and does not touch the running server, which is what lets the seven lines above land in any order without a half-configured server in between; `vinga reload` then builds the engines and serves the agents without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first reload is the slow one, because it downloads the speech models onto the data volume. `vinga default-agent set` is the exception that needs no reload either way: it is read as a device asks for it.
+
+The same deployment can be written as one document and applied in one transaction with `vinga apply -f`, which is what [`vinga-server/examples/presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml) is; the presets beside it are the same deployment on vendor APIs. Every field of either spelling is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
 
 **4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
