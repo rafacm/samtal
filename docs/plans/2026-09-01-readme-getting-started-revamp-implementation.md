@@ -11,8 +11,14 @@ says so explicitly.
 
 ### What was done
 
-Six commits, touching four files. No code, no generator, no generated
-page, and not one line of the Getting Started section, which is M2's.
+No code, no generator, no generated page, and not one line of the
+Getting Started section, which is M2's. What it touches: the root
+README, `vinga-esp32/README.md`, whose hardware table moves with it, one
+new asset, `CHANGELOG.md`, this plan and this document, and the census
+manifest. A count of commits is deliberately not given: this branch
+stacks on the plan's, so the pull request's diff against `main` carries
+the plan's commits too, and any number written here goes stale at the
+next amendment.
 
 **Hardware.** The introduction said these were the boards vinga
 "targets and tests", which was true of a list whose rows had all been
