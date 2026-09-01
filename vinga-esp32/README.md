@@ -16,11 +16,13 @@ runtime. Planned customizations:
 
 ## Target hardware
 
+The same three boards the [project README](../README.md#hardware) lists, in the same order. The Touch-LCD-1.54 is the board vinga is developed and tested on; the other two are targets.
+
 | Board | Display | Audio | Links | Status |
 |---|---|---|---|---|
-| [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) | 200×200 e-paper | ES8311, single mic | [guide](../docs/devices/waveshare-esp32-s3-epaper-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned |
-| [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) | 240×240 LCD (ST7789), CST816 touch | ES8311 + ES7210 (AEC) | [guide](../docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | [working with upstream prebuilt firmware](../docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) |
-| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) | 480×480 AMOLED (CO5300), CST9220 touch | ES8311 + ES7210 (AEC) | [guide](../docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned |
+| [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) | 240×240 LCD (ST7789), CST816 touch | ES8311 + ES7210 (AEC) | [guide](../docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | [**working** (upstream firmware)](../docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) | 480×480 AMOLED (CO5300), CST9220 touch | ES8311 + ES7210 (AEC) | [guide](../docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned 🚧 |
+| [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) | 200×200 e-paper | ES8311, single mic | [guide](../docs/devices/waveshare-esp32-s3-epaper-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned 🚧 |
 
 ## Building
 
