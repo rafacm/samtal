@@ -296,3 +296,95 @@ orphaned diagram reference) came from grep rather than from reading.
       before it is published, and the board half walked on the
       Touch-LCD-1.54. Touches `vinga-server/README.md`, so the server
       workflow is the lane that runs.
+
+## Plan review round
+
+External review of commit d8bda771: backend codex (codex-cli 0.151.0),
+model gpt-5.6-sol, sandbox read-only, 2026-09-01, runtime 456 seconds.
+Verdict: ready after the P1/P2 amendments. Findings condensed but
+faithful; resolutions appended per amendment.
+
+1. **P1: the plan never states the command sequence it claims to
+   verify.** The resolved question says M2 executes "this exact line",
+   and the milestone says "a linear `key=value` sequence", but no
+   sequence appears anywhere in the plan. The preset defines four
+   providers, four defaults and one agent; materially different and
+   potentially wrong implementations fit the milestone text as written.
+   The plan should carry the literal sequence, say that it reproduces
+   the preset's entities, and say that it deliberately adds the default
+   agent the preset omits.
+
+2. **P1: one of the two promised server-README inline alternatives
+   cannot exist.** The plan requires the inline spelling beside both
+   `-f` examples, but the first is `vinga apply -f ...`, and `apply`
+   takes a document through `-f` and has no `key=value` form; the issue
+   itself keeps `-f` for documents. The whole-deployment example at
+   `vinga-server/README.md:1442` should be left unchanged, and only the
+   short provider at line 2722 should lead with inline fields while
+   keeping `-f` as the fragment alternative.
+
+3. **P1: the photo is a no-leak surface, and the plan excludes it from
+   no-leak verification.** The plan states the source carries GPS
+   coordinates, a capture timestamp and the phone model, then says
+   no-leak does not apply because nothing here writes a message or a
+   field. Neither named check inspects JPEG metadata. The plan should
+   apply the lens to M1 and require recorded verification that the
+   committed file carries no EXIF, GPS, XMP, capture-time,
+   device-model or thumbnail metadata, that the image was auto-oriented
+   before metadata removal so stripping the orientation tag cannot
+   publish a rotated hero, and that the result was inspected visually.
+
+4. **P2: the readback does not prove field-for-field equivalence.**
+   Reading back `agents.assistant` and `providers.llm.local` alone would
+   miss an omitted `asr.whisper.vad_filter`, the wrong Piper voice, a
+   malformed VAD entry or incorrect agent defaults, and a successful
+   reload proves only that the stored world can be built, not that its
+   values match the preset. The plan should compare the whole stored
+   domain against `local-stack.yaml`, with only the intended `base_url`
+   substitution and the added `default_agent`.
+
+5. **P2: both CI-lane claims omit the command-spellings manifest and
+   are wrong.** The census stores file and line and fails on any drift.
+   M1 moves the root README's command lines and M2 changes both command
+   blocks, so both regenerate `vinga-server/tests/unit/command-spellings.txt`,
+   which is under `vinga-server/**` and triggers the server workflow;
+   both also touch non-ignored root and docs files, so the docs workflow
+   runs too. The manifest also has no entries for the newly committed
+   plan itself. The plan should name the manifest in both milestone
+   footprints, regenerate it for the plan commit and each milestone, and
+   state that both workflows run for both milestones.
+
+6. **P2: the plan explicitly leaves the changelog unchanged** while
+   AGENTS.md requires a `CHANGELOG.md` entry with every notable change.
+   The plan should include a dated entry in each milestone, or say how
+   each independently releasable PR records its notable user-facing
+   change.
+
+7. **P2: `host.docker.internal` resolution is overclaimed as
+   cross-platform reachability.** The `extra_hosts` alias proves address
+   resolution, not that Ollama is listening on an interface reachable
+   through the host gateway, and the compose feature record says Linux
+   was never exercised. The plan should limit the claim to the tested
+   macOS path; if the walkthrough is to support Linux, step 0 must
+   include and verify the platform-appropriate Ollama listener
+   configuration rather than equating hostname resolution with service
+   reachability.
+
+8. **P2: the hardware section is reordered but not fully rescoped.**
+   The introduction still says all three boards are ones vinga "targets
+   and tests" although two rows are planned, and M1 names only the
+   reorder. The plan should also rewrite that introduction to
+   distinguish targets from the one tested board, and apply the
+   `planned 🚧` status and the same row order to both hardware tables.
+
+9. **P2: the documented link-check command exits with a usage error.**
+   `scripts/check_doc_links.py` requires a `<repo-root>` argument and
+   exits 2 without one. The plan should use the workflow's actual
+   command, `python3 scripts/check_doc_links.py .`.
+
+10. **P3: the proposed prerequisites are not exhaustive for the copied
+    walkthrough.** Step 1 invokes `curl` and `openssl` directly and step
+    2 installs from a `git+https` URL, while the plan names only Docker
+    Compose, uv, Ollama and a board. The plan should list `curl`, an
+    `openssl` command and Git, or state that the tested macOS setup
+    assumes those system-provided tools.
