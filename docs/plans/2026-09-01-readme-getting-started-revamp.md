@@ -418,7 +418,7 @@ orphaned diagram reference) came from grep rather than from reading.
 
 ## Milestones
 
-- [ ] **M1: the front page around Getting Started.** The hardware table
+- [x] **[M1: the front page around Getting Started](2026-09-01-readme-getting-started-revamp-implementation.md#m1-the-front-page-around-getting-started)** (PR TBD). The hardware table
       reordered to lead with the Touch-LCD-1.54 and its introduction
       rescoped to distinguish the tested board from the targeted ones;
       "What is vinga?" losing
