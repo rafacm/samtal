@@ -161,13 +161,6 @@ vinga device pending list                     # which board is showing what
 vinga device pending claim 418293 assistant   # bind the one showing 418293
 ```
 
-**No board yet?** A simulated one ships with the CLI. It makes the real check-in, shows the activation code a screen would show, and then holds one conversation over the websocket: it says a packaged sentence and prints the transcript and the reply as they arrive. It is a board's protocol, not a board: no microphone, no speaker, no wake word and one fixed sentence, and its help page lists exactly what it does and does not do.
-
-```bash
-uvx --from "vinga-server[sim] @ git+https://github.com/rafacm/vinga#subdirectory=vinga-server" \
-  vinga simulator run https://voice.example/xiaozhi/ota/ --claim assistant
-```
-
 Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](vinga-server/README.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
 
 ## Documentation
