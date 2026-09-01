@@ -312,7 +312,12 @@ would disagree about a field's meaning, the README links
   both milestones move command lines. It is regenerated with
   `uv run python -m tests.unit.test_command_spellings`, never by hand.
   This plan's own commit staled it, and it is regenerated in the
-  amendment that records this.
+  amendment that records this. Because it records the line and not only
+  the file, **any later edit to a file that quotes a command stales it
+  again, including an edit that changes no command at all**: the plan
+  review's own amendments staled it a second time by moving the lines
+  they did not touch. Regenerating is therefore the last step before a
+  push, not a step in the middle.
 - **Both milestones write `CHANGELOG.md`**, a dated `### Changed`
   entry each, because each merges on its own and each changes what a
   reader of the front page meets. M1's entry is the front page's
