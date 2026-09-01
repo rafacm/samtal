@@ -174,6 +174,45 @@ The root README's is step 3. There is no third file.
 - **Step 5 is already correct** and is left alone beyond wording: the
   `vinga info` collapse the issue asked for landed with #341.
 
+## The step 3 sequence
+
+The literal commands the rewritten step 3 publishes, which M2 executes
+before it publishes them:
+
+```bash
+vinga provider set llm local type=openai_compatible base_url=http://host.docker.internal:11434/v1 model=qwen3:8b egress=false
+vinga provider set asr whisper type=faster_whisper model=small vad_filter=true
+vinga provider set tts voice type=piper voice=en_US-lessac-medium
+vinga provider set vad ears type=silero
+vinga agent-defaults set llm=local asr=whisper tts=voice vad=ears
+vinga agent set assistant "prompt=You are a helpful voice assistant. Keep replies short, plain, and speakable. One or two sentences, no lists, no markdown. Always reply in the language the user spoke."
+vinga default-agent set assistant
+vinga reload
+```
+
+The first six lines reproduce what `examples/presets/local-stack.yaml`
+holds, entity for entity: four providers, the four agent defaults naming
+them, and the one agent. The seventh adds what the preset deliberately
+omits and says it omits, because it is the one thing a preset cannot
+know: which agent an unbound board reaches. The eighth installs all of
+it, and is the only line that reloads, because entity writes do not
+(only `apply` carries a reload, and this sequence does not use it).
+`default-agent set` needs no reload either way, since it is read as a
+device asks for it.
+
+Two differences from the preset, both deliberate. The `base_url` says
+`host.docker.internal` rather than `localhost`, for the reason in the
+resolved question above. And the prompt says "speakable. One or two
+sentences" rather than the preset's "speakable: one or two sentences",
+for the scalar reason in the resolved question above.
+
+Every value was parsed as a lone YAML scalar before this was written:
+`openai_compatible`, `http://host.docker.internal:11434/v1`, `qwen3:8b`,
+`small`, `piper`, `silero`, `faster_whisper` and `en_US-lessac-medium`
+all come back as strings (`qwen3:8b` because a colon makes a mapping
+only when a space follows it), `true` and `false` as booleans, and the
+colon-free prompt as one string.
+
 ## Page layout
 
 Neither milestone adds a page. The front page's section order after
@@ -313,6 +352,13 @@ faithful; resolutions appended per amendment.
    The plan should carry the literal sequence, say that it reproduces
    the preset's entities, and say that it deliberately adds the default
    agent the preset omits.
+
+   *Resolution*: adopted. The plan gains a section of its own, "The step
+   3 sequence", carrying all eight lines verbatim, saying which six
+   reproduce the preset, which one adds the default agent the preset
+   cannot know, and which one installs. It also records the two
+   deliberate differences from the preset and the scalar parse of every
+   value in it.
 
 2. **P1: one of the two promised server-README inline alternatives
    cannot exist.** The plan requires the inline spelling beside both
