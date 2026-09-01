@@ -327,9 +327,12 @@ would disagree about a field's meaning, the README links
 
 There is no unit test for prose. What stands in for one:
 
-- `uv run python scripts/check_doc_links.py` (the `docs` workflow's own
-  check) for every internal link and anchor, including the three inbound
-  anchors listed above.
+- `python3 scripts/check_doc_links.py .` (the `docs` workflow's own
+  invocation, run from the repository root) for every internal link and
+  anchor, including the three inbound anchors listed above. The
+  repository-root argument is required and the script exits 2 without
+  it, so a spelling that omits it reports a usage error rather than a
+  clean run.
 - `uv run pytest tests/unit/test_command_spellings.py -q` from
   `vinga-server/`, which sweeps every tracked file. Both milestones move
   command text, so both run it, and a stale manifest is regenerated with
@@ -564,6 +567,11 @@ faithful; resolutions appended per amendment.
    `scripts/check_doc_links.py` requires a `<repo-root>` argument and
    exits 2 without one. The plan should use the workflow's actual
    command, `python3 scripts/check_doc_links.py .`.
+
+   *Resolution*: adopted. The command in the plan was wrong and would
+   have exited 2 rather than checking anything; corrected to the
+   workflow's own invocation, with the reason the argument is not
+   optional written beside it.
 
 10. **P3: the proposed prerequisites are not exhaustive for the copied
     walkthrough.** Step 1 invokes `curl` and `openssl` directly and step
