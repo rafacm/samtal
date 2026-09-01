@@ -397,9 +397,16 @@ def test_a_mid_session_read_stops_at_the_last_completed_turn(
         with connect(client) as websocket:
             shake_hands(websocket)
             say_something(websocket)
+            # On the events half rather than on the turns, because the
+            # events are what this reads at the end and a marker commits
+            # its two halves in two transactions: the turn row is
+            # visible before its events are. Waiting on the turns lets
+            # the read below race the interval between them and find no
+            # `heard` at all, which is the opposite of what it is
+            # testing.
             until(
-                lambda: read("select * from record.turns"),
-                "the first turn never committed",
+                lambda: read("select * from record.events where name = 'heard'"),
+                "the first turn never committed both its halves",
             )
             websocket.send_text(
                 json.dumps({"type": "listen", "state": "start", "mode": "manual"})
