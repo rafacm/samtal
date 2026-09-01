@@ -404,3 +404,79 @@ obligation is not discharged. The PR carries them as unchecked boxes
 rather than ticks. Everything the server side of that path depends on
 was exercised through the simulator instead, which is a board's protocol
 and not a board.
+
+### PR review round
+
+External review of the branch as pushed to PR #370, at `122f3a5c`
+against `feature/readme-revamp-m1`: backend codex (codex-cli 0.151.0),
+model gpt-5.6-sol, read-only sandbox, 2026-09-01, runtime 11m22s. Sol
+rather than the fast tier despite a documentation-only diff, because the
+commands this page publishes are load-bearing. Five findings, two P1,
+three P2, verdict as received: mergeable after the listed fixes. All
+five confirmed against the sources before being fixed; none rejected.
+
+Two of them are the same failure, and it is worth naming: **a claim the
+milestone made about itself, which its own record contradicts three
+files away.** The plan's checklist said the board half was walked while
+the implementation doc said it was not, and step 3's prose said the
+writes may land in any order while the code refuses exactly that. Both
+survived because each was written from what the sequence was meant to
+be, and neither was checked against what it does.
+
+1. **P1: M2 was ticked although its board walkthrough was not
+   performed.** The checklist claimed every command ran and the
+   Touch-LCD-1.54 was walked; this document says steps 4, 6 and 7 were
+   not carried out, and `CHANGELOG.md` said "every command was
+   executed".
+
+   *Resolution*: the box is unticked, and says in the checklist itself
+   that it stays unticked until a board has been walked. The changelog
+   now names the steps that were executed (0 to 3, and 5) instead of
+   claiming all of them. The tick was the more serious half: a
+   checklist a fresh session resumes from is worth nothing if it can
+   claim work nobody did.
+
+2. **P1: the Linux Ollama path was left out, though the plan required
+   it.** The plan's resolved question says the README states the tested
+   path as tested and says in one sentence that a Linux host also needs
+   Ollama listening beyond loopback, pointing at Ollama's own
+   documentation. The page described only macOS. On a default Linux
+   Ollama the pasted sequence reaches `vinga reload` with a name that
+   resolves and a service that refuses.
+
+   *Resolution*: the sentence is there, naming `OLLAMA_HOST`, linking
+   Ollama's FAQ rather than inventing a procedure this project has not
+   run, and saying plainly that the path is untested here.
+
+3. **P2: "the seven lines may land in any order" is false.**
+   `check_references` runs at write time, and its own docstring says
+   refusing there "is what forces the natural creation order".
+
+   *Resolution*: measured rather than reasoned about. Against an empty
+   deployment, `vinga agent-defaults set` before any provider exists is
+   refused, naming all four unresolved references, and `vinga
+   default-agent set` before the agent exists is refused the same way.
+   The page now says to type them in the order shown and says what the
+   reload actually decouples, which is installation and not order.
+
+4. **P2: `local-stack.yaml` is not the "same deployment".** It says
+   `localhost` where the sequence says `host.docker.internal`, and sets
+   no `default_agent`, so applying it unchanged reaches neither the host
+   model nor a bound board.
+
+   *Resolution*: described as the document form of the same deployment
+   and explicitly not a drop-in replacement, with both differences
+   named. These are two of the three the comparison above found; the
+   third is the prompt's punctuation, which is a spelling of the same
+   sentence rather than a difference a reader acts on.
+
+5. **P2: the server README still led with `-f`.** The plan's resolution
+   says line 2722 "is the one that leads with the inline fields, keeping
+   `-f` beside it as the fragment alternative", and the first draft put
+   them the other way round.
+
+   *Resolution*: inline first, with `vinga reload` after it, and the
+   `-f` form below as what a longer entry wants. The paragraph
+   introducing the block no longer says the commands are run from a
+   checkout directory, which was true only of the spelling that is now
+   second.
