@@ -15,7 +15,7 @@ Conversational AI. [Sweded](https://youtu.be/i5Rd8x4OJoY).
 [![ESP-IDF v6.0.x](https://img.shields.io/badge/ESP--IDF-v6.0.x-E7352C)](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
-[What is it?](#what-is-vinga) • [Features](#features) • [Hardware](#hardware) • [Getting Started](#getting-started) • [Project Layout](#project-layout) • [Credits](#credits) • [Changelog](#changelog)
+[What is it?](#what-is-vinga) • [Features](#features) • [Hardware](#hardware) • [Getting Started](#getting-started) • [Documentation](#documentation) • [Credits](#credits) • [Changelog](#changelog)
 
 </div>
 
@@ -148,15 +148,16 @@ uvx --from "vinga-server[sim] @ git+https://github.com/rafacm/vinga#subdirectory
 
 Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](vinga-server/README.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
 
-## Project Layout
+## Documentation
 
-| Directory | What it is |
-| --- | --- |
-| [`vinga-server/`](vinga-server/) | The conversation server (Python): OTA/config endpoint, WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable providers, MCP tools, device authentication. Published as a multi-arch container image. |
-| [`vinga-esp32/`](vinga-esp32/) | Thin firmware customization: vinga server as default endpoint, English wake word, minimal UI changes. 🚧 |
-| [`deploy/`](deploy/) | What a deployment runs against its own Postgres before the server does: [`postgres-init.sql`](deploy/postgres-init.sql) creates the two schemas the server owns and the read-only role the conversation record is read through. The `docker-compose.yml` at the root runs the same file against the database it starts, whether that is the development one alone or the pair a trial runs. |
-| [`docs/`](docs/README.md) | The reference pages (the CLI, every configuration field, the API contract, the events), the per-board device guides, the architecture with its product promises and guidelines, and the record: research notes, plans, features and decisions. Its index says which class each page belongs to and therefore what it may claim. |
-| `vendor/` | Reference clones of the upstream projects (not committed). |
+[`docs/`](docs/README.md) is the index, and it says which class each page belongs to and therefore what that page may claim. Four doors into it:
+
+- [**system-overview.md**](docs/system-overview.md): one conversation turn end to end, from the wake word to the spoken reply, diagrammed and explained a step at a time.
+- [**devices/**](docs/devices/README.md): a guide per board. Which button starts a conversation, which wake word is enabled, what the display shows, and the serial procedures that get a server's address into a board.
+- [**reference/**](docs/reference/): generated from the code and diffed by CI, so it cannot come to describe a server this repository does not build. Every CLI command, every configuration field, the API contract, and the structured events.
+- [**architecture/**](docs/architecture/README.md): the promises vinga makes to whoever runs it, the guidelines that keep them, and the design and CLI standards every change is held to.
+
+The other two READMEs are pages in their own right: [`vinga-server/`](vinga-server/README.md) for every provider option, the security defaults, the container and onboarding a device, and [`vinga-esp32/`](vinga-esp32/README.md) for the firmware side.
 
 ## Credits
 
