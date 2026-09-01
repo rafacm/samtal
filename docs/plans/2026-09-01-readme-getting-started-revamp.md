@@ -182,6 +182,14 @@ fields, keeping `-f` beside it as the fragment alternative.
 
 ## Smaller decisions
 
+- **The Hardware introduction is rewritten, not just the table.** It
+  says today that these are the boards vinga "targets and tests", which
+  was true of a list whose rows were all attempted and is not true of a
+  list whose second and third rows are `planned 🚧`. The replacement
+  distinguishes the one board this project runs and tests from the ones
+  it targets, so the reordered table and the sentence above it say the
+  same thing. The status wording and the row order are applied to both
+  hardware tables, the root README's and `vinga-esp32/README.md`'s.
 - **The anchors `#getting-started` and `#credits` must survive.** Three
   pages link into them from outside: `vinga-server/README.md:2686`,
   `docs/reference/cli.md:138` and `docs/related-projects.md:177`. The
@@ -257,7 +265,7 @@ both milestones, with what each is for:
 | Early-development warning | Unchanged | |
 | What is vinga? | Diagram and its summary paragraph out, device photo in | M1 |
 | Features | Rewritten to the rule above | M1 |
-| Hardware | Table reordered, Touch-LCD-1.54 first | M1 |
+| Hardware | Introduction rescoped, table reordered, Touch-LCD-1.54 first | M1 |
 | Getting Started | Destination paragraph, Prerequisites, step 0, step 3 rewritten, simulator block out | M2 |
 | Project Layout | Removed | M1 |
 | Documentation | New, pointing into `docs/` | M1 |
@@ -396,7 +404,9 @@ orphaned diagram reference) came from grep rather than from reading.
 ## Milestones
 
 - [ ] **M1: the front page around Getting Started.** The hardware table
-      reordered to lead with the Touch-LCD-1.54; "What is vinga?" losing
+      reordered to lead with the Touch-LCD-1.54 and its introduction
+      rescoped to distinguish the tested board from the targeted ones;
+      "What is vinga?" losing
       the diagram and its summary paragraph and gaining the device
       photo; Features rewritten to the stated rule; Project Layout
       removed; a Documentation section added; Credits gaining its
@@ -542,6 +552,13 @@ faithful; resolutions appended per amendment.
    reorder. The plan should also rewrite that introduction to
    distinguish targets from the one tested board, and apply the
    `planned 🚧` status and the same row order to both hardware tables.
+
+   *Resolution*: adopted. Reordering the rows under a sentence that
+   claims all three are tested would have made the overclaim more
+   visible rather than less. The introduction is rewritten to
+   distinguish the one tested board from the targeted ones, and the
+   status wording and row order apply to both tables; M1's description
+   and the page layout both say so.
 
 9. **P2: the documented link-check command exits with a usage error.**
    `scripts/check_doc_links.py` requires a `<repo-root>` argument and
