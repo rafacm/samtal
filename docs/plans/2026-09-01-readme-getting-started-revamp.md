@@ -303,11 +303,19 @@ There is no unit test for prose. What stands in for one:
   to every check above.
 - **Every command in the rewritten section is executed**, in order, from
   an empty deployment, against a stack started under its own compose
-  project name so it collides with nothing already running. What the
-  server actually stored is read back with `vinga agent show assistant`
-  and `vinga provider show llm local`, and the reload's own listing is
-  the evidence the engines were built. A command that is not executed is
-  not published.
+  project name so it collides with nothing already running. A command
+  that is not executed is not published.
+- **The stored configuration is compared whole against the preset.**
+  Two entity reads would prove almost nothing: an omitted
+  `asr.whisper.vad_filter`, the wrong Piper voice, a malformed VAD entry
+  or wrong agent defaults all survive them, and a reload that succeeds
+  proves only that the stored world can be built, not that it is the one
+  the preset describes. So M2 takes `vinga export` after the sequence
+  and diffs the whole domain against
+  `vinga-server/examples/presets/local-stack.yaml`, expecting exactly
+  two differences: the `base_url` host, and the added `default_agent`.
+  Any third difference is a finding, not a rounding error, and the diff
+  goes in the implementation doc.
 - The board half (flash, NVS write, captive portal, speaking) is walked
   on the Touch-LCD-1.54 per the folded-in #308 obligation. Anything the
   implementing session cannot carry out stays an unchecked box on the PR
@@ -432,6 +440,11 @@ faithful; resolutions appended per amendment.
    values match the preset. The plan should compare the whole stored
    domain against `local-stack.yaml`, with only the intended `base_url`
    substitution and the added `default_agent`.
+
+   *Resolution*: adopted. The two entity reads are replaced by a whole
+   `vinga export` diffed against the preset, with exactly two expected
+   differences named and any third treated as a finding. The diff is
+   recorded in the implementation doc rather than summarized.
 
 5. **P2: both CI-lane claims omit the command-spellings manifest and
    are wrong.** The census stores file and line and fails on any drift.
