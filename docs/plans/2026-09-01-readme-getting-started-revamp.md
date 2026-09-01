@@ -135,12 +135,28 @@ Today's step 3 hands the reader a preset with `localhost` in it and a
 comment telling them to edit it.
 
 **Resolved: the README's command carries `host.docker.internal` from
-the start**, so there is no edit step and no trap to explain. This is
-sound on every platform because the committed compose file declares
+the start**, so there is no edit step and no trap to explain. The
+committed compose file declares
 `extra_hosts: - "host.docker.internal:host-gateway"`
-(`docker-compose.yml:208-215`), which is what makes the name resolve on
-Linux as well as on macOS. One sentence says why the name is what it is,
-for the reader running the server some other way.
+(`docker-compose.yml:208-215`), which is what gives the name an address
+to resolve to inside the container.
+
+**What that does not establish, and what the README may therefore
+claim.** Resolving a name is not reaching a service. On Linux the
+gateway address is only useful if Ollama is listening on an interface
+the container can reach, and Ollama binds loopback by default there, so
+the same line can resolve and still refuse the connection. The compose
+record that added the alias says plainly that nothing in it was
+exercised on Linux
+(`docs/features/2026-08-27-compose-quick-start.md`, "Not verified, and
+why").
+
+So the README states the tested path, macOS, as tested, and says in one
+sentence that a Linux host also needs Ollama listening beyond loopback,
+pointing at Ollama's own documentation for the variable rather than
+inventing a procedure this project has not run. The claim the front page
+makes is the claim this project can support, which is the whole reason
+the walkthrough is executed before it is published.
 
 ### Whether the generated CLI recipes are part of the `key=value` sweep
 
@@ -363,9 +379,12 @@ orphaned diagram reference) came from grep rather than from reading.
   that returns if the prose is edited later. Mitigation: M2 records the
   parse rule in the implementation doc, so the next editor meets the
   reason rather than rediscovering the symptom.
-- **`host.docker.internal` for a reader not using the compose file.**
-  Mitigation: one sentence naming why the name resolves, pointing at the
-  server README's container section for the general case.
+- **`host.docker.internal` for a reader not using the compose file, or
+  on Linux.** Mitigation: the scope limit above. One sentence names why
+  the name resolves and points at the server README's container section
+  for the general case; a second says a Linux host needs Ollama
+  listening beyond loopback. Neither claims a platform this project has
+  not run.
 - **Model download time on the first reload.** Several minutes on a cold
   data volume. Mitigation: the step says so, as it does today.
 - **The photo decision reversing after M1 merges.** Mitigation: the
@@ -509,6 +528,13 @@ faithful; resolutions appended per amendment.
    include and verify the platform-appropriate Ollama listener
    configuration rather than equating hostname resolution with service
    reachability.
+
+   *Resolution*: adopted. The plan distinguished the two after this
+   finding: `extra_hosts` buys an address, not a listening service, and
+   Ollama binds loopback on Linux, so the line can resolve and still
+   refuse. The README now claims the tested macOS path as tested and
+   carries one sentence about the Linux listener pointing at Ollama's
+   own documentation, rather than a procedure nobody here has run.
 
 8. **P2: the hardware section is reordered but not fully rescoped.**
    The introduction still says all three boards are ones vinga "targets
