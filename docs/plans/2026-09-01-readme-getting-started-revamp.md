@@ -246,7 +246,7 @@ both milestones, with what each is for:
 | Project Layout | Removed | M1 |
 | Documentation | New, pointing into `docs/` | M1 |
 | Credits | Gains the `docs/related-projects.md` link | M1 |
-| Changelog, License | Unchanged | |
+| Changelog, License | Unchanged (these are the README's own two closing sections, not `CHANGELOG.md`, which both milestones write to) | |
 
 `vinga-server/README.md` gains the inline spelling at its one short
 entity example in M2, and keeps `-f` beside it: showing the pair is what
@@ -282,6 +282,12 @@ would disagree about a field's meaning, the README links
   `uv run python -m tests.unit.test_command_spellings`, never by hand.
   This plan's own commit staled it, and it is regenerated in the
   amendment that records this.
+- **Both milestones write `CHANGELOG.md`**, a dated `### Changed`
+  entry each, because each merges on its own and each changes what a
+  reader of the front page meets. M1's entry is the front page's
+  structure and the hardware table's order; M2's is the Getting Started
+  section becoming a command sequence with its prerequisites. Neither
+  entry is a summary of the other.
 - **Both milestones therefore run both workflows.** The manifest lives
   under `vinga-server/**`, a server-workflow path, and the README and
   plan changes are docs-workflow paths, so both lanes run on both PRs
@@ -485,6 +491,14 @@ faithful; resolutions appended per amendment.
    The plan should include a dated entry in each milestone, or say how
    each independently releasable PR records its notable user-facing
    change.
+
+   *Resolution*: adopted, with one clarification: the page-layout row
+   the finding cites is about the README's own closing Changelog
+   section, which genuinely does not change, not about `CHANGELOG.md`.
+   The underlying gap was real, since the plan never said the file gets
+   an entry. Both milestones now write a dated `### Changed` entry of
+   their own, named in the documentation footprint, and the table row
+   says which Changelog it means.
 
 7. **P2: `host.docker.internal` resolution is overclaimed as
    cross-platform reachability.** The `extra_hosts` alias proves address
