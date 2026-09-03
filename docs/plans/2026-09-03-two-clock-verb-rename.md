@@ -258,7 +258,20 @@ change falsifies, found through the authority taxonomy in
   `config reload` respell to the new grammar.
 - **`vinga-server/examples/presets/local-stack.yaml` and
   `cloud-stack.yaml`**: header comments become
-  `vinga import -f <preset>` followed by `vinga apply`.
+  `vinga import -f <preset>` followed by `vinga apply`. The
+  domain-config recipe machinery moves with them:
+  `docgen._TOPIC_COMMANDS` learns `("import",)` as a preset-topic
+  command (an unknown line is a refusal there, not a drop), and the
+  recipe rendering keeps each preset's ordered import-then-apply pair
+  intact instead of deduplicating the two identical `vinga apply`
+  lines across presets into one (today's global `dict.fromkeys` would
+  leave one preset reading as never applied). The exact mechanism is
+  the implementer's; the behavior is pinned by a new docgen test that
+  every preset `import` line in the rendered recipes is immediately
+  followed by its `apply` line. The live lane keeps refusing to build
+  either stack: it exercises the store-only half by running `import`,
+  which after this rename IS the documented first command, so the
+  old divergence comment about `--no-reload` comes out.
 - **`docs/architecture/cli-guide.md`**: the flat-verbs census adds
   `import` and respells its example block; the `vinga reload`
   example under "The flat system verbs" becomes the new `apply` with
@@ -406,6 +419,13 @@ The plan should update the recipe machinery to recognize `import`,
 keep each preset's ordered pair intact, keep the live verification
 from building either stack, and pin that every preset import is
 immediately followed by an apply.
+
+*Resolution*: adopted. The presets bullet in the documentation
+footprint now carries the docgen recipe work: `("import",)` joins
+`_TOPIC_COMMANDS`, per-preset ordered pairs survive rendering, a new
+pin holds import-then-apply adjacency in the rendered recipes, and
+the live lane runs `import` (now exactly the documented command) and
+still builds neither stack.
 
 **3. P1: the respelling differential fails on the notice and export
 changes.** `test_config_cli_respelling.py` drives the current grammar
