@@ -221,6 +221,14 @@ the three untouched ones. It does and it does not, respectively.
 - **The simulator's two sentences** (`NOT_ADMITTED_YET` and the
   not-admitted listing) respell `{PROGRAM} reload` to
   `{PROGRAM} apply` with no other change.
+- **`DIFF_INTRO` explains the kept token with the new verb.** The
+  `applies` labels stay the API's (`reload`, `check-in`, `restart`),
+  and the intro's explanation of the `reload` label changes from "at
+  the next reload" to naming the command that crosses it: applied
+  when `vinga apply` next installs the stored configuration. A pin in
+  the rendering tests holds the intro to naming `vinga apply` beside
+  the `reload` label, since the existing assertions read only the
+  per-kind lines.
 
 ## Design footprint
 
@@ -533,6 +541,10 @@ command that no longer exists.** The token stays, but its
 operator-facing explanation must say the boundary is crossed by
 `vinga apply`, and the mapping deserves a pin; neither the footprint
 nor M1 names `DIFF_INTRO`.
+
+*Resolution*: adopted. A smaller-decisions bullet now specifies the
+`DIFF_INTRO` rewording (token kept, explanation names `vinga apply`)
+and the pin that holds the mapping.
 
 **7. P2: the notice tests do not enforce the shortening or the
 `vinga diff` pointer.** `boundaries()` passes any sentence containing
