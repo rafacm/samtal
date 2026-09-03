@@ -560,7 +560,6 @@ async def _build_composition(
         live=live,
         api=api_runtime,
     )
-    app.state.composition = composition
     # Connected last, and closed first on the way out so stdio child
     # processes do not outlive the server. A server that will not connect
     # only logs a warning. The stop is registered in front of the start
@@ -568,6 +567,17 @@ async def _build_composition(
     # what a stop is for.
     stack.push_async_callback(mcp_servers.stop_all)
     await mcp_servers.start_all()
+    # Installed last, and its removal registered in the same breath,
+    # after every other registration on this stack. The unwind is last in
+    # first out, so this is what runs first on the way out: the attribute
+    # is gone before any resource behind it is released, and nothing can
+    # read a composition whose parts are already closing. It is the
+    # discipline the API's installed runtime state already follows, now
+    # applied to the attribute the drain and the readiness probe read,
+    # which is what makes a served-then-torn-down application answer that
+    # it has no composition rather than that it is ready.
+    app.state.composition = composition
+    stack.callback(delattr, app.state, "composition")
     return composition
 
 

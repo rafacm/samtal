@@ -269,8 +269,10 @@ def test_a_store_that_records_nothing_today_still_serves_what_it_recorded(
         listing = client.get(
             f"{MOUNT_PATH}/sessions", headers={"Authorization": f"Bearer {TOKEN}"}
         ).json()
+        # Read while it serves, because that is when there is a
+        # composition to read: it belongs to the lifespan that built it.
+        assert app.state.composition.conversations is None, "this server records nothing"
 
-    assert app.state.composition.conversations is None, "this server records nothing"
     assert [item["session"] for item in listing["items"]] == ["session-01", "session-00"]
 
 
