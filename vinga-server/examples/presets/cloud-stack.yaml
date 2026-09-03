@@ -2,17 +2,19 @@
 # transcription, a cloud voice, and the one stage that is local
 # whatever else is, because the endpointer runs on every audio frame
 # before anything leaves the host. One document, written in one
-# transaction:
+# transaction and then installed on the running server:
 #
-#   vinga apply -f examples/presets/cloud-stack.yaml
+#   vinga import -f examples/presets/cloud-stack.yaml
+#   vinga apply
 #
-# Applying orders the writes for you. A write whose references do not
+# The import orders the writes for you. A write whose references do not
 # resolve is refused, and a document is refused whole rather than half
-# applied, so there is no creation order to get right here: the
+# written, so there is no creation order to get right here: the
 # providers, the defaults naming them and the agent inheriting them all
-# arrive together. Applying is additive and never deletes, so a section
+# arrive together. Importing is additive and never deletes, so a section
 # this document does not name is left alone and the same document twice
-# changes nothing.
+# changes nothing. Nothing the import wrote is serving until the apply
+# behind it installs it.
 #
 # No credential is written here, and none can be. Every key below names
 # the environment variable that holds the value, and the models refuse

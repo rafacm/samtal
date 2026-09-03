@@ -49,6 +49,7 @@ the edge cannot come back unnoticed.
 import json
 import re
 import textwrap
+from collections.abc import Mapping
 from dataclasses import dataclass
 from importlib import resources
 from importlib.resources.abc import Traversable
@@ -233,7 +234,7 @@ def reference() -> str:
         f"arrived. The API's own contract is [`{API_DOCUMENT}`]({API_DOCUMENT}),",
         "generated from its routes under the same regenerate-and-diff check as",
         "this document. A deployment whose server will not start is recovered by",
-        f"booting one on an empty database and applying a kept `{PROGRAM} export`,",
+        f"booting one on an empty database and importing a kept `{PROGRAM} export`,",
         "which the command reference writes out step by step.",
         "",
         "## How the pieces fit",
@@ -287,11 +288,11 @@ def reference() -> str:
         "agent applies at that device's next OTA check or connection, with",
         "nothing asked of the server at all. The exception ends where the agent",
         "does: a binding naming an agent this server is not serving resolves to",
-        "nothing until the reload that installs it.",
+        "nothing until the apply that installs it.",
         "",
-        "The reload is the second, and unlike the first it is asked for rather",
-        f"than noticed. `{PROGRAM} reload` has a running server re-read",
-        "the stored configuration and apply the whole domain half: the",
+        "The apply is the second, and unlike the first it is asked for rather",
+        f"than noticed. `{PROGRAM} apply` has a running server re-read",
+        "the stored configuration and install the whole domain half: the",
         "`providers` entries and the `mcp_servers` entries with the",
         "secrets stored on them, the",
         "agents' effective `mcp` grant lists, the prompt fragments, the agents",
@@ -304,7 +305,7 @@ def reference() -> str:
         "activation and cached for it, so a rewritten prompt, fragment or",
         "`instructions` reaches a conversation at its next activation, which is",
         "a new session or an agent switch. Filled pauses are synthesized during",
-        "the reload and bound by a conversation when it opens, so an edited",
+        "the apply and bound by a conversation when it opens, so an edited",
         "filler section reaches the next conversation and never changes what",
         "one already open is masking with. An agent is synthesized again when",
         "any field of its effective `filler` section moved or when the voice",
@@ -315,7 +316,7 @@ def reference() -> str:
         "rewriting the provider entry an agent speaks through is another,",
         "since that is the voice moving; an edit that reaches neither, a",
         "prompt or a fragment, is none. An agent whose",
-        "synthesis fails runs unmasked rather than making the reload refuse.",
+        "synthesis fails runs unmasked rather than making the apply refuse.",
         "",
         "The engines keep the same clock as the clips and cost what they cost.",
         "An entry whose definition and stored credential have not moved is",
@@ -325,7 +326,7 @@ def reference() -> str:
         "through the new one. An entry a conversation is still speaking through",
         "is released when that conversation ends, so applying a change to a",
         "local model briefly holds two of it, and an entry that will not build",
-        "refuses the reload with nothing changed.",
+        "refuses the apply with nothing changed.",
         "",
         "The agent set moves with the rest. An agent the store has added is",
         "one a device can be bound to and reach at its next check-in, with no",
@@ -333,7 +334,7 @@ def reference() -> str:
         "one no session can be opened as from the moment the apply answers,",
         "while a conversation already talking as it finishes on the world it",
         "was built from and is served that world's prompt to the end. The one",
-        "thing an agent carries that a reload does not move is its memory,",
+        "thing an agent carries that an apply does not move is its memory,",
         "which is keyed by its name and stays under the name it was stored",
         "under.",
         "",
@@ -651,9 +652,10 @@ def _sentence(description: str | None) -> str:
 # A recipe is the sequence of commands one topic is written with, and
 # every line of one is read out of an example file rather than typed
 # beside it. The files already name their own commands: each fragment
-# quotes the `set` that installs it, each preset quotes the `apply` that
-# writes it whole, and the ones that can hold a credential quote the
-# `secret set` that fills the slot. Those quoted lines are the recipes,
+# quotes the `set` that installs it, each preset quotes the `import`
+# that writes it whole and the `apply` that installs what it wrote, and
+# the ones that can hold a credential quote the `secret set` that fills
+# the slot. Those quoted lines are the recipes,
 # collected and grouped, so a recipe cannot come to name a file that
 # moved or an entity name the file no longer uses.
 #
@@ -685,7 +687,7 @@ def _example_dir() -> Traversable:
 
 EXAMPLE_DIR: Traversable = _example_dir()
 
-# The subdirectory holding complete apply documents rather than one
+# The subdirectory holding complete import documents rather than one
 # entity's fragment. A tier of its own: a preset is owned by the shape
 # of the document it is, not by any one descriptor, which is why no
 # entity claims one.
@@ -745,7 +747,7 @@ _PRESET_TOPIC = (
 
 _DEVICE_TOPIC = (
     "Which board reaches which agent, which is the one thing a preset cannot know. A "
-    "binding applies at that device's next check-in rather than at a reload."
+    "binding applies at that device's next check-in rather than at an apply."
 )
 
 _SECRET_TOPIC = (
@@ -766,6 +768,7 @@ _SECRET_TOPIC = (
 # prefix, because the tree is not one depth and `device pending claim`
 # and `device bind` are the same topic reached at two.
 _TOPIC_COMMANDS: dict[tuple[str, ...], str] = {
+    ("import",): PRESET_DIR,
     ("apply",): PRESET_DIR,
     ("device", "bind"): "devices",
     ("device", "pending", "claim"): "devices",
@@ -790,8 +793,9 @@ class Recipe:
     # What the topic is, in a paragraph.
     purpose: str
 
-    # The command lines, program name and all, deduplicated and in the
-    # order the files quote them.
+    # The command lines, program name and all, in the order the files
+    # quote them, with a sequence a second file repeats verbatim left
+    # out: see `_steps`.
     commands: tuple[str, ...]
 
 
@@ -813,19 +817,44 @@ def recipes() -> tuple[Recipe, ...]:
     region and turns the drift check red on an unrelated change.
     """
     quoted = _quoted(PROGRAM)
-    collected: dict[str, list[str]] = {}
+    collected: dict[str, dict[str, list[str]]] = {}
     for source, argv in quoted:
-        collected.setdefault(_topic(source, argv), []).append(f"{PROGRAM} {argv}")
+        topic = collected.setdefault(_topic(source, argv), {})
+        topic.setdefault(source.name, []).append(f"{PROGRAM} {argv}")
     return tuple(
         Recipe(
             title=title,
             location=location,
             purpose=purpose,
-            commands=tuple(dict.fromkeys(collected.get(key, ()))),
+            commands=_steps(collected.get(key, {})),
         )
         for key, title, location, purpose in _TOPICS
         if collected.get(key)
     )
+
+
+def _steps(quoted: Mapping[str, list[str]]) -> tuple[str, ...]:
+    """One topic's command lines, given what each file quoted for it.
+
+    A file's lines are one sequence rather than a bag of commands, and
+    that is the whole of this rule: a sequence already published is not
+    published again, and a sequence that differs anywhere is published
+    whole. Both presets quote the same two device commands, so the
+    devices recipe says them once; each preset quotes its own import
+    followed by the same bare `apply`, and both pairs survive, because
+    the pair is what differs rather than either line of it.
+
+    Deduplicating line by line is what this replaced, and it was wrong
+    in exactly one place, which is the place this grammar created: two
+    identical trailing `apply` lines collapsed into one, leaving the
+    second preset reading as a document nothing ever installed.
+    """
+    published: list[tuple[str, ...]] = []
+    for steps in quoted.values():
+        sequence = tuple(steps)
+        if sequence not in published:
+            published.append(sequence)
+    return tuple(step for sequence in published for step in sequence)
 
 
 # The topics, in the order a reader meets them and the order the whole
