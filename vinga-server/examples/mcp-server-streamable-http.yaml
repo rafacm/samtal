@@ -59,7 +59,7 @@ instructions: |
 # `vinga agent preview <agent>` under its own provenance, so you
 # can see whose words are in the prompt and what they cost.
 
-# The handshake channel. Turning this on applies at the next reload
+# The handshake channel. Turning this on applies at the next apply
 # without dropping the connection, since what the server shipped was
 # captured when it connected.
 use_server_instructions: true
@@ -69,7 +69,7 @@ use_server_instructions: true
 # user-controlled templates and a server may publish dozens, so name the
 # ones that are standing guidance. They are injected in this order,
 # after everything above. Editing this list changes what a connect
-# fetches, so a reload restarts the connection to apply it.
+# fetches, so an apply restarts the connection to install it.
 #
 # A name this server does not list, a prompt that needs arguments, and
 # one that renders anything but text are each skipped with a warning
