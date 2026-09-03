@@ -1035,6 +1035,30 @@ class RejectedAtCapacity(Variant):
 
 
 @dataclass(frozen=True)
+class RejectedWhileDraining(Variant):
+    """The same refusal as the one above, from the other cause.
+
+    Told apart because the two send whoever reads them to different
+    places: a server at capacity is a sizing question, and a server that
+    is shutting down is a redeploy that will be over in a moment. Said as
+    one word, every rolling restart read as a load problem, at exactly
+    the moment `/readyz` was answering `draining`.
+    """
+
+    CHANNEL: ClassVar[str] = WS_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "refused a websocket handshake from %s: the server is shutting down"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("shown",)
+
+    device: DeviceId | None
+    session: SessionId
+    reason: Rejection = value(fixed=Rejection.DRAINING)
+    shown: DeviceOrUnidentified = value(carried=False)
+
+
+@dataclass(frozen=True)
 class SessionOpen(Variant):
     """A conversation starts."""
 
@@ -1753,6 +1777,7 @@ SESSION_REJECTED = declare(
         RejectedAgentNotLoaded,
         RejectedNoAgent,
         RejectedAtCapacity,
+        RejectedWhileDraining,
     ),
 )
 
@@ -3372,6 +3397,7 @@ __all__ = [
     "RejectedAtCapacity",
     "RejectedBadDeviceId",
     "RejectedNoAgent",
+    "RejectedWhileDraining",
     "Replied",
     "SERVER_CHANNELS",
     "SESSION_CHANNEL",

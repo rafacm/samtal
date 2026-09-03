@@ -1056,12 +1056,12 @@ docs/reference/domain-config.md:487  generated  vinga default-agent set
 docs/reference/domain-config.md:490  generated  vinga default-agent clear
 docs/reference/domain-config.md:500  generated  vinga show
 docs/reference/events.md:389  generated  vinga-server config apply
-docs/reference/events.md:1134  generated  vinga-server config device pending claim
-docs/reference/events.md:1159  generated  vinga-server config apply
-docs/reference/events.md:1248  generated  vinga-server config device bind
-docs/reference/events.md:1405  generated  vinga-server config ota-url
-docs/reference/events.md:1429  generated  vinga-server config ota-url
-docs/reference/events.md:1448  generated  vinga-server config ota-url
+docs/reference/events.md:1151  generated  vinga-server config device pending claim
+docs/reference/events.md:1176  generated  vinga-server config apply
+docs/reference/events.md:1265  generated  vinga-server config device bind
+docs/reference/events.md:1422  generated  vinga-server config ota-url
+docs/reference/events.md:1446  generated  vinga-server config ota-url
+docs/reference/events.md:1465  generated  vinga-server config ota-url
 docs/related-projects.md:122  respell  vinga provider
 docs/system-overview.md:32  respell  vinga conversation
 docs/xiaozhi-notes.md:256  respell  config device pending claim
@@ -1255,12 +1255,12 @@ vinga-server/src/vinga_server/doctor.py:183  respell  vinga-server config ota-ur
 vinga-server/src/vinga_server/doctor.py:191  respell  config ota-url
 vinga-server/src/vinga_server/doctor.py:310  respell  vinga simulator
 vinga-server/src/vinga_server/events/catalog.py:987  respell  vinga-server config apply
-vinga-server/src/vinga_server/events/catalog.py:1900  respell  vinga-server config device pending claim
-vinga-server/src/vinga_server/events/catalog.py:1946  respell  vinga-server config apply
-vinga-server/src/vinga_server/events/catalog.py:2035  respell  vinga-server config device bind
-vinga-server/src/vinga_server/events/catalog.py:2184  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:2213  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:2229  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:1925  respell  vinga-server config device pending claim
+vinga-server/src/vinga_server/events/catalog.py:1971  respell  vinga-server config apply
+vinga-server/src/vinga_server/events/catalog.py:2060  respell  vinga-server config device bind
+vinga-server/src/vinga_server/events/catalog.py:2209  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:2238  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:2254  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/memory/__init__.py:35  respell  vinga memory
 vinga-server/src/vinga_server/onboarding/__init__.py:30  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:37  respell  vinga-server config ota-url

@@ -1012,6 +1012,10 @@ class Rejection(StrEnum):
     AGENT_NOT_LOADED = "agent_not_loaded"
     NO_AGENT = "no_agent"
     CAPACITY = "capacity"
+    # The other way the door can be shut, and a separate word because it
+    # sends a reader somewhere else: capacity is a sizing question, and
+    # this is a redeploy that will be over in a moment.
+    DRAINING = "draining"
 
 
 class Suppression(StrEnum):
