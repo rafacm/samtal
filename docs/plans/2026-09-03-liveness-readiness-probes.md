@@ -104,27 +104,36 @@ zero-drain configuration, which never calls `drain()` at all. The
 registry never clears the flag, so readiness stays false for the
 rest of the process's life.
 
-**A full server stays ready.** `try_add` also refuses at
-`max_sessions`, and readiness deliberately does not reflect that.
-Capacity refusal is a per-connection, instantly recoverable answer
-(the refused device retries on its own), and a readiness that
-flapped on a session count would make an orchestrator pull the pod,
-and with it the configuration API, out of traffic because
-conversations are going well. The issue's criteria enumerate
-lifecycle states (startup, serving, drain, shutdown) and dependency
-failures, not capacity, and the documented semantics say
-"may admit" means "is not draining and is past startup" so the
-choice is visible rather than implied.
+**A full server is not ready, and one classifier says so.** The
+issue's settled definition is "may the process admit a new device
+conversation", and a process at `max_sessions` may not, so
+readiness reflects capacity as well as lifecycle. The registry,
+which owns both facts, gains a public `admission` property
+answering one literal from a closed set: `admitting`, `draining`,
+or `full`, with `draining` winning when both hold because it is the
+terminal one. `try_add` refuses exactly when `admission` is not
+`admitting`, so the predicate has one home and the probe cannot
+disagree with the door. Readiness at capacity dips and recovers as
+slots free; the README says so, and says why it is correct rather
+than a flap: a refused device retries on its own, and an
+orchestrator withholding new traffic from a full pod is what
+readiness is for. The cost is documented beside it: under an
+orchestrator that routes by readiness, a full pod's configuration
+API leaves the traffic set too, which is worth knowing when sizing
+`max_sessions`.
 
-**The response is a closed set with the decision at the read.**
-`/readyz` answers `200 {"status": "ok"}` when ready and
-`503 {"status": "starting"}` or `503 {"status": "draining"}` when
-not. Three literals, chosen at the one site that classifies (the
-handler reading composition presence, then the flag), no message
-text, no provider names, no dependency detail; there is nothing in
-the body a probe log could leak. `starting` versus `draining` is
-worth distinguishing because they are read at opposite ends of a
-process's life by an operator debugging opposite problems.
+**The response is a closed set, classified where each fact lives.**
+`/readyz` answers `200 {"status": "ok"}` when ready and 503 with
+`{"status": "starting"}`, `{"status": "draining"}` or
+`{"status": "full"}` when not. Two decision sites, each owning its
+fact: the handler classifies composition presence, and the
+registry's `admission` property classifies its own three states,
+which the handler maps one to one (`admitting` to `ok`). Literals
+only, no message text, no provider names, no dependency detail;
+there is nothing in the body a probe log could leak. The non-ready
+states are worth distinguishing because they are read by operators
+debugging different problems at different ends of a process's
+life.
 
 **Provider and MCP state stay out of readiness by construction.**
 The handler consults composition presence and one registry flag,
@@ -204,6 +213,11 @@ restated.
   already exercises `try_add` refusing under drain; it gains the
   assertion that `draining` reads true from `drain`'s entry,
   before the grace period, if it does not already pin that.
+- **Capacity**: filled to `max_sessions` through `try_add`, the
+  registry answers `admission == "full"` and `/readyz` answers 503
+  `full`; after `remove` frees a slot, both read ready again. A
+  draining registry at capacity answers `draining`, pinning the
+  precedence.
 - **Shutdown**: `tests/integration/test_drain.py` already proves
   the drain-then-exit order and stays untouched; readiness during
   shutdown is the draining state already tested above, and past
@@ -298,6 +312,15 @@ endorsed the no-new-module layout explicitly.
    use the same predicate, add a closed literal for the capacity
    state, and test readiness false at the cap and true again when a
    slot frees.
+
+   *Resolution*: accepted in full. The registry gains a public
+   `admission` property answering `admitting`, `draining` or `full`
+   (draining wins), `try_add` refuses exactly when it is not
+   `admitting`, and `/readyz` maps the three one to one, adding
+   `full` to the closed status set. The capacity section now argues
+   for the dip-and-recover behavior instead of against it, names
+   the documented cost, and the test plan pins the cap, the
+   recovery, and the draining-over-full precedence.
 
 3. **P2: composition presence is not an honest lifespan-state
    seam.** `_build_composition` assigns `app.state.composition` and
