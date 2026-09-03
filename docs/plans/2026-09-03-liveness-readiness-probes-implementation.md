@@ -91,6 +91,15 @@ hand; `docs/reference/api-openapi.json` is untouched, which is the
 plan's claim that a route on the server application is outside the
 configuration API's document.
 
+The two claims in that paragraph did not survive the review round below,
+and are corrected here rather than left standing. `server.ota_path` now
+refuses the two probe paths (finding 4), which is a schema behavior
+change even though no key moved; `config.example.yaml` still does not
+change, because its `ota_path` comment claims no path is allowed and
+names neither of the reservations that already existed.
+`docs/reference/events.md` changed too, through its own generator, for
+the new rejection variant (finding 5).
+
 ### Deviations from the plan
 
 None in substance. Two decisions the plan left to implementation:
@@ -153,4 +162,126 @@ started under a project name of this session's own.
 - [x] `uv run pytest tests/unit -q -n auto --dist loadfile`: 4955
   passed, 19 skipped, run after the regeneration.
 - [x] `uv run pytest tests/integration -q`: 236 passed.
+- [ ] The smoke lane and the image build: CI's, not run here.
+
+### PR review round
+
+External review of the branch as pushed to PR #373, at `9b800ab3`
+against `origin/main`: backend codex (codex-cli 0.153.0), model
+gpt-5.6-sol, 2026-09-03, runtime 9m52s. Sol rather than the fast tier
+because the diff changes what a supervisor reads and when a device is
+turned away. Five findings, three P1 and two P2, verdict as received:
+mergeable after the listed fixes. All five were confirmed against the
+sources before being fixed, three of them by running the defect; none
+rejected.
+
+Two of the three P1s are the same shape, and it is worth naming: **a
+decision and the act it authorizes were separated by something that can
+run in between.** In `try_add` it was a signal handler between two
+bytecodes; in `handle_exit` it was a whole lifespan between the signal
+and the registry it would go on to publish. The latch M1 added closed
+the window the plan named and left both of these, because both are
+windows the plan did not name.
+
+1. **P1: the trailing-slash redirect quotes the request back.** The
+   server application keeps FastAPI's slash redirects, so
+   `GET /readyz/?token=x` answers 307 with the query and the Host copied
+   into `Location`. The repository already turned redirects off in
+   `config/api.py` for exactly this leak. Fix: answer the trailing-slash
+   spelling without a redirect, treat both probes the same way, and add
+   a sentinel test over every surface.
+
+   *Resolution* (`326ed303`): confirmed by running it, `/healthz/`
+   included, which had leaked since that endpoint existed. Both probes
+   now register both spellings through `ota.spellings`, the helper the
+   device-facing routes already answer their two spellings with, so
+   there is no `Location` to carry anything. Scoped to the probes rather
+   than turning `redirect_slashes` off for the whole application: the
+   websocket path has one spelling and is not this milestone's to
+   change. The sentinel test asks both spellings of both probes with a
+   credential-shaped query value and hunts it in the headers, the body,
+   the log in each rendering a deployment keeps, and the live stream.
+
+2. **P1: admission was a check and then an act.** `try_add` classified
+   and then mutated, and `stop_admitting` runs in a signal handler, so a
+   SIGTERM landing between the two admitted a conversation to a process
+   already shutting down. Fix: make admission linearizable against the
+   latch, with a deterministic test that fires the latch in the window.
+
+   *Resolution* (`0eb6feda`): confirmed by reading and then by test. The
+   operation is `admit` now: it reads the flag again after the insertion
+   and gives back the slot it took when the signal won, keeping a slot
+   an earlier call took, because a conversation admitted before the
+   shutdown is one the drain has to reach. It answers the classifier's
+   own word rather than a boolean, which is what finding 5 needed. The
+   test occupies the window through a test-local subclass whose
+   classification fires the latch, and fails with the recheck removed.
+
+3. **P1: a signal during a build was forgotten.** `handle_exit` passed a
+   signal straight to uvicorn when there was no composition, and uvicorn
+   runs the lifespan's startup first, binds its listener the moment it
+   returns, and only then notices it was told to stop. A build a
+   provider held for minutes therefore published a fresh admitting
+   registry after the shutdown had begun. Fix: persist the intent where
+   both sides meet and apply it at publication.
+
+   *Resolution* (`c91a7479`): confirmed in uvicorn's own `startup` and
+   `_serve`, which bind before the `should_exit` check. The application
+   gained `stop_admitting(app)`: it records the intent on the seed the
+   build reads and shuts a composition that is already serving, and
+   `_build_composition` applies the intent in the same step as the
+   publication, with no await between them, so no interleaving is left
+   open. `DrainingServer` lost its own helper. The test signals the
+   server before entering the lifespan and reads the published
+   registry; it fails with the application half removed.
+
+4. **P2: `ota_path` accepted a probe path.** The probes register before
+   the OTA router, so an endpoint configured at `/readyz/` or
+   `/healthz/` would never be reached, and after finding 1 both
+   spellings answer the probe. Fix: reserve them in the validator, with
+   refusal tests, and correct the implementation doc's no-schema-change
+   claim.
+
+   *Resolution* (`a1ff404a`): confirmed. The two paths are constants in
+   `config/models.py`, `app.py` registers the routes from them, and the
+   validator refuses them beside the API mount and the onboarding
+   prefix, naming the rule and not the value the way those two do. The
+   claim above is corrected in place. `config.example.yaml` needs no
+   edit: its `ota_path` comment claims no path is allowed and names
+   neither existing reservation either.
+
+5. **P2: a drain's refusals were reported as capacity.** `ws.py` emitted
+   `RejectedAtCapacity` for both refusals, so every rolling restart read
+   as a load problem at exactly the moment `/readyz` said `draining`.
+   Fix: emit a distinct variant, regenerate the event reference through
+   its generator, and follow the trails a new variant has to update.
+
+   *Resolution* (`12b12c2f`): confirmed. `RejectedWhileDraining` joins
+   the `session_rejected` declaration with a `draining` token in the
+   rejection set and a sentence naming the shutdown, and the endpoint
+   reports the word `admit` returned rather than guessing. The trails,
+   followed rather than edited by hand: `docs/reference/events.md`
+   regenerated with `uv run vinga-server events reference`, a driver in
+   `tests/tools/event_baseline.py` that produces the new variant (the
+   catalog is what makes the driver suite exhaustive, so a variant no
+   driver produces fails), and the baseline's carried-shape map and path
+   count. A handshake refused after `stop_admitting` is pinned to the
+   new reason and sentence.
+
+### Verification after the review round
+
+Run from `vinga-server/`, against a compose Postgres of this session's
+own, torn down afterwards.
+
+- [x] `uv run ruff check .`: passed.
+- [x] `uv run mypy`: passed (the typed events package, which the new
+  variant is in).
+- [x] `uv run pytest tests/unit -q`: 4964 passed, 19 skipped.
+- [x] `uv run pytest tests/unit -q -n auto --dist loadfile`: 4964
+  passed, 19 skipped.
+- [x] `uv run pytest tests/integration -q`: 236 passed.
+- [x] `python3 scripts/check_doc_links.py .`: 178 files, 0 failures.
+- [x] `uv run pytest tests/unit/test_command_spellings.py -q`: passed,
+  the manifest regenerated through its generator after the document
+  edits.
 - [ ] The smoke lane and the image build: CI's, not run here.
