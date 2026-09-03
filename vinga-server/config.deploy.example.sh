@@ -38,21 +38,20 @@
 # reach it over TLS, through a tunnel that terminates TLS, or on
 # loopback from inside the container.
 #
-# This stages the document rather than installing it, which is what
-# --no-reload says. An apply installs what it wrote by default, and
-# installing this one builds its engines: the ASR weights below are a
-# download of minutes on a first run, and a deployment chooses when to
-# spend that rather than having a seeding script choose. So the last
-# step is yours:
+# This writes the document to the store and stops there, which is the
+# whole of what an import does. Installing it builds its engines: the
+# ASR weights below are a download of minutes on a first run, and a
+# deployment chooses when to spend that rather than having a seeding
+# script choose. So the last step is yours:
 #
-#   vinga-server config reload
+#   vinga-server config apply
 #
 # which reaches the running server with no restart and no conversation
 # dropped; the device binding at the foot applies at that board's next
 # check-in without being asked at all.
 set -eu
 
-vinga-server config apply --no-reload -f - <<'YAML'
+vinga-server config import -f - <<'YAML'
 providers:
   llm:
     claude:

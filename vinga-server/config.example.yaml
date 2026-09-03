@@ -12,9 +12,10 @@
 # (providers, mcp_servers, prompt_fragments, agent_defaults, agents,
 # devices, default_agent), lives in the Postgres database
 # server.database names and is written with the config commands. A whole
-# deployment is one document and one command:
+# deployment is one document, imported and then installed:
 #
-#   vinga-server config apply -f examples/presets/local-stack.yaml
+#   vinga-server config import -f examples/presets/local-stack.yaml
+#   vinga-server config apply
 #   vinga-server config default-agent set assistant
 #   vinga-server config list
 #
@@ -26,13 +27,13 @@
 #
 # Those commands write through the configuration API described under
 # server.api below, so they need a running server, and an empty database
-# is a valid state to run one on. Applying orders the writes for you: one
-# transaction over the whole document, refused whole if anything in it
-# will not resolve, so there is no creation order to get right.
+# is a valid state to run one on. Importing orders the writes for you:
+# one transaction over the whole document, refused whole if anything in
+# it will not resolve, so there is no creation order to get right.
 # A server that will not start is recovered by booting one on an empty
-# database, staging a kept `vinga-server config export` with
-# `vinga-server config apply --no-reload`, re-entering the credentials
-# that export listed, and then `vinga-server config reload`.
+# database, importing a kept `vinga-server config export` with
+# `vinga-server config import`, re-entering the credentials that export
+# listed, and then `vinga-server config apply`.
 #
 # Every field of it is documented in docs/reference/domain-config.md
 # (generated from the models, also available as `vinga-server config
@@ -207,7 +208,7 @@ server:
   # configuration is a boot-time snapshot, so restart the server after
   # an edit. Two exceptions, and each write says which case it is in: a
   # running server re-reads device bindings as a device asks for them,
-  # and `vinga-server config reload` has it re-read the MCP servers and
+  # and `vinga-server config apply` has it re-read the MCP servers and
   # the agents' grant lists without a restart.
   # database:
   #   host: 127.0.0.1

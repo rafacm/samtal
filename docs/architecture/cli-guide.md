@@ -295,18 +295,19 @@ deployment, or on nothing stored at all. Those stay at the top level.
 
 ```bash
 vinga info
-vinga apply -f deployment.yaml
+vinga import -f deployment.yaml
 vinga export > deployment.yaml
-vinga reload
+vinga diff
+vinga apply
 vinga schema provider asr faster_whisper
 vinga ota-url
 ```
 
-Two groups, for two reasons. `info`, `apply`, `export`, `reload` and the
-reserved `diff` (#193) act on the configuration as a whole: their
-subject is the deployment, and inventing a noun to put in front of them
-would be inventing a word (`deployment apply`) that names the thing the
-program is already about. `schema`, `reference`, `openapi`,
+Two groups, for two reasons. `info`, `import`, `export`, `diff` and
+`apply` act on the configuration as a whole: their subject is the
+deployment, and inventing a noun to put in front of them would be
+inventing a word (`deployment import`) that names the thing the program
+is already about. `schema`, `reference`, `openapi`,
 `cli-reference` and `ota-url` render a document out of the models, the
 routes, the command tree or the file half, and reach no database, no
 key and no server at all; they have no stored subject to be a verb of.
@@ -324,13 +325,13 @@ A verb that has both a whole-deployment form and a per-entity form
 keeps the flat spelling for the whole and moves under the noun for the
 one: `vinga export` beside `vinga provider export llm local`.
 
-**Example.** `vinga reload`. It asks the running server to re-read the
-store. There is no noun because it does not reload a provider, it
-reloads the server.
+**Example.** `vinga apply`. It installs the stored configuration on the
+running server. There is no noun because it does not apply a provider,
+it applies the deployment.
 
-**Counterexample, constructed.** `vinga config apply`, adding a noun for
-symmetry with the noun-verb commands. It reads as though there were some
-other kind of apply, and there is not.
+**Counterexample, constructed.** `vinga config import`, adding a noun
+for symmetry with the noun-verb commands. It reads as though there were
+some other kind of import, and there is not.
 
 **Counterexample, historical.** `vinga-server config status`, flat until
 #341 and quoted in the spelling it had while it was. Its subject was
@@ -610,50 +611,64 @@ different clocks, and a command that changed the first says which.
 
 **Example.** Five sentences in `config/entities.py`, one per answer,
 each a fact of what was written rather than of the command that wrote
-it. `RELOAD_NOTICE` names three clocks rather than one: an in-progress
-conversation meets new tools at its next utterance and new prompt text
-at its next activation, while a new voice reaches the next
-conversation. A sentence saying "immediately" would have been wrong
-about all three. `BINDING_UNSERVED_NOTICE` exists because a binding
+it. `APPLY_NOTICE` names the boundary and the two commands either side
+of it: `vinga apply` installs what is stored, and `vinga diff` lists
+what is pending. `BINDING_UNSERVED_NOTICE` exists because a binding
 whose agent this server is not serving yet is true two ways at once,
-and neither of the other sentences would have been honest. `apply`
+and neither of the other sentences would have been honest. `import`
 prints each distinct notice once, because a document that wrote nine
-entities is waiting on one reload, not nine.
+entities is waiting on one apply, not nine.
+
+**The sentence is as short as the boundary allows** (#371). The three
+clocks an installed change converges at (tools at the next utterance,
+prompt text at the next activation, voice at the next conversation) are
+true and are published, in `vinga apply --help` and in the domain-config
+reference. They are not in the per-write sentence, because that sentence
+is printed once per entry of every domain-half write: a Quick Start run
+printed it six times, and a paragraph worth reading once is a wall of
+text at that count. What a per-write notice carries is what the operator
+acts on now.
 
 **Counterexample, constructed.** A single "written" line. The operator
 finds out at the next field test that the board is still speaking in the
 old voice, and has no way to know whether that is a bug or a boundary.
 
-**A verb does what its name says, and the exception is the one that is
-spelled** (#341). `apply` used to write the document and stop, so every
-operator learned to type `reload` after it and the ones who did not left
-a deployment serving what it had before. Applying a configuration means
-installing it, so the verb does both, and the other thing (write it now,
-install it later) is `--no-reload`, named for what it turns off. The
-rule this is an instance of: when a verb's plain meaning and what it
-does come apart, move the command rather than the reader, and give the
-narrower behavior a flag rather than giving the wider one a second verb.
+**A verb does what its name says, and the rule has two merged
+instances** (#341, #371). The rule: when a verb's plain meaning and what
+it does come apart, move the command rather than the reader.
 
-Two consequences follow, and both are the practice above applied to a
-command that is now two acts. The write's boundary notice is printed
-under `--no-reload` and dropped under the default, because the reload's
-own listing is on the next line and a sentence telling the operator to
-run it would be telling them to run what they are reading. And an apply
-whose reload did not answer says what it saw and no more: that the apply
-was answered and the store says what the document says, entry by entry
-above. It does not say "stored but not applied", because it cannot know:
-a 409 means another reload is running and re-read the store on one side
-or the other of this commit, and a transport failure is ambiguous
-because a reload outlives the connection that asked for it. Nor does it
-say the document was written, which is false of the two applies in three
-that write nothing, an all-unchanged one and an empty one. So the
-sentence sends the operator to `vinga diff`, which does know, and then
-to `vinga reload`.
+**The first instance** (#341). `apply` wrote the document and stopped,
+so every operator learned to type `reload` after it and the ones who did
+not left a deployment serving what it had before. The reading taken then
+was that applying a configuration means installing it, so the verb was
+widened to do both and the narrower behavior became a flag,
+`--no-reload`, named for what it turned off. The half of the rule that
+sentence added, give the narrower behavior a flag rather than giving the
+wider one a second verb, is the half the second instance retired.
 
-**Counterexample, merged and retired.** `apply` as a pure write. It read
-as the whole of the operation to everybody who typed it, which is what
-made "and now reload" a step people were told about rather than one they
-could infer.
+**The second instance** (#371). A verb doing two acts is a verb that has
+to be described twice, and every consequence #341 derived was a
+consequence of the second act: a rendering that dropped the boundary
+notice because the install's listing followed it, a sentence explaining
+what an answered write behind an unanswered install may honestly claim,
+and a flag to turn the second act off. So the pair was cut the other
+way. `apply` narrowed to the act it names, which is installing what is
+stored, and the write it used to do first moved to a verb whose plain
+meaning is exactly that write: `import`. `--no-reload` was deleted
+rather than renamed, because a write-only `import` needs no flag to stay
+write-only. The names now pair: `import`/`export` are the store's
+document I/O, `diff`/`apply` are the store-versus-running-server
+reconciliation.
+
+What both instances share is the move: the command changed so that the
+reader would not have to. What #371 adds to the rule is that a flag is
+the answer only when the two behaviors are one act with a narrower
+scope. When they are two acts, they are two commands.
+
+**Counterexample, merged and retired.** `apply` as write-then-install,
+under one name. It read as one operation, and it needed a flag, a second
+rendering and a sentence about a half-finished pair to stay honest about
+being two.
 
 ### A credential is never an argument, and never travels in a read
 
@@ -732,9 +747,9 @@ is blocks instead, because a column holding a list is a column that
 wraps and stops being one line per entry.
 
 **Example.** `vinga export > deployment.yaml` followed by
-`vinga apply --no-reload -f deployment.yaml`, the `secret set` commands
-the export listed, and `vinga reload` reproduces a deployment; the
-staging is what keeps the engines from being built before their
+`vinga import -f deployment.yaml`, the `secret set` commands the export
+listed, and `vinga apply` reproduces a deployment; the import writing
+and stopping is what keeps the engines from being built before their
 credentials are back. `pending`
 prints five short columns, header included, because the question it
 answers ("which of these boards is the one I am holding") is read
@@ -815,8 +830,8 @@ anything a document is generated from. All four audited guides recommend
 some of those, and each is rejected in
 [the audit](cli-guide-audit.md) for this one reason.
 
-**Owed.** The progress line for the two long waits (`apply`, which has
-no bound at all, and `reload`, which has a sixty-second one) is the
+**Owed.** The progress line for the two long waits (`import`, which has
+no bound at all, and `apply`, which has a sixty-second one) is the
 licensed kind: on stderr, only when stderr is a terminal, and carrying
 nothing the run does not report anyway. Nothing that lands in a file,
 nothing that reaches a redirected stream.
@@ -883,19 +898,19 @@ server that is not there must say so quickly. The read timeout is
 thirty, chosen with margin above the database's ten-second busy
 timeout, so that the retryable 409 the server answers with survives as
 an answer instead of becoming a client-side transport error that says
-nothing about what happened. `reload` gets sixty, derived from the
-server's own envelope. `apply` gets none, and the comment says why: the
+nothing about what happened. `apply` gets sixty, derived from the
+server's own envelope. `import` gets none, and the comment says why: the
 transaction validates the whole resulting configuration, whose size
 nothing about the request bounds, so no finite number can be derived
 that would not sometimes expire on a transaction the server goes on to
 commit, which is the one outcome every timeout here exists to prevent.
 
 A bound belongs to the endpoint rather than to the command that reached
-it, which is what a two-act command makes visible: the write of a
-default `apply` waits without a bound and the reload behind it waits the
-same sixty `reload` does, on its own request. Neither inherits the
-other, so the unbounded one does not quietly become this command's
-answer to a reload that stopped answering.
+it, and the two above are what make that readable: `import` waits
+without a bound and `apply` waits sixty seconds, because those are facts
+of the two endpoints rather than of one command that happens to reach
+both. Splitting the verbs (#371) is what turned that from a rule about
+one command's two acts into two rows each stating its own.
 
 **Example, the second unbounded one**, and it reaches the same
 conclusion from the opposite direction. `events tail` reads a response

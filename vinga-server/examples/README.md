@@ -5,7 +5,7 @@ Two tiers of file, for the two shapes a document can have.
 A **fragment** is the body of a single entity, in the shape
 `vinga-server config <noun> set` takes it: one file per entity or
 provider type. A **preset**, under [`presets/`](presets/), is a whole deployment
-in one document, in the shape `vinga-server config apply` takes it:
+in one document, in the shape `vinga-server config import` takes it:
 several kinds at once, written in one transaction. Neither is a
 configuration the server reads. The domain half of the configuration
 lives in the database, and these are what get written into it.
@@ -19,7 +19,8 @@ Every file names its own command in its header, so using one is copy,
 edit, run:
 
 ```bash
-vinga-server config apply -f examples/presets/local-stack.yaml
+vinga-server config import -f examples/presets/local-stack.yaml
+vinga-server config apply
 vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
 ```
 
@@ -33,7 +34,7 @@ the same `agent.yaml` can be installed twice under two names. A preset
 carries its entities' names in the document instead, because a document
 says where each of its entries goes.
 
-Applying is additive and never deletes: a section a document does not
+Importing is additive and never deletes: a section a document does not
 name is left alone, and the same document twice changes nothing.
 
 ## What is documented where

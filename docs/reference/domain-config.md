@@ -19,7 +19,7 @@ the body of a `PUT`, validated in the same one place whichever way it
 arrived. The API's own contract is [`api-openapi.json`](api-openapi.json),
 generated from its routes under the same regenerate-and-diff check as
 this document. A deployment whose server will not start is recovered by
-booting one on an empty database and applying a kept `vinga export`,
+booting one on an empty database and importing a kept `vinga export`,
 which the command reference writes out step by step.
 
 ## How the pieces fit
@@ -73,11 +73,11 @@ for them, so binding a device, unbinding it, or changing the default
 agent applies at that device's next OTA check or connection, with
 nothing asked of the server at all. The exception ends where the agent
 does: a binding naming an agent this server is not serving resolves to
-nothing until the reload that installs it.
+nothing until the apply that installs it.
 
-The reload is the second, and unlike the first it is asked for rather
-than noticed. `vinga reload` has a running server re-read
-the stored configuration and apply the whole domain half: the
+The apply is the second, and unlike the first it is asked for rather
+than noticed. `vinga apply` has a running server re-read
+the stored configuration and install the whole domain half: the
 `providers` entries and the `mcp_servers` entries with the
 secrets stored on them, the
 agents' effective `mcp` grant lists, the prompt fragments, the agents
@@ -90,7 +90,7 @@ up on the next utterance, while prompt text is assembled at an
 activation and cached for it, so a rewritten prompt, fragment or
 `instructions` reaches a conversation at its next activation, which is
 a new session or an agent switch. Filled pauses are synthesized during
-the reload and bound by a conversation when it opens, so an edited
+the apply and bound by a conversation when it opens, so an edited
 filler section reaches the next conversation and never changes what
 one already open is masking with. An agent is synthesized again when
 any field of its effective `filler` section moved or when the voice
@@ -101,7 +101,7 @@ provider even though the audio it produces is identical, and
 rewriting the provider entry an agent speaks through is another,
 since that is the voice moving; an edit that reaches neither, a
 prompt or a fragment, is none. An agent whose
-synthesis fails runs unmasked rather than making the reload refuse.
+synthesis fails runs unmasked rather than making the apply refuse.
 
 The engines keep the same clock as the clips and cost what they cost.
 An entry whose definition and stored credential have not moved is
@@ -111,7 +111,7 @@ is still serving, and the conversations that open after the apply speak
 through the new one. An entry a conversation is still speaking through
 is released when that conversation ends, so applying a change to a
 local model briefly holds two of it, and an entry that will not build
-refuses the reload with nothing changed.
+refuses the apply with nothing changed.
 
 The agent set moves with the rest. An agent the store has added is
 one a device can be bound to and reach at its next check-in, with no
@@ -119,7 +119,7 @@ restart between the write and the board; an agent it has deleted is
 one no session can be opened as from the moment the apply answers,
 while a conversation already talking as it finishes on the world it
 was built from and is served that world's prompt to the end. The one
-thing an agent carries that a reload does not move is its memory,
+thing an agent carries that an apply does not move is its memory,
 which is keyed by its name and stays under the name it was stored
 under.
 

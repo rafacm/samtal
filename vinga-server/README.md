@@ -656,7 +656,7 @@ work it out. Guidance is whole-entry: an entry whose tools want two
 different paragraphs is two entries.
 
 Editing it does not restart the connection, since it is prompt text the
-connection never sees, so a reload reports the entry as `unchanged` and
+connection never sees, so an apply reports the entry as `unchanged` and
 the tools do not blink. What that costs is stated rather than hidden:
 the new text reaches a conversation at its **next activation**, a new
 session or an agent switch, and a conversation already running keeps
@@ -678,7 +678,7 @@ inject_prompts: [forecast_style]
 
 `use_server_instructions` injects the handshake's text. What a server
 ships is captured on every connect whether or not the entry opted in,
-so turning it on applies at the next reload with no reconnection, and
+so turning it on applies at the next apply with no reconnection, and
 turning it off stops the injection while the connection stands.
 
 `inject_prompts` names published prompts, one at a time, by the name
@@ -711,7 +711,7 @@ instruction nobody reviewed. What is injected appears under
 the surface below, with a heading in the prompt itself saying the
 server is the one talking, so neither you nor the model has to guess
 whose words they are. The prompts are re-fetched on every reconnect,
-which reaches new sessions and switched-in agents the way a reload's
+which reaches new sessions and switched-in agents the way an apply's
 guidance does.
 
 **The device's own tools** need no configuration. A board whose hello
@@ -894,7 +894,7 @@ Nothing already stored is deleted by it. The rows stay under the
 agent's name, `vinga memory list agent poet` still shows them, and
 switching the section back on is an agent that remembers what it
 remembered before; `vinga memory delete` is the door that takes rows
-away. A reload applies the change at that agent's next utterance, and
+away. An apply installs the change at that agent's next utterance, and
 one reply never gets half of it: which tools it is offered and what its
 prompt carries are decided together, once, at the top of the reply.
 
@@ -990,7 +990,7 @@ is prompt text the operator composed, and a heading would editorialize.
 Its indentation and its own blank lines are part of it, and the only
 bytes trimmed are whitespace at the two ends of the whole prompt, which
 the surface above reports trimmed with them. A fragment is one of the
-kinds `vinga-server config reload` applies, so writing or editing one
+kinds `vinga-server config apply` installs, so writing or editing one
 reaches every agent that includes it at that agent's next activation,
 and the write says so.
 
@@ -1014,7 +1014,7 @@ by one conversation is known to a concurrent one on its next reply and
 a note written in one round is read in the next. So this command
 answers what a session opening now would be given, which is what an
 operator auditing a configuration wants, and a conversation that
-started before the last reload is holding the older text until it ends.
+started before the last apply is holding the older text until it ends.
 
 It shows the agent's own memory and no other scope, and that is the
 same honesty: what a conversation is keeping and what is known about a
@@ -1027,7 +1027,7 @@ is what reaches them.
 Over the API it is `GET /api/runtime/agents/{name}/prompt`, and it is a
 read of the running server rather than of the database: the agents this
 server is serving, the MCP slice it is running, and the memory it
-writes. An agent it is not serving answers 404 naming the reload, since
+writes. An agent it is not serving answers 404 naming the apply, since
 that is what installs one.
 
 ### What the MCP servers are doing
@@ -1087,15 +1087,15 @@ operator has to be able to write one down.
 A running server serves one immutable snapshot of the domain half at a
 time, so writing an entry and granting it to an agent used to cost a
 restart and every conversation on the server. `vinga-server config
-reload` builds the next snapshot and swaps to it instead:
+apply` builds the next snapshot and swaps to it instead:
 
 ```console
 $ vinga-server config mcp-server set weather -f weather.yaml
 wrote mcp-server weather
-This applies when the running server is asked to reload: run
-`vinga-server config reload`, which ...
+This is stored and not yet serving: `vinga apply` installs the stored
+configuration on the running server, and `vinga diff` lists ...
 $ vinga-server config agent set house -f house.yaml
-$ vinga-server config reload
+$ vinga-server config apply
 mcp:
   started: weather
   restarted: (none)
@@ -1124,13 +1124,13 @@ weather: connected since 2026-08-13T11:02:44.118902+00:00
   agents: house
 ```
 
-An `apply` asks for this itself: it writes the document and then makes
-exactly this request, printing the listing above under the outcomes, so
-a whole deployment is one command. `--no-reload` writes without it,
-which is what a rebuild does while its credentials are still missing.
-The per-entity writes are the other half of the picture, and they say
-which boundary they are waiting at, because nothing installs one until
-somebody asks.
+`config import` is the other half of the pair rather than a shortcut
+past it: it writes a whole deployment to the store in one transaction
+and stops there, and this is the command that installs what it wrote.
+Two commands rather than one, which is what a rebuild needs anyway,
+since a document's credentials go in between them. The per-entity
+writes say which boundary they are waiting at for the same reason,
+because nothing installs one until somebody asks.
 
 **What it applies** is the whole domain half, re-read from the
 configuration database: the `providers` entries and the `mcp_servers`
@@ -1162,15 +1162,15 @@ masked agent speaks through; but an edit to any field of the section
 does, `delay_ms` included, even though the
 audio that comes back is identical to what it replaced, and so does
 rewriting the entry an agent's voice comes from, whose clips are spoken
-again in the engine the reload built. That is
+again in the engine the apply built. That is
 deliberate rather than an oversight: the section is one value, and a
 comparison that covered part of it would be a second rule about what a
 clip depends on. Synthesis is real work at the configured provider, and
-may be billed there, so a reload of a deployment with many masked agents
+may be billed there, so an apply of a deployment with many masked agents
 costs what this says it does. The
 `fillers` section names each agent under one of three outcomes, and an
-agent whose synthesis failed is `disabled`: the reload applied, that
-agent runs with the mask off, and the next reload tries again. A
+agent whose synthesis failed is `disabled`: the apply installed, that
+agent runs with the mask off, and the next apply tries again. A
 text-to-speech hiccup never holds back a prompt fix.
 
 **The engines are rebuilt, and only the ones that moved.** An entry
@@ -1183,7 +1183,7 @@ the new one; one that a conversation is still speaking through is
 released when that conversation ends, so applying a change to a local
 model briefly holds two of it. The `providers` section names the entries
 built, reused and retired. An entry that will not build, or that
-`server.local_only` forbids, refuses the reload with nothing changed.
+`server.local_only` forbids, refuses the apply with nothing changed.
 
 **The agent set moves with the rest.** An agent the store has added is
 built with everything else the apply builds and is servable the instant
@@ -1193,7 +1193,7 @@ has deleted is one no session can be opened as from that same instant,
 while a conversation already talking as it finishes on the world it was
 built from and is served that world's prompt to the end. The `agents`
 section names both, and says whether `agent_defaults` moved. The one
-thing an agent carries that a reload does not move is its memory, which
+thing an agent carries that an apply does not move is its memory, which
 is keyed by its name, so the rows stay under the old name. The whole
 `server` section (including the configuration file itself) is
 start-time as it always was.
@@ -1201,7 +1201,7 @@ start-time as it always was.
 **No session is dropped**, and when one meets the change depends on
 which half moved. The tools an agent may reach are snapshotted per
 reply, so a conversation in progress meets the new tool world on its
-next utterance; a tool call in flight on a server the reload stopped
+next utterance; a tool call in flight on a server the apply stopped
 fails into the same error result a server dropping mid-call produces,
 which the assistant explains in its own words. Prompt text is assembled
 once per activation and cached for it, so a rewritten prompt, fragment
@@ -1215,7 +1215,7 @@ masking with.
 and built before anything running is touched, so an unset `$VAR`, a
 credential that will not decrypt, an entry `server.local_only` forbids,
 or a stored configuration that will not compose into something this
-server can serve refuses the reload and leaves it exactly as it was. A
+server can serve refuses the apply and leaves it exactly as it was. A
 server that merely will not connect is not that: it applies, shows
 `down` with its reason, and is reconnected in the background like any
 other. One apply runs at a time; a second is refused with the retryable
@@ -1434,27 +1434,28 @@ route its API outward.
 page: installing it, reaching a server, rebuilding one, and every
 command's help.
 
-A whole deployment, from an empty database, is one document and one
-command. [`examples/presets/`](examples/presets/) holds two of them, a
+A whole deployment, from an empty database, is one document and two
+commands. [`examples/presets/`](examples/presets/) holds two of them, a
 deployment that reaches no vendor and the same thing on vendor APIs:
 
 ```bash
-vinga apply -f examples/presets/cloud-stack.yaml
+vinga import -f examples/presets/cloud-stack.yaml
+vinga apply
 vinga device bind aa:bb:cc:dd:ee:ff assistant
 vinga list
 ```
 
-Applying orders the writes for you. A write whose references do not
+Importing orders the writes for you. A write whose references do not
 resolve is refused, which is what forces the creation order when
 entities are written one at a time; a document is validated against the
 state it would leave and written in one transaction, so the providers,
 the defaults naming them and the agent inheriting them all arrive
-together and nothing is ever half applied. Applying is additive and
-never deletes, and the same document twice changes nothing. And it ends
-on the running server: an apply installs what it wrote, which is
-[Applying a change without a restart](#applying-a-change-without-a-restart)
-run for you, and `--no-reload` is the spelling for writing without
-installing.
+together and nothing is ever half written. Importing is additive and
+never deletes, and the same document twice changes nothing. What it
+does not do is touch the running server: that is the `apply` on the
+second line, which is
+[Applying a change without a restart](#applying-a-change-without-a-restart),
+and the gap between the two is where a document's credentials go.
 [`examples/`](examples/) holds a commented fragment per entity for
 writing one at a time with a noun's own `set`, which is what editing a
 deployment looks like once it exists.
@@ -1471,9 +1472,9 @@ state to be in and an illegitimate one to serve from.
 
 **When the server will not start**, there is nothing to write through,
 and the way back is to rebuild the store rather than to operate on it:
-stop the server, delete the database, boot clean, stage the export taken
-while the deployment was healthy (`apply --no-reload`), re-enter the
-credentials that export listed, and reload. That is [When the server
+stop the server, delete the database, boot clean, import the export
+taken while the deployment was healthy (`import -f`), re-enter the
+credentials that export listed, and apply. That is [When the server
 will not start](#when-the-server-will-not-start), in the deployment
 notes.
 
@@ -1489,7 +1490,7 @@ entity and provider type, each naming the command that installs it, and
 that is where the measured numbers and the field findings behind each
 provider option are kept. `config list` and `config show` read back what
 is stored, with every secret masked, and `config export` prints the same
-content as a document `config apply` takes back.
+content as a document `config import` takes back.
 
 **The `server` section is what a start reads.** The port, the
 directories, the limits and the barge-in tuning come out of the file
@@ -1504,22 +1505,23 @@ place, so a conversation goes on speaking the world it opened in while
 new work binds the world that is current. A change reaches it in one of
 two ways, and every mutating command says which.
 
-**The reload applies the domain half, on request.** Writing a provider
+**The apply installs the domain half, on request.** Writing a provider
 entry or an MCP entry, rotating a secret on either, changing which
 agents may reach an MCP server, editing a prompt fragment, writing an
 agent, deleting one, or rewriting the `agent_defaults` layer under them
-all takes effect when a running server is asked to reload, with no
-restart and no session dropped: that is [Applying a change without a
-restart](#applying-a-change-without-a-restart). Those writes name
-`vinga-server config reload`, and say the three moments a conversation
-already in progress meets an applied change at: the tools an agent may
-reach at its next utterance, its prompt text at its next activation, and
-the voice it speaks in and the clips it masks with at the next
-conversation. An agent the reload added is one a device can be bound to
+all takes effect when a running server is asked to install what is
+stored, with no restart and no session dropped: that is [Applying a
+change without a restart](#applying-a-change-without-a-restart). Those
+writes name `vinga-server config apply`, whose own help says the three
+moments a conversation already in progress meets an installed change
+at: the tools an agent may reach at its next utterance, its prompt text
+at its next activation, and the voice it speaks in and the clips it
+masks with at the next conversation. An agent the apply added is one a
+device can be bound to
 and reach at its next check-in; one it deleted is one no session can be
 opened as from the moment the request answers, while a conversation
 already talking as it finishes on the world it was built from. The one
-thing an agent carries that a reload does not move is its memory, which
+thing an agent carries that an apply does not move is its memory, which
 is keyed by its name, so the rows stay under the old name.
 
 **Device bindings are the other way, applied by being noticed.** A
@@ -1530,7 +1532,7 @@ at that device's next OTA check or connection, with nothing asked of
 the server at all. Those
 writes say so instead. That ends where the agent does: a
 binding naming an agent this server is not serving resolves to
-nothing until the reload that installs it, and the
+nothing until the apply that installs it, and the
 acknowledgement says that rather than promising otherwise. A
 conversation already running is never touched by either.
 
@@ -1667,18 +1669,20 @@ model is actually sent](#what-the-model-is-actually-sent) describes and
 `vinga-server config agent preview` prints. The second answers what the
 database holds that this server is not serving, kind by kind: the names
 added, removed and changed, and for each kind whether its changes reach
-a conversation at the next reload or at a device's
+a conversation at the next apply or at a device's
 next check-in, which is what makes it possible to say whether a write is
 still waiting. It carries entity names and those labels and nothing
 else, so a rotated credential shows up as the provider that holds it
 being listed as changed. The third answers what each configured MCP
 server is doing right now, which [What the MCP servers are
 doing](#what-the-mcp-servers-are-doing) describes and `vinga-server
-config mcp-server status` prints. The reload applies what the stored configuration
-holds to the running server, which [Applying a change without a
-restart](#applying-a-change-without-a-restart) describes and
-`vinga-server config reload` prints; it is the only route here that
-changes what the server is doing rather than what is stored.
+config mcp-server status` prints. The reload route installs what the stored
+configuration holds on the running server, which [Applying a change
+without a restart](#applying-a-change-without-a-restart) describes and
+`vinga-server config apply` prints; it is the only route here that
+changes what the server is doing rather than what is stored. The route
+keeps the mechanism's name and the command names the act, which is a
+deliberate crossing rather than a mismatch.
 
 **And one namespace that reads the conversation record**, the store
 [The conversation store](#the-conversation-store) describes:
@@ -1744,16 +1748,16 @@ of sentences. A device binding and the default agent carry the one about
 a device asking, because a running server reads them as it asks: they
 apply at that device's next OTA check or connection. Every other kind
 this API writes, which is the whole of the rest of the domain half,
-carries the one that names the reload above, and that sentence also
-names the three moments a conversation already in progress meets an
-applied change at: the tools an agent may reach at its next utterance,
-its prompt text at its next activation, and the voice it speaks in and
-the clips it masks with at the next conversation. A binding naming an
-agent this server is not serving yet carries a sentence of its own, and
-it is the one an operator is most likely to need, because both halves of
-it are true at once: the row is live, and the agent arrives at the
-reload that installs it. Nothing about a running conversation changes
-when a write lands, in any of these cases.
+carries the one that names the apply above; it says the write is
+stored and not yet serving, names the command that installs it and the
+read that lists everything pending, and leaves the three moments a
+conversation meets an installed change at to that command's own help.
+A binding naming an agent this server is not serving yet carries a
+sentence of its own, and it is the one an operator is most likely to
+need, because both halves of it are true at once: the row is live, and
+the agent arrives at the apply that installs it. Nothing about a
+running conversation changes when a write lands, in any of these
+cases.
 
 **A refusal is an RFC 9457 problem document**, served as
 `application/problem+json`, and carries the sentence the CLI prints in
@@ -1802,13 +1806,13 @@ refused outright, and any URL the client prints has that stripped. Its
 timeouts are explicit (5 s to connect, 30 s to read) so that the
 server's own retryable answer, which can take up to the database's ten
 second lock timeout to arrive, reaches you as itself rather than as a
-transport error. `apply` is the exception, and deliberately: its
+transport error. `import` is the exception, and deliberately: its
 transaction loads the whole existing configuration and validates the
 whole resulting one, whose size no request bound limits, so it waits for
 the answer however long that takes rather than giving up on a write the
-server may be about to commit. The reload behind that write is a request
-of its own and carries the reload's own sixty seconds, because a bound
-belongs to the endpoint rather than to the command that reached it.
+server may be about to commit. `apply` is a command of its own and
+carries its own sixty seconds, because a bound belongs to the endpoint
+rather than to the command that reached it.
 
 The whole command line, including installing it away from a deployment
 and every command's own help page, is
@@ -1817,9 +1821,9 @@ and every command's own help page, is
 **There is no second way in.** Every command here is a request, so a
 deployment whose server will not start is recovered by rebuilding its
 store rather than by editing it: stop the server, delete the database,
-boot clean, stage a kept `config export` with `apply --no-reload`,
+boot clean, import a kept `config export` with `config import`,
 re-enter each stored credential through the `secret set` commands that
-export listed at its foot, and `config reload` to install what came
+export listed at its foot, and `config apply` to install what came
 back. The full procedure is in the deployment notes, under
 [When the server will not start](#when-the-server-will-not-start).
 
@@ -2092,12 +2096,12 @@ and cached as PCM, never at fire time: synthesis at the moment of
 masking would add TTS latency to the exact gap being masked, and a
 cached clip keeps working when the TTS provider is the thing being
 slow. Ahead of time is the server start and every `vinga-server config
-reload` after it, which re-synthesizes the agents whose effective
+apply` after it, which re-synthesizes the agents whose effective
 `filler` section or whose voice moved, whichever field of the section it
 was, and hands the result to the next conversation; one already open
 keeps the clips it opened with. A synthesis failure logs a
 warning and leaves the feature off for that agent rather than failing
-the boot or refusing the reload.
+the boot or refusing the apply.
 
 The filler is honest assistant speech: it moves the device into its
 speaking state, counts as the turn's `speaking_started`, lands on
@@ -2718,7 +2722,7 @@ docker run -d --name vinga \
   ghcr.io/rafacm/vinga-server:latest
 
 vinga provider set llm claude type=anthropic model=claude-sonnet-5 api_key_env=ANTHROPIC_API_KEY
-vinga reload
+vinga apply
 ```
 
 An entry that fits on a line is written on one, with no file to name and
@@ -2879,7 +2883,7 @@ server refuses to start with a stored secret it cannot open, naming the
 entity and the slot. That refusal takes the API with it, so the way back
 is the rebuild under [When the server will not
 start](#when-the-server-will-not-start): boot on an empty database,
-stage a kept export, enter the credentials again and reload, which
+import a kept export, enter the credentials again and apply, which
 leaves no unopenable envelope behind. The key
 the credentials are then entered under need not be the lost one; what
 the next boot needs is a key list that opens every envelope stored, and
@@ -2954,10 +2958,10 @@ in effect when the command returns, which both the command and the API's
 answer say every time they write. There are two ways it becomes
 effective, and each write says which case it is in: everything in the
 domain half, from a provider entry to an agent to the defaults under
-them, reaches a running server when it is asked to reload; a device
+them, reaches a running server when it is asked to apply; a device
 binding and the default agent reach it at that device's next check-in,
-with nothing asked of the server. The one thing an agent carries that a
-reload does not move is its memory, which is keyed by its name, so
+with nothing asked of the server. The one thing an agent carries that an
+apply does not move is its memory, which is keyed by its name, so
 renaming an agent still orphans what it remembered: the rows stay in
 the database under the old name and the renamed agent starts empty.
 
@@ -3019,9 +3023,9 @@ configured key opens, an entity that cannot be loaded, a reference that
 no longer resolves) leaves nothing to write through, because every
 config command is a request to a server that is not answering. The way
 back is not a surgical edit: stop the server, delete the database, start
-it again on the empty one, stage the export taken while the deployment
+it again on the empty one, import the export taken while the deployment
 was healthy, re-enter each stored credential through the `secret set`
-commands that export listed at its foot, and reload.
+commands that export listed at its foot, and apply.
 
 ```bash
 # Stop the container that will not serve, and take the database away.
@@ -3039,15 +3043,15 @@ psql "$ADMIN_URL" -f deploy/postgres-init.sql
 # Start it again, which boots clean on the empty database, then put the
 # configuration back and re-enter the credentials it could not carry.
 docker run -d --name vinga ...          # the run command from above
-docker exec -i vinga vinga-server config apply --no-reload -f - < deployment.yaml
+docker exec -i vinga vinga-server config import -f - < deployment.yaml
 docker exec -i vinga vinga-server \
   config provider secret set -- llm claude api_key
-docker exec vinga vinga-server config reload
+docker exec vinga vinga-server config apply
 ```
 
-The apply stages, which is what `--no-reload` says: the engines the
-document names are built at the reload on the last line, and their
-credentials are the line before it.
+The import writes and stops, which is the whole of what it does: the
+engines the document names are built by the apply on the last line, and
+their credentials are the line before it.
 
 **A dropped database takes the conversation record with it**, since
 every schema lives in one. What is broken here is the domain half, so a
@@ -3067,7 +3071,7 @@ next boot then migrates from nothing, which is the state this
 procedure needs and the state a first-ever boot is in.
 
 That is what makes `vinga-server config export` worth keeping in version
-control beside the YAML file: it is the document the apply takes. A
+control beside the YAML file: it is the document the import takes. A
 stored credential never travels in a read, so the export carries the
 command that enters each of them rather than the value, and the values
 come from wherever the deployment keeps its secrets.
@@ -3093,13 +3097,13 @@ rolled is an export from a server that will not start:
 docker exec -i vinga vinga-server config export > deployment.yaml
 
 # Then point VINGA_DB_* at an empty database, roll the image, and put
-# the configuration back exactly as above: stage the document, re-enter
+# the configuration back exactly as above: import the document, re-enter
 # each stored credential from wherever the deployment keeps its secrets,
-# and reload.
-docker exec -i vinga vinga-server config apply --no-reload -f - < deployment.yaml
+# and apply.
+docker exec -i vinga vinga-server config import -f - < deployment.yaml
 docker exec -i vinga vinga-server \
   config provider secret set -- llm claude api_key
-docker exec vinga vinga-server config reload
+docker exec vinga vinga-server config apply
 ```
 
 **The conversation record does not come across, and nothing pretends
@@ -3299,8 +3303,8 @@ off removes both the short URL and the code ceremony.
 **On a fresh deployment, write the agent and apply it.** A server
 serves the world it last installed, so an agent written into an empty
 database is not being served yet: bind a board to it and the
-acknowledgement says which reload installs it rather than promising
-otherwise. `vinga-server config reload` is that reload, and from there
+acknowledgement says which command installs it rather than promising
+otherwise. `vinga-server config apply` is that command, and from there
 the board connects at its next check-in, seconds later; no step of a
 deployment's life needs a restart once the process is up.
 

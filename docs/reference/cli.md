@@ -233,7 +233,7 @@ ordinary way to configure a deployment: that is the workstation client,
 and this is the door for when the token should not travel to reach one.
 
 The `-i` is load-bearing rather than habit: a secret set reads the
-credential from stdin, and `apply -f -` reads a whole document from it.
+credential from stdin, and `import -f -` reads a whole document from it.
 One thing does not carry over: a path is resolved inside the container,
 which has the CLI but not `examples/`, so a document that lives on your
 machine is piped in with `-f -` rather than named.
@@ -255,6 +255,20 @@ instead is fail legibly: a command whose route the server does not have
 is refused by the server, and an answer whose shape this client does not
 recognize earns one sentence saying so rather than a rendering of
 something nobody sent.
+
+**A command notice from a mismatched pair is not to be followed.** The
+skew above is one a route or a shape can catch; this one is neither. A
+release can change the words a server puts in an operator's hands while
+every route and every response shape stays exactly as it was, which is
+what the #371 verb rename did: the CLI's write is spelled `import` now
+and its install is spelled `apply`, and both still post to the routes
+they always did. So a new CLI against an old server is told, by that
+server, to run the `reload` its own grammar no longer has; and an old
+CLI against a new server is told to run `apply`, which in its grammar is
+the write rather than the install. Neither is an error
+either half can detect, because neither half is wrong about the
+protocol. The answer is the policy at the top of this section: match the
+halves first, then follow what the server tells you to type.
 
 **A refusal is not a rollback**, and the difference matters most on a
 write. The client checks the answer's shape after the request has been
@@ -325,23 +339,20 @@ vinga-server config list
 
 ## Writing a whole deployment at once
 
-`apply` takes one document holding any number of entities and settings,
-writes all of it in one transaction, and applies it to the running
-server:
+`import` takes one document holding any number of entities and settings
+and writes all of it to the store in one transaction. `apply` is the
+separate command that installs what is stored on the running server:
 
 ```bash
-vinga-server config apply -f examples/presets/local-stack.yaml
+vinga-server config import -f examples/presets/local-stack.yaml
+vinga-server config apply
 ```
 
-The second half of that is what the verb's name promises, and it is a
-second request: the write, and then the reload that installs it, whose
-listing is printed under the outcomes. `--no-reload` writes the document
-and stops there, for the two cases where the halves belong apart, a
-rebuild whose credentials arrive after the document and a change an
-operator wants to install at a moment of their own choosing. A write
-that committed whose reload then failed says so and no more: what the
-running server ended up serving is not knowable from the client, so the
-sentence sends you to `diff` and then `reload`.
+Two commands rather than one, and the split is what each verb's name
+promises: `import` touches nothing that is running, and `apply` touches
+nothing that is stored. The gap between them is where a rebuild's
+credentials go, and where an operator who wants to install at a moment
+of their own choosing waits. `diff` says what is sitting in that gap.
 
 The document's top-level keys are the sections of the domain
 configuration, the entity bodies are exactly the fragments `set` takes,
@@ -362,7 +373,7 @@ checked.
 
 **It is refused whole.** Anything in the document that will not resolve
 rolls the whole transaction back, with the same sentences a single write
-of the same entity would have earned. There is no half-applied document.
+of the same entity would have earned. There is no half-written document.
 
 **It is additive, and it never deletes.** A section the document does
 not mention is left alone, an empty mapping adds nothing, and an
@@ -377,24 +388,24 @@ equal body is reported `unchanged`, with no write and no notice.
 Two bounds sit in front of all of that, and both are refused before
 anything is mutated: the number of entities one document may carry, and
 the size of the request body. What has no bound is how long the client
-waits. An apply loads the whole existing configuration and validates the
-whole resulting one, and nothing about the request limits how large
+waits. An import loads the whole existing configuration and validates
+the whole resulting one, and nothing about the request limits how large
 either is, so no finite timeout can be derived that would not sometimes
 expire on a transaction the server goes on to commit. The client
 therefore waits for the answer however long it takes. The connect
 timeout stays bounded, because a server that is not there must still say
 so quickly. What remains is the connection dying mid-wait, which is the
 exposure every write already has, and the recovery is the same one: read
-the store back with `export` or `show`. The reload behind the write is a
-request of its own and carries the bound `reload` carries, sixty
-seconds, which is the server's own envelope with room to spare.
+the store back with `export` or `show`. `apply` is a request of its own
+and carries a bound of its own, sixty seconds, which is the server's own
+envelope with room to spare.
 
 ## Reading it back out
 
 `show` and `export` are two projections of the same read. `show` is the
 display one: the configuration as a person reads it, with every stored
 credential listed underneath as a masked slot. `export` is the writable
-one: the same content in the shape `apply` takes it, with a header
+one: the same content in the shape `import` takes it, with a header
 saying how to reproduce the deployment.
 
 ```bash
@@ -409,18 +420,18 @@ Reproducing a deployment is therefore three steps, in this order, which
 is the order the export's own header names:
 
 ```bash
-vinga-server config apply --no-reload -f deployment.yaml
+vinga-server config import -f deployment.yaml
 # then the secret set commands the export listed, one per stored slot
-vinga-server config reload
+vinga-server config apply
 ```
 
 That order is not a nicety. A masked value is not something a creating
 write would accept, so an export that injected masks into the bodies
-would fail to apply onto an empty store, which is the one place an
+would fail to import onto an empty store, which is the one place an
 export most has to work; and a secret set addresses an entity, so it
-cannot run before the entity exists. The staging is the same argument
-once more: a reload builds the engines the document names, and their
-credentials are the step after it.
+cannot run before the entity exists. The last step is the same argument
+once more: an apply builds the engines the document names, and their
+credentials are the step before it.
 
 ## When the server will not start
 
@@ -455,16 +466,16 @@ psql "$ADMIN_URL" -f deploy/postgres-init.sql
 # 4. Start it again, which migrates from nothing and boots clean.
 docker run -d --name vinga ...
 
-# 5. Put the configuration back, staged: the engines it names are
-#    built at the reload in step 7, and their credentials are step 6.
-vinga-server config apply --no-reload -f deployment.yaml
+# 5. Put the configuration back: the engines it names are built by the
+#    apply in step 7, and their credentials are step 6.
+vinga-server config import -f deployment.yaml
 
 # 6. Re-enter each stored credential, one per secret set command the
 #    export listed at the foot of that file.
 vinga-server config provider secret set -- llm claude api_key
 
 # 7. Install what was put back.
-vinga-server config reload
+vinga-server config apply
 ```
 
 **The domain schema alone, when the record is worth keeping.** A dropped
@@ -519,9 +530,9 @@ vinga-server config export > deployment.yaml
 
 # 4. Put the configuration back and re-enter each stored credential,
 #    exactly as in steps 5, 6 and 7 above.
-vinga-server config apply --no-reload -f deployment.yaml
+vinga-server config import -f deployment.yaml
 vinga-server config provider secret set -- llm claude api_key
-vinga-server config reload
+vinga-server config apply
 ```
 
 **The conversation record does not come across, and nothing pretends
@@ -558,8 +569,10 @@ refused whole if anything in it will not resolve. This is the shortest path
 from an empty database to a server with something to say.
 
 ```bash
-vinga apply -f examples/presets/cloud-stack.yaml
-vinga apply -f examples/presets/local-stack.yaml
+vinga import -f examples/presets/cloud-stack.yaml
+vinga apply
+vinga import -f examples/presets/local-stack.yaml
+vinga apply
 ```
 
 ### Provider
@@ -625,7 +638,7 @@ vinga agent-defaults set -f examples/agent-defaults.yaml
 `devices, default_agent`
 
 Which board reaches which agent, which is the one thing a preset cannot know.
-A binding applies at that device's next check-in rather than at a reload.
+A binding applies at that device's next check-in rather than at an apply.
 
 ```bash
 vinga device bind aa:bb:cc:dd:ee:ff assistant
@@ -687,15 +700,14 @@ Commands:
                    running server's version and revision, the URL to type into a
                    device's captive portal, and how much of each kind is
                    configured
-  apply            write a whole document in one transaction and apply it to the
-                   running server, refused whole if anything in it will not
-                   resolve; additive, never deleting, and waiting for the
-                   write's answer however long the transaction takes; or write
-                   it without applying, with --no-reload
+  import           write a whole document to the store in one transaction,
+                   refused whole if anything in it will not resolve; additive,
+                   never deleting, and waiting for the answer however long the
+                   transaction takes; nothing running changes until vinga apply
   list             a summary tree
   show             print the whole stored configuration, with its stored secrets
                    masked
-  export           the stored configuration as a document apply takes
+  export           the stored configuration as a document import takes
   diff             what the stored configuration would change on the running
                    server, kind by kind, with the boundary each kind's changes
                    reach a conversation at
@@ -703,8 +715,11 @@ Commands:
   conversation     the conversations this server recorded, and erasing them
   memory           what is remembered about a person, a place and a conversation
   events           what the running server is saying right now, as it says it
-  reload           apply the stored configuration to the running server, without
-                   a restart and without dropping a conversation
+  apply            install the stored configuration on the running server,
+                   without a restart and without dropping a conversation: a
+                   conversation already in progress meets new tools at its next
+                   utterance and new prompt text at its next activation, while a
+                   changed voice reaches the next conversation
   ota-url          the URL to type into a device's captive portal; derived from
                    this configuration and the device-auth secret, and it
                    contacts nothing
@@ -1921,23 +1936,20 @@ Options:
   -h, --help     Show this message and exit.
 ```
 
-### `vinga apply`
+### `vinga import`
 
 ```
-Usage: vinga apply [OPTIONS]
+Usage: vinga import [OPTIONS]
 
-  write a whole document in one transaction and apply it to the running server,
-  refused whole if anything in it will not resolve; additive, never deleting,
-  and waiting for the write's answer however long the transaction takes; or
-  write it without applying, with --no-reload
+  write a whole document to the store in one transaction, refused whole if
+  anything in it will not resolve; additive, never deleting, and waiting for the
+  answer however long the transaction takes; nothing running changes until vinga
+  apply
 
 Options:
-  -f, --file PATH  YAML document to apply, or - to read it from stdin: the
+  -f, --file PATH  YAML document to import, or - to read it from stdin: the
                    sections of the domain configuration, with the entities in
                    each written as they are for set  [required]
-  --no-reload      write the document and stop there, leaving the running server
-                   on what it is already serving until a `vinga reload`
-                   (default: write it, then reload)
   --config PATH    path to the YAML config file naming server.port and
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
@@ -1995,7 +2007,7 @@ Options:
 ```
 Usage: vinga export [OPTIONS]
 
-  the stored configuration as a document apply takes
+  the stored configuration as a document import takes
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
@@ -2402,13 +2414,15 @@ Options:
   -h, --help     Show this message and exit.
 ```
 
-### `vinga reload`
+### `vinga apply`
 
 ```
-Usage: vinga reload [OPTIONS]
+Usage: vinga apply [OPTIONS]
 
-  apply the stored configuration to the running server, without a restart and
-  without dropping a conversation
+  install the stored configuration on the running server, without a restart and
+  without dropping a conversation: a conversation already in progress meets new
+  tools at its next utterance and new prompt text at its next activation, while
+  a changed voice reaches the next conversation
 
 Options:
   --config PATH  path to the YAML config file naming server.port and

@@ -167,8 +167,9 @@ server:
 # written with `vinga-server config`, and the document that carries them
 # is the runnable script beside this one, config.deploy.example.sh, with
 # the same measured values and the reasoning behind each. It is one
-# `config apply` against the running server, so run it once the server
-# is up, from inside the container or with VINGA_API_URL naming the API.
+# `config import` against the running server followed by one
+# `config apply`, so run it once the server is up, from inside the
+# container or with VINGA_API_URL naming the API.
 #
 # There is deliberately no default agent in it: leaving it unset is what
 # turns the device bindings into an allowlist, so an unknown device

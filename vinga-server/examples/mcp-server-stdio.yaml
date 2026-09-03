@@ -53,7 +53,7 @@ egress: false
 # noise in every prompt that carries it.
 #
 # It applies at the next activation of a conversation (a new session, or
-# an agent switch) once the running server has been asked to reload, and
+# an agent switch) once the running server has been asked to apply, and
 # editing it does not restart the connection.
 instructions: |
   The lights, the blinds and the front door are on this server. Turn

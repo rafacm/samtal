@@ -386,7 +386,7 @@ session %s rejected: the Device-Id header is not a device MAC (six colon-separat
 #### Variant 2: `vinga_server.session` at WARNING
 
 ```text
-session %s rejected: device %s is bound to agent %s, which this server is not serving; install it with: vinga-server config reload
+session %s rejected: device %s is bound to agent %s, which this server is not serving; install it with: vinga-server config apply
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -1156,7 +1156,7 @@ device %s (%s, firmware %s) has no agent and is showing activation code %s; bind
 #### Variant 2: `vinga_server.ota` at WARNING
 
 ```text
-device %s (%s, firmware %s) is bound to agent %s, which this server is not serving; install it with: vinga-server config reload
+device %s (%s, firmware %s) is bound to agent %s, which this server is not serving; install it with: vinga-server config apply
 ```
 
 | # | Argument | Nullable | Constraint | Note |

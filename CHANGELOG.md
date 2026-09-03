@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-03
+
+### Changed
+
+- **The two-clock verbs are renamed so each names its own act** (#371).
+  `vinga apply` becomes `vinga import`: it writes a whole document to
+  the store in one transaction and stops there. `vinga reload` becomes
+  `vinga apply`: it installs the stored configuration on the running
+  server. The names pair deliberately, `import`/`export` for the store's
+  document I/O and `diff`/`apply` for the store-versus-running-server
+  reconciliation, and "apply" names the outcome where "reload" named the
+  mechanism. Pre-release stance: no aliases. `vinga reload` is an unknown
+  command, and `vinga apply -f` is refused, because the new `apply` takes
+  no document.
+- **The per-write boundary notice is one line** (#371). It said which
+  command installs the write and then named the three moments a
+  conversation meets an installed change at, printed verbatim on every
+  entry of every domain-half write; a Quick Start run printed it six
+  times. It now says the write is stored and not yet serving, names
+  `vinga apply` and `vinga diff`, and stops. The three clocks moved to
+  `vinga apply --help` and stay in `docs/reference/domain-config.md`. The
+  binding-not-yet-served notice is respelled and tightened the same way.
+- **The server API keeps the mechanism's vocabulary** (#371).
+  `POST /api/runtime/config/reload`, the whole-document write route, the
+  response model names and the diff's `applies` tokens are all unchanged;
+  the CLI's `import` posts to the API's apply route and its `apply` posts
+  to the reload route, which the two act rows say where they are
+  declared. What did change server-side is every sentence telling an
+  operator what to type: the two event message templates and the
+  unserved-agent refusal now name `vinga-server config apply`.
+
+### Removed
+
+- **`--no-reload`** (#371), deleted rather than renamed: a write-only
+  `import` needs no flag to stay write-only. Scripts using it type
+  `vinga import` and then `vinga apply`.
+
 ## 2026-09-01
 
 ### Changed
