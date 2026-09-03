@@ -83,6 +83,15 @@ class DrainingServer(uvicorn.Server):
         self._drain_task: asyncio.Task[None] | None = None
 
     def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        # Before anything else, and therefore on every path below: this
+        # process is going, so it stops taking conversations now rather
+        # than whenever the drain gets its turn. The window that closes
+        # is real on three of those paths: the scheduled drain task does
+        # not run until the loop next gets control, a `drain_s` of zero
+        # never runs one at all, and a second signal goes straight to
+        # uvicorn. A conversation admitted in any of them would be
+        # admitted to a server already on its way out.
+        self._stop_admitting()
         if self._draining or self._drain_s <= 0:
             # The two ways uvicorn is called directly: a second signal,
             # which is an operator forcing the issue while a drain is
@@ -151,6 +160,24 @@ class DrainingServer(uvicorn.Server):
             # uvicorn's graceful shutdown to wait on.
             self._close_live()
             super().handle_exit(sig, frame)
+
+    def _stop_admitting(self) -> None:
+        """Shut this server's door, whatever happens next.
+
+        Safe from a signal handler, which is the whole reason it can be
+        the first thing `handle_exit` does: it sets one bool, and a bool
+        set under the GIL cannot be seen half written. Idempotent as
+        well, since the flag latches, so calling it on every path costs
+        nothing and the drain that may follow latches the same one.
+
+        The composition is read defensively for the reason `_close_live`
+        below reads it that way: a signal can arrive while the lifespan
+        is still building, and a state bag that cannot answer is exactly
+        the case where nothing is admitting anything yet.
+        """
+        composition: Composition | None = getattr(self._app.state, "composition", None)
+        if composition is not None:
+            composition.sessions.stop_admitting()
 
     def _close_live(self) -> None:
         """End every open event tail.
