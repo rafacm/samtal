@@ -224,19 +224,24 @@ def test_a_current_server_answers_both_spellings_with_no_redirect(
     all: the test above is what it answers one with instead."""
     monkeypatch.setenv(API_SECRET_ENV, "test-api-token-" + "0123456789abcdef" * 2)
     app = create_app(Config())
+    # Probed while it is up, which is what "a current server" means and
+    # is now the only way to probe one: the composition lives for as long
+    # as the lifespan that built it, so an application past its teardown
+    # has no more to answer an OTA check-in with than one that never
+    # started.
     with TestClient(app) as client:
         for path in (f"/x/{KEY}", f"/x/{KEY}/"):
             assert client.get(path, follow_redirects=False).status_code == 200, path
 
-    monkeypatch.setattr(
-        doctor,
-        "build_client",
-        lambda url: TestClient(app, base_url=url),
-    )
+        monkeypatch.setattr(
+            doctor,
+            "build_client",
+            lambda url: TestClient(app, base_url=url),
+        )
 
-    assert doctor.main([f"http://192.168.1.10:8003/x/{KEY}"]) == 0
+        assert doctor.main([f"http://192.168.1.10:8003/x/{KEY}"]) == 0
 
-    assert f"vinga-server {__version__}" in capsys.readouterr().out
+        assert f"vinga-server {__version__}" in capsys.readouterr().out
 
 
 def test_no_bearer_token_is_sent_to_a_device_facing_address(
