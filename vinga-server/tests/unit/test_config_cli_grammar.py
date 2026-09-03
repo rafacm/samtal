@@ -1131,6 +1131,33 @@ def test_the_import_word_is_the_registered_write(run) -> None:
     assert run("import", "-f", "-", stdin="{}\n") == 0
 
 
+def test_the_write_refusal_says_written_rather_than_applied() -> None:
+    """The sentence an unreadable write acknowledgement carries, held to
+    the word that is true of every act that carries it.
+
+    Every one of them writes the store and installs nothing: the
+    per-entity sets and deletes, the secret writes, the bindings, the
+    memory writes and `import`. So what is unknown after an
+    acknowledgement this client cannot read is whether the store took
+    the write, which "applied" said until #371 gave that word to the
+    install. Read off the registration table rather than asserted about
+    a string, so an installing act that came to carry this sentence
+    fails here.
+    """
+    carrying = [
+        act
+        for row in cli.COMMANDS
+        for act in row.acts()
+        if act.refusal == cli.UNREADABLE_WRITE
+    ]
+
+    assert len(carrying) > 1
+    assert cli.APPLY not in carrying, "the install carries the write's refusal"
+    assert cli.IMPORT in carrying
+    assert "written" in cli.UNREADABLE_WRITE
+    assert "applied" not in cli.UNREADABLE_WRITE
+
+
 def test_the_applys_help_carries_the_three_clocks(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:

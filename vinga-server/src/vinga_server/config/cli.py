@@ -299,10 +299,18 @@ UNREADABLE_APPLY = f"the configuration API answered the apply with {UNRECOGNIZED
 NOT_APPLIED = "(this server does not apply this kind without a restart)"
 
 # A write is the one whose refusal has to say what is now unknown: the
-# request may well have been applied, and this client cannot tell.
+# request may well have landed, and this client cannot tell.
+#
+# "Written" and not "applied", which is a correction rather than a
+# style (#371). Every act carrying this sentence writes the store and
+# installs nothing: the per-entity sets and deletes, the secret writes,
+# the bindings, the memory writes and `import`. What is unknown after an
+# unreadable acknowledgement is whether the store took it, and `apply`
+# is now the word for the other thing, so the old wording would have had
+# twenty refusals naming a command none of them makes.
 UNREADABLE_WRITE = (
     f"the configuration API acknowledged the write with {UNRECOGNIZED_ANSWER}; "
-    f"read the configuration back to see whether it was applied."
+    f"read the configuration back to see whether it was written."
 )
 
 # And what the event stream says when it stops, which is the same
@@ -2043,12 +2051,12 @@ def _show_everything(document: Mapping[str, object]) -> str:
 
 # Export
 #
-# The apply-able projection of what a read already answers. There is no
+# The importable projection of what a read already answers. There is no
 # new read behind it: #207 made every read derive from the descriptor
 # registry and stay write-shaped, and #192's marker made the display
 # envelope the writable projection, so this is assembly rather than
 # translation. The whole-configuration read is already the document
-# `apply` takes, section for section, and one entity's envelope already
+# `import` takes, section for section, and one entity's envelope already
 # carries the fragment `set` takes.
 #
 # What export adds is the two things a document has to say that a read
@@ -2057,8 +2065,8 @@ def _show_everything(document: Mapping[str, object]) -> str:
 # command that enters each of them, because a credential never travels
 # in a read: it is not in the exported bodies at all, and the mask is
 # not a value a creating write would accept, so injecting one would make
-# an export fail to apply onto an empty store, which is the one place it
-# most has to work.
+# an export fail to import onto an empty store, which is the one place
+# it most has to work.
 
 EXPORT_HEADER = f"""\
 # The domain configuration of this deployment, in the shape
@@ -3461,7 +3469,7 @@ def _file(path: str) -> str:
 # What `-f -` says when it is run at a terminal with nothing piped in.
 #
 # It used to block: the read is unconditional, so a person who typed
-# `apply -f -` at a prompt met a cursor and no explanation, which is the
+# `import -f -` at a prompt met a cursor and no explanation, which is the
 # same rule as the secret prompt broken from the other side, by never
 # asking whether there is anybody there. The published answer is to quit
 # and point at the help, and this grammar's shape for that is one
@@ -3730,7 +3738,7 @@ def _typed(args: Invocation, at_a_terminal: str, empty: str) -> str:
     `-f -` is standard input, the spelling this grammar already has for
     it. A terminal with nothing piped into it is answered with one
     sentence and the usage tail rather than a cursor, which is the
-    mistake `apply -f -` used to make from the other side.
+    mistake `import -f -` used to make from the other side.
 
     The trailing newline is the shell's rather than the content's, and
     what is left after it is refused where it is empty: an empty read is
@@ -3815,7 +3823,7 @@ def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
 
 
 def _entry_name(entry: Mapping[str, object]) -> str:
-    """Where one applied entry is, as an operator reads their own
+    """Where one imported entry is, as an operator reads their own
     document: the section, and the identity under it where the section
     holds entries rather than one thing.
 

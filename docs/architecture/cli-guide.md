@@ -453,13 +453,14 @@ next, and the one sentence a failure gets.
 The line is not prose against data. It is **about the artifact** against
 **about this invocation**. A document that explains itself is still the
 artifact: an export's header says how to reproduce the deployment in
-two steps, and its foot lists a `secret set` command per stored slot,
-both as YAML comments, and both belong in the file because the file is
-what somebody opens six months later with no terminal scrollback to
-consult. `apply` reads it back with the comments in it.
+three steps, and its foot lists a `secret set` command per stored slot
+under a line saying where in those steps they go, all as YAML comments,
+and all of it belongs in the file because the file is what somebody
+opens six months later with no terminal scrollback to consult. `import`
+reads it back with the comments in it.
 
 The test is therefore redirection in both directions.
-`vinga export > deployment.yaml` must produce a file that `apply` takes
+`vinga export > deployment.yaml` must produce a file that `import` takes
 as it stands and that tells its own reader what it is, what it does not
 carry and what to run after it; and nothing about *that run* may be in
 it.
@@ -733,10 +734,10 @@ one rather than the value, and a read masks with a fixed eight
 characters. A third exception would need its own case made here, in
 the same shape.
 
-### One machine-readable shape, and it is the document `apply` takes
+### One machine-readable shape, and it is the document `import` takes
 
 The machine interface is not a serialization mode bolted onto a human
-one. It is a round trip: `export` emits exactly what `apply` consumes,
+one. It is a round trip: `export` emits exactly what `import` consumes,
 so the automation story is "read it, edit it, write it back" rather
 than "parse our display format".
 
