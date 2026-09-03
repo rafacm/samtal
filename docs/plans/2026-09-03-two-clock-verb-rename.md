@@ -453,7 +453,7 @@ move together. A docs-first or code-first split would merge a red
 `main` either way, and the workflow publishes an image on every push
 to `main`.
 
-- [ ] **M1: the rename, whole.** `config/cli.py` grammar
+- [x] **[M1: the rename, whole](2026-09-03-two-clock-verb-rename-implementation.md#m1-the-rename-whole).** `config/cli.py` grammar
   (`import` row, `apply` row, the apply-specific machinery deleted,
   `DIFF_INTRO` reworded), `config/entities.py` notices
   (`APPLY_NOTICE` one-liner, `BINDING_UNSERVED_NOTICE` respelled),
@@ -470,7 +470,7 @@ to `main`.
   config.example.yaml, the deploy example pair, examples README,
   both presets, cli-guide, the cli.md versions paragraph), the
   CHANGELOG entry, and the census manifest regenerated in the same
-  commit as the last document edit. PR: TBD.
+  commit as the last document edit. PR TBD.
 
 ## Plan review round
 
