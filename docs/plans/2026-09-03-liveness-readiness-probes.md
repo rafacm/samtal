@@ -302,7 +302,7 @@ assertion's explanation stays complete.
 
 ## Milestones
 
-- [ ] **M1: readiness beside liveness.** `/readyz` on the server
+- [x] **[M1: readiness beside liveness](2026-09-03-liveness-readiness-probes-implementation.md#m1-readiness-beside-liveness).** (PR TBD) `/readyz` on the server
   application with the closed status set above (`ok`, `draining`,
   `full`, `unavailable`), backed by composition presence and the
   registry's `admission` classifier; the registry's
