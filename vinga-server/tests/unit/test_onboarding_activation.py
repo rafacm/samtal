@@ -179,7 +179,7 @@ def test_a_device_bound_to_an_agent_this_server_has_not_loaded_gets_no_code(
 
     assert "activation" not in body
     assert body["websocket"]["token"] == ""
-    assert f"{DISPATCHED} reload" in caplog.text
+    assert f"{DISPATCHED} apply" in caplog.text
     assert "restart" not in caplog.text
     assert "device pending claim" not in caplog.text
 
