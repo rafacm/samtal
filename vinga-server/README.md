@@ -34,7 +34,8 @@ full:
 They run strictly in that order, each waiting on the one before it, which
 is why the latency of any one of them is latency the user hears.
 
-Those two paths, `/healthz`, and the configuration API under `/api` are
+Those two paths, the two probes `/healthz` and `/readyz`, and the
+configuration API under `/api` are
 everything the server exposes: the interactive API docs are turned off,
 the WebSocket requires a device token the OTA endpoint issued, and every
 request to `/api` carries a bearer token.
@@ -1335,7 +1336,7 @@ and can take a few minutes; later runs finish in seconds. Without
 ### The smoke lane: a conversation with a container
 
 A fourth lane runs nothing itself. It points at a server that is already
-up and holds one whole conversation with it: healthz, an OTA check whose
+up and holds one whole conversation with it: both probes, an OTA check whose
 token it verifies, and a full utterance-to-audio exchange through the
 device simulator. CI runs it against the image it just built, seeding
 that image's own CLI into the database it then reads, which is what
@@ -1968,7 +1969,7 @@ The WebSocket path never moves: the token is what protects it.
 
 **Nothing else is exposed.** `/x/<key>/`, `/xiaozhi/ota/` (or wherever
 you put it), each with an `activate` beneath it that a waiting board
-polls, `/xiaozhi/v1/`, `/healthz`, and the configuration API under
+polls, `/xiaozhi/v1/`, `/healthz`, `/readyz`, and the configuration API under
 `/api/`, which answers 401 to anything not carrying its bearer token. FastAPI's
 `/docs`, `/redoc`, and `/openapi.json` are turned off on both
 applications, and `server.ota_path` refuses a path under `/api/`: the
@@ -2172,6 +2173,48 @@ of speech takes thirty seconds to deliver. When a reply outlasts the
 budget its socket is still closed politely, but the drain logs
 `drain_incomplete` with `cut_mid_reply`, which is the signal that
 `drain_s` is too short for the replies this server gives.
+
+**Two probes, and which one to point at what.** `/healthz` is liveness:
+this process is alive and serving its control surface. `/readyz` is
+admission: this process may be handed a new device conversation. An
+orchestrator with two probe slots points restart at `/healthz` and
+traffic admission at `/readyz`. A draining server answers 200 on the
+first and 503 on the second, which is exactly what a redeploy wants: the
+pod is left running to finish the conversations it has, and no new device
+is sent to it. Both are unauthenticated, and neither says anything about
+a provider or an MCP server.
+
+`/readyz` answers `200 {"status": "ok"}`, or 503 with one word for why
+not:
+
+| Status | What it means |
+| ------ | ------------- |
+| `ok` | serving, and there is room for another conversation |
+| `draining` | shutting down: what is in flight is finishing, and nothing new is admitted |
+| `full` | every one of the `max_sessions` slots is taken |
+| `unavailable` | there is no serving composition to admit anything to |
+
+Readiness dips at capacity and recovers as slots free. That is what
+readiness is for rather than a flap: a device refused a slot retries on
+its own next wake word, and an orchestrator withholding new traffic from
+a full pod is precisely the behavior being asked for. The cost is worth
+knowing when sizing `max_sessions`, though: under an orchestrator that
+routes by readiness, a full pod's configuration API leaves the traffic
+set along with its WebSocket.
+
+`unavailable` is narrower than it sounds. Uvicorn binds its listener only
+once the lifespan's startup has finished, and that startup is what builds
+the composition (a provider loading a model can hold it for minutes), so
+a probe against a starting server meets a connection failure rather than
+this answer, and every prober treats that as not ready. What answers
+`unavailable` is an application that was described and never served, and
+one whose shutdown has already released what it was serving with.
+
+The image's own `HEALTHCHECK` is `/healthz`, deliberately. Docker has one
+health slot and it is not a restart trigger: an unhealthy container is
+surfaced and gated on (`--wait`, `depends_on: service_healthy`) rather
+than replaced, so a container going unhealthy while it drains would turn
+every redeploy into a reported failure.
 
 **A stalled generation is retried, then dropped.** An LLM whose stream
 shows no sign of life within `llm_first_token_timeout_s` (ten seconds

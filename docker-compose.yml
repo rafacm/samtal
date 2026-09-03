@@ -116,6 +116,14 @@ services:
         # than its start. The image carries a HEALTHCHECK of its own
         # against /healthz, so `--wait` gates on both: the database is
         # ready, and then the server is serving.
+        #
+        # What that second gate means is liveness: the process is up and
+        # answering. At a boot it also means the server is admitting,
+        # since a server that has just started is not draining and holds
+        # no session, which is why nothing here reads /readyz. That probe
+        # is for an orchestrator deciding where to send traffic while the
+        # server runs, and the server README says which probe such a
+        # deployment points at what.
         condition: service_healthy
 
     env_file:
