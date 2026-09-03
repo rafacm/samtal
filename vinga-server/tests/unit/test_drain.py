@@ -18,8 +18,10 @@ from typing import Any, cast
 import pytest
 import uvicorn
 
+from tests.support.configs import config_with_agent
 from tests.support.registry import FakeSession, registry_with
 from vinga_server import serving
+from vinga_server.app import create_app, lifespan
 from vinga_server.config import Config
 from vinga_server.events.live import LiveEvents
 from vinga_server.registry import SessionRegistry
@@ -354,6 +356,30 @@ async def test_a_signal_before_the_composition_exists_is_passed_straight_through
     server.handle_exit(signal.SIGTERM, None)
 
     assert server.should_exit
+
+
+async def test_a_signal_during_a_build_reaches_the_registry_it_publishes() -> None:
+    """Passed through is not forgotten.
+
+    Uvicorn runs the lifespan's startup first and binds its listener the
+    moment that returns, and only then notices it was told to stop, so a
+    signal that arrived during a long build is followed by a bound socket
+    and a fresh registry. A registry published admitting there would take
+    a conversation for a process whose shutdown had already begun.
+
+    The signal has nothing to shut when it lands, so it leaves the intent
+    where the build reads it, and the build applies it in the same step
+    as the publication.
+    """
+    app = create_app(config_with_agent())
+    server = DrainingServer(uvicorn.Config(app), app, 5.0)
+
+    server.handle_exit(signal.SIGTERM, None)
+
+    async with lifespan(app):
+        registry = app.state.composition.sessions
+        assert registry.admission == "draining"
+        assert registry.admit(cast(Any, FakeSession())) != "admitting"
 
 
 def uvicorn_that_stops_mid_drain(monkeypatch: pytest.MonkeyPatch) -> None:

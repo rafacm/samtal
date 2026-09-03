@@ -1214,7 +1214,7 @@ vinga-server/examples/vad-silero.yaml:5  respell  vinga provider set vad silero
 vinga-server/pyproject.toml:84  respell  vinga simulator run
 vinga-server/pyproject.toml:165  respell  config cli-reference
 vinga-server/pyproject.toml:181  respell  vinga simulator run
-vinga-server/src/vinga_server/app.py:861  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/app.py:906  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/config/api.py:443  respell  vinga-server config device pending list
 vinga-server/src/vinga_server/config/api.py:462  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:562  respell  vinga-server config apply

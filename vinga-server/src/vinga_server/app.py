@@ -115,6 +115,11 @@ class _CompositionSeed:
 
     `failure` is written by the lifespan when the build refuses: the
     sanitized sentence, for `main()` to print after `serve()` returns.
+
+    `stop_admitting` travels the other way, and is written by the
+    shutdown: a signal that arrives while this build is still running has
+    no registry to shut, and this is where the intent waits for the one
+    the build is about to publish.
     """
 
     config: Config
@@ -130,6 +135,38 @@ class _CompositionSeed:
     # anything could look (#283).
     from_store: bool = False
     failure: str | None = None
+    stop_admitting: bool = False
+
+
+def stop_admitting(app: FastAPI) -> None:
+    """Refuse new conversations on this application, whether or not it
+    has a composition yet.
+
+    The shutdown's one call, and it lives here rather than in
+    `serving.py` because what to do about a signal that arrives before
+    anything has been published is this module's business: this module is
+    what publishes it.
+
+    Both halves, in this order. The intent goes on the seed first, where
+    `_build_composition` reads it in the same step as the publication, so
+    a build that is signalled part way through never exposes a registry
+    that is admitting. Then a composition that is already serving has its
+    registry shut on the spot. Doing both rather than one or the other is
+    what leaves no interleaving open: a signal landing between the
+    publication and the build's own read finds the registry and shuts it,
+    and one landing before the publication is applied by the build.
+
+    Everything is read defensively, for the reason
+    `DrainingServer._close_live` reads its composition that way: this
+    runs in a signal handler, a signal can arrive at any moment, and a
+    state bag that cannot answer is not a reason to raise in there.
+    """
+    seed: _CompositionSeed | None = getattr(app.state, "seed", None)
+    if seed is not None:
+        seed.stop_admitting = True
+    composition: Composition | None = getattr(app.state, "composition", None)
+    if composition is not None:
+        composition.sessions.stop_admitting()
 
 
 def startup_failure(app: FastAPI) -> str | None:
@@ -579,6 +616,14 @@ async def _build_composition(
     # it has no composition rather than that it is ready.
     app.state.composition = composition
     stack.callback(delattr, app.state, "composition")
+    if seed.stop_admitting:
+        # Signalled while this was building, which is an ordinary case
+        # rather than a rare one: a provider loading a model can hold a
+        # startup for minutes, and uvicorn binds its listener the moment
+        # this returns. Applied here, with no await between the
+        # publication and this line, so nothing can be served by a
+        # registry that is admitting for a process already shutting down.
+        composition.sessions.stop_admitting()
     return composition
 
 
