@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Collection
 from dataclasses import dataclass
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from vinga_server import __version__, logs, onboarding, ota, ws
 from vinga_server.auth import build_device_auth
@@ -1002,10 +1003,11 @@ def create_app(
     # applies it again with that level once it has it, and the call is
     # idempotent.
     logs.quiet_vendor_libraries()
-    # No interactive docs, no schema. A device needs two paths and a
-    # healthcheck needs a third; publishing an API description of them to
-    # anyone who asks is surface with no reader, and the security default
-    # is that nothing beyond what a device needs is exposed.
+    # No interactive docs, no schema. A device needs two paths, and the
+    # two probes a supervisor reads (liveness and readiness) need one
+    # each; publishing an API description of them to anyone who asks is
+    # surface with no reader, and the security default is that nothing
+    # beyond what a device needs is exposed.
     app = FastAPI(
         title="vinga-server",
         version=__version__,
@@ -1048,6 +1050,45 @@ def create_app(
         # A pod reporting only the former cannot be matched to the image
         # tag that produced it without going and asking the cluster.
         return {"status": "ok", "version": __version__, "revision": revision()}
+
+    @app.get("/readyz")
+    def readyz() -> JSONResponse:
+        """Whether this server may be handed a new device conversation.
+
+        The other question `/healthz` was being asked and could not
+        answer. The two diverge exactly when it matters: a draining
+        process is alive and finishing the conversations it has while
+        refusing every new one, and an orchestrator that reads liveness
+        for both keeps sending it work or restarts it for saying so.
+
+        Two decision sites, each owning its fact. Whether there is a
+        serving composition at all is this application's to know, and it
+        is read defensively (`DrainingServer._close_live` reads it the
+        same way, for the same reason): an application that was described
+        and never served, and one whose lifespan has left, both have
+        none. Which of the three admission states a serving one is in is
+        the registry's, said in the registry's own words and mapped one
+        to one, so the probe and the door cannot come to disagree.
+
+        Literals and nothing else. No message, no provider name, no
+        dependency detail: a probe's answer is read by whatever is
+        deciding where to send traffic, it is logged wherever that thing
+        logs, and there is nothing in these four words to leak. It is
+        also why a provider that stopped answering cannot show up here:
+        this asks composition presence and one flag, and never asks a
+        provider anything.
+        """
+        composition: Composition | None = getattr(app.state, "composition", None)
+        if composition is None:
+            # Before the lifespan built one, and again after teardown
+            # released it. One word for the one observable fact, because
+            # from outside those two are the same state: there is no
+            # server to admit anything.
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+        admission = composition.sessions.admission
+        if admission != "admitting":
+            return JSONResponse({"status": admission}, status_code=503)
+        return JSONResponse({"status": "ok"})
 
     # The OTA router is built here rather than imported ready-made: its
     # path is configuration, and a module-level router would have been
