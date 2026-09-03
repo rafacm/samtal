@@ -224,22 +224,22 @@ VERSION_UNKNOWN = "unknown (nothing is installed under this name)"
 CONNECT_TIMEOUT_S = 5.0
 READ_TIMEOUT_S = 30.0
 
-# What `reload` waits instead, because it is the one request whose
+# What `apply` waits instead, because it is the one request whose
 # server-side work is not a database call. The server's envelope is one
 # MCP connect timeout plus one prompt-discovery deadline plus small
 # change: stops run concurrently under a short bound, starts run
 # concurrently under the connect timeout, and an entry that names
 # published prompts spends one further bounded phase fetching them, so
 # a slow server is reported down rather than waited for. This is
-# comfortably above that, because a client that gave up on a reload the
-# server then applied would recreate the exact ambiguity the whole
-# feature exists to remove: nobody would know what is running.
-RELOAD_READ_TIMEOUT_S = 60.0
+# comfortably above that, because a client that gave up on an install
+# the server then carried out would recreate the exact ambiguity the
+# whole feature exists to remove: nobody would know what is running.
+APPLY_READ_TIMEOUT_S = 60.0
 
-# And what `apply` waits, which is the sentence above taken to its
+# And what `import` waits, which is the sentence above taken to its
 # conclusion where no finite envelope exists.
 #
-# An apply is one transaction, and the transaction loads the whole
+# An import is one transaction, and the transaction loads the whole
 # existing configuration and validates the whole resulting one, whose
 # size nothing about the request bounds: the document may be small and
 # the store it lands in large. So there is no number to derive. What a
@@ -255,7 +255,7 @@ RELOAD_READ_TIMEOUT_S = 60.0
 # transport death mid-wait, which is the exposure every write already
 # has, and the recovery is the same: read the store back with `export`
 # or `show`.
-APPLY_READ_TIMEOUT_S: float | None = None
+IMPORT_READ_TIMEOUT_S: float | None = None
 
 # And what `events tail` waits, which is the same conclusion reached
 # from the opposite direction.
@@ -288,9 +288,9 @@ UNRECOGNIZED_ANSWER = "a body this client does not recognize"
 # is written on its row rather than at the raise site.
 UNREADABLE_READ = f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}"
 
-UNREADABLE_RELOAD = f"the configuration API answered the reload with {UNRECOGNIZED_ANSWER}"
+UNREADABLE_APPLY = f"the configuration API answered the apply with {UNRECOGNIZED_ANSWER}"
 
-# What the reload listing prints for a kind this server cannot apply
+# What the apply listing prints for a kind this server cannot apply
 # while it runs. The sections are declared complete from the first
 # release that has any of them, so that a client generated from the
 # contract never meets a grown answer, and a kind whose milestone has
@@ -303,38 +303,6 @@ NOT_APPLIED = "(this server does not apply this kind without a restart)"
 UNREADABLE_WRITE = (
     f"the configuration API acknowledged the write with {UNRECOGNIZED_ANSWER}; "
     f"read the configuration back to see whether it was applied."
-)
-
-# What `apply` adds when the apply was answered and the reload behind it
-# was not. Everything it says is something this client knows: the
-# transaction ran and its outcomes are printed above, and no completed
-# reload answer arrived.
-#
-# It opens on the store rather than on the write, and that is a
-# correction rather than a style. "The document was written" is false of
-# two successful applies in three: a document every entry of which was
-# already what the store held wrote nothing, and an empty document names
-# nothing to write. What is true of all three is what an apply promises,
-# which is that the store says what the document says, and that promise
-# is exactly what the outcome per entry above spells out.
-#
-# What it deliberately does not say is what the server is now serving,
-# because that is not knowable from here. A 409 says another reload is
-# already running, and that one re-read the store either before this
-# commit or after it, which decides whether the document is live and is
-# not in the answer. A transport failure or a timeout is ambiguous in a
-# second way: the request is carried out in tasks that outlive the
-# connection, so a reload whose client went away can still finish.
-#
-# So the sentence sends the operator to the read that does know
-# (`diff` compares the stored half against the running one) and to the
-# command that settles it either way.
-APPLY_UNANSWERED = (
-    "The apply was answered and the store is what the document says, entry by entry "
-    "above. What did not arrive is a completed answer to the reload behind it, so "
-    f"what the server is serving now is not said here: run `{PROGRAM} diff`, which "
-    f"compares the stored configuration against the running one, and `{PROGRAM} "
-    "reload` if they differ."
 )
 
 # And what the event stream says when it stops, which is the same
@@ -402,9 +370,9 @@ NOTHING_CONFIGURED = (
     f"its mcp list"
 )
 
-NOTHING_APPLIED = (
-    "the document names no section of the configuration, so nothing was applied. An applied\n"
-    "document's top-level keys are the sections of the domain configuration"
+NOTHING_IMPORTED = (
+    "the document names no section of the configuration, so nothing was imported. An\n"
+    "imported document's top-level keys are the sections of the domain configuration"
 )
 
 NOTHING_PENDING = (
@@ -933,12 +901,6 @@ class Invocation:
     pairs: tuple[str, ...] = ()
     from_env: str | None = None
     entity: str | None = None
-
-    # Whether the one row with a second act was told to leave it out.
-    # `apply` writes the document and installs it; this stages the write
-    # instead, and it is a field of the invocation because the row reads
-    # it to choose what it runs (`Command.selects`).
-    no_reload: bool = False
 
     # And the provider type a schema is asked about, which goes with the
     # `stage` above: the two together name one type's options, since the
@@ -1477,9 +1439,9 @@ def _call(
     once by the row that is performing rather than here: see `Reached`.
 
     `read_timeout_s` is how long this one endpoint may take to answer,
-    which for all but the reload and the apply is the same bound the
+    which for all but the apply and the import is the same bound the
     client is built with; None is no bound at all, which is what one
-    endpoint has and `APPLY_READ_TIMEOUT_S` says why.
+    endpoint has and `IMPORT_READ_TIMEOUT_S` says why.
 
     Set on the client rather than passed with the request: a
     per-request timeout is what httpx would want, and Starlette's
@@ -2100,17 +2062,17 @@ def _show_everything(document: Mapping[str, object]) -> str:
 
 EXPORT_HEADER = f"""\
 # The domain configuration of this deployment, in the shape
-# `{PROGRAM} apply` takes. Reproduce it in three steps, in this order:
+# `{PROGRAM} import` takes. Reproduce it in three steps, in this order:
 #
-#   1. {PROGRAM} apply --no-reload -f <this file>
+#   1. {PROGRAM} import -f <this file>
 #   2. the secret set commands at the foot of this file, if any
-#   3. {PROGRAM} reload
+#   3. {PROGRAM} apply
 #
 # A stored credential never travels in a read, which is what the second
-# step is for, and why the first stages rather than installing: a
-# reload builds the engines the document names, and their credentials
-# are not in it yet. Applying is additive: a section this document does
-# not name is left alone, and nothing in it deletes.
+# step is for, and why it comes before the third: an apply builds the
+# engines the document names, and their credentials are not in the
+# store until the second step has run. Importing is additive: a section
+# this document does not name is left alone, and nothing in it deletes.
 """
 
 EXPORT_SECRETS_HEADING = (
@@ -2617,7 +2579,7 @@ def _status_block(entries: Mapping[str, Mapping[str, object]]) -> str:
     that wraps, and the pending listing's shape only works because every
     one of its fields is short.
 
-    One function and not two: the reload answers one of these inside its
+    One function and not two: the apply answers one of these inside its
     own shape, and the reading is the act's either way, so there is
     nothing left for a second entry point to do.
     """
@@ -2713,7 +2675,7 @@ def _block(value: str) -> str:
     )
 
 
-# What a reload's answer can say, read off the shapes it is declared in
+# What an apply's answer can say, read off the shapes it is declared in
 #
 # Three readings of `ConfigReloadResult` and its sections, all of them
 # this renderer's: which sections there are, and within one section
@@ -2723,7 +2685,7 @@ def _block(value: str) -> str:
 
 
 def outcomes(section: type[BaseModel]) -> tuple[str, ...]:
-    """One reload section's outcome lists, in the order it declares
+    """One apply section's outcome lists, in the order it declares
     them: every field that is a list of names.
 
     Presentation, which is why the answer is a tuple and not a set, but
@@ -2742,7 +2704,7 @@ def outcomes(section: type[BaseModel]) -> tuple[str, ...]:
 
 
 def flags(section: type[BaseModel]) -> tuple[str, ...]:
-    """One reload section's yes-or-no answers, in the order it declares
+    """One apply section's yes-or-no answers, in the order it declares
     them.
 
     The sibling of `outcomes` above and the other half of what a section
@@ -2768,19 +2730,19 @@ def _section(annotation: object) -> type[BaseModel]:
     )
 
 
-# Which sections one reload answers with and what shape each of them
+# Which sections one apply answers with and what shape each of them
 # is, read off the result rather than written down beside it: a section
 # added to the model is a section this renders, and a field whose shape
 # the rendering has no rule for is a failing test rather than output
 # that quietly went missing.
-RELOAD_SECTIONS: dict[str, type[BaseModel]] = {
+APPLY_SECTIONS: dict[str, type[BaseModel]] = {
     name: _section(field.annotation)
     for name, field in ConfigReloadResult.model_fields.items()
 }
 
 
-def _reload_listing(applied: Mapping[str, Any]) -> str:
-    """What the reload applied, kind by kind, and then what is running.
+def _apply_listing(applied: Mapping[str, Any]) -> str:
+    """What the apply installed, kind by kind, and then what is running.
 
     The outcomes first, because they are the answer to the question that
     was asked, and the MCP status underneath because it is the answer to
@@ -2802,7 +2764,7 @@ def _reload_listing(applied: Mapping[str, Any]) -> str:
     here would otherwise become output or a traceback.
     """
     lines: list[str] = []
-    for section, shape in RELOAD_SECTIONS.items():
+    for section, shape in APPLY_SECTIONS.items():
         body = applied[section]
         if body is None:
             lines.append(f"{section}: {NOT_APPLIED}")
@@ -2855,7 +2817,7 @@ def nested(section: type[BaseModel]) -> tuple[str, ...]:
 
 # Which kinds one comparison answers with and what shape each of them
 # is, read off the result rather than written down beside it, exactly as
-# the reload's sections are.
+# the apply's sections are.
 DIFF_SECTIONS: dict[str, type[BaseModel]] = {
     name: _section(field.annotation) for name, field in ConfigDiff.model_fields.items()
 }
@@ -2863,10 +2825,17 @@ DIFF_SECTIONS: dict[str, type[BaseModel]] = {
 # What the label on a block means, said once at the head rather than
 # per block: three boundaries and no fourth, and which one a kind's
 # changes converge at is the answer's own.
+#
+# The labels are the API's tokens and stay spelled as the API spells
+# them, `reload` included: it names the mechanism truthfully, and a
+# client generated from the contract reads the same word this does
+# (#371). What the head explains is which command crosses each of them,
+# and for `reload` that command is `vinga apply`.
 DIFF_INTRO = (
     "# what the stored configuration would change on the running server. `applies`\n"
-    "# says when a change of that kind reaches a conversation: `reload` at the next\n"
-    "# reload, `check-in` as a device next asks, `restart` at the next server start."
+    f"# says when a change of that kind reaches a conversation: `reload` when `{PROGRAM} apply`\n"
+    "# next installs the stored configuration, `check-in` as a device next asks, and\n"
+    "# `restart` at the next server start."
 )
 
 
@@ -3774,43 +3743,32 @@ def _typed(args: Invocation, at_a_terminal: str, empty: str) -> str:
 # Output
 
 
-def _applied(answer: Mapping[str, object]) -> None:
-    """One staged document read out: what each entry did, and then the
+def _imported(answer: Mapping[str, object]) -> None:
+    """One imported document read out: what each entry did, and then the
     boundaries the ones that were written are waiting on.
 
-    The rendering of `--no-reload`, which is the invocation that leaves
-    a write waiting: nothing in this command installs it, so the
+    Every import is rendered this way, because an import installs
+    nothing: the write is the whole of what the command did, so the
     boundaries are what the operator has to be told about.
 
     One line per entry on stdout, in the order the answer lists them,
     which is the configuration's own section order. The notices go to
     stderr the way a single write's does, and each distinct one once: a
-    document that wrote nine entities is waiting on one reload, not on
+    document that wrote nine entities is waiting on one apply, not on
     nine, and printing the sentence nine times would say otherwise.
     """
-    for notice in _applied_entries(answer):
+    for notice in _imported_entries(answer):
         print(notice, file=sys.stderr)
 
 
-def _applied_quietly(answer: Mapping[str, object]) -> None:
-    """The same document read out with its boundaries left off, which is
-    what a default `apply` prints.
-
-    The reload runs behind this rendering and prints what it applied, so
-    a notice saying to run one would be telling the operator to run the
-    command whose answer is on the next line. What is dropped is only
-    the notice: the outcome per entry is the answer to what was asked,
-    and it is printed either way.
-    """
-    _applied_entries(answer)
-
-
-def _applied_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
-    """What an applied document did, entry by entry, and the distinct
+def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
+    """What an imported document did, entry by entry, and the distinct
     boundaries the entries that were written are waiting on.
 
-    The half both renderings share, printed here rather than returned,
-    so the two of them differ in exactly the thing they are named for.
+    Apart from the rendering above it and printing rather than
+    returning, because the two halves answer different questions: what
+    was written goes to stdout as it is read, and what it is waiting on
+    is a set the caller sends to stderr underneath.
 
     A document that named nothing has one line and no boundaries, which
     is the same shape rather than a second one: it leaves through the
@@ -3820,18 +3778,17 @@ def _applied_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
     for entry in entries:
         print(f"{_entry_name(entry)}: {entry['outcome']}")
     if not entries:
-        print(NOTHING_APPLIED)
+        print(NOTHING_IMPORTED)
     # Flushed here rather than by the caller, so whatever follows on
     # stderr lands after the lines it is about rather than ahead of
-    # them: stderr is unbuffered and stdout is not. That is a notice
-    # under `--no-reload` and a refusal from the reload under the
-    # default, and both have to arrive underneath what was written.
+    # them: stderr is unbuffered and stdout is not. That is the notice
+    # this write is waiting on, and it has to arrive underneath what was
+    # written.
     #
     # On both arms, which is what the early return used to miss: a
-    # document that named nothing still printed a line, and a reload
-    # refused behind it still lands on stderr, so the one output an
-    # empty apply has would have been read after the failure it came
-    # before.
+    # document that named nothing still printed a line, so the one
+    # output an empty import has would have been read after the notice
+    # it came before.
     sys.stdout.flush()
     return tuple(
         dict.fromkeys(
@@ -3914,7 +3871,7 @@ class Act:
     body: Callable[[Invocation], object] | None = None
 
     # How long this one endpoint may take to answer. Every act but the
-    # reload and the apply takes the default, whose bound is the
+    # apply and the import takes the default, whose bound is the
     # database's; None is no bound, which is one act's answer.
     read_timeout_s: float | None = READ_TIMEOUT_S
 
@@ -3938,17 +3895,6 @@ class Act:
 
     # What is printed, given the answer.
     render: Callable[[Any], None]
-
-    # What this act adds to its refusal when it is not the first act of
-    # its command, which is to say when something before it has already
-    # changed the deployment. None for every act that either changes
-    # nothing or runs alone, which is all but one of them: see
-    # `APPLY_UNANSWERED`, the sentence `apply`'s reload carries.
-    #
-    # On the act rather than at the boundary because it is a fact about
-    # what this act follows: the same reload run by `reload` itself
-    # follows nothing and has nothing extra to say.
-    unanswered: str | None = None
 
     def read(self, answer: object) -> Any:
         """One answer, read as the shape this act says it is sent.
@@ -3987,27 +3933,22 @@ def _performed(args: Invocation, acts: "tuple[Act, ...]", reached: Reached) -> N
     the first that is refused.
 
     Stopping is what makes a sequence honest about what ran: a refused
-    `apply` never reaches the reload behind it, because there is
-    nothing to install and the refusal is the whole answer.
+    read never reaches the second read behind it, because the refusal is
+    the whole answer.
 
-    An act that failed behind an act that already changed something
-    answers with its own refusal and then with what its row says is now
-    unknown (`Act.unanswered`). The sentence is built inside the
-    handler and raised outside it, the way every boundary in this
-    module raises: an exception raised while another is being handled
-    carries that one on `__context__` for a chain walker to find, and
-    what a refusal quotes is this module's own words rather than
-    whatever the failure was carrying.
+    The refusal is raised outside the handler that caught it, the way
+    every boundary in this module raises: an exception raised while
+    another is being handled carries that one on `__context__` for a
+    chain walker to find, and what a refusal quotes is this module's own
+    words rather than whatever the failure was carrying.
     """
     problem: str | None = None
-    for position, act in enumerate(acts):
+    for act in acts:
         try:
             _act(args, act, reached)
             continue
         except ConfigError as refused:
             problem = str(refused)
-            if position and act.unanswered is not None:
-                problem = f"{problem}\n{act.unanswered}"
         break
     if problem is not None:
         raise ConfigError(problem)
@@ -4264,7 +4205,7 @@ def _running_path(args: Invocation) -> str:
     return _path("runtime", "mcp-servers")
 
 
-def _reload_path(args: Invocation) -> str:
+def _apply_path(args: Invocation) -> str:
     return _path("runtime", "config", "reload")
 
 
@@ -4800,16 +4741,22 @@ PROMPT = Act(
 )
 
 # The one act that changes what a server is doing without writing
-# anything, and it prints both halves of the answer: what the reload
-# applied, and what every configured MCP entry is doing now that it has
-# been done.
-RELOAD = Act(
+# anything, and it prints both halves of the answer: what the apply
+# installed, and what every configured MCP entry is doing now that it
+# has been done.
+#
+# The CLI's `apply` posts to the API's reload route, and that crossing
+# is deliberate rather than an oversight (#371): the API names the
+# mechanism, which is that the server re-reads the store and swaps the
+# world, and the CLI names the act an operator asked for. Whether the
+# API's own vocabulary follows is #287's question, not this row's.
+APPLY = Act(
     method="POST",
-    path=_reload_path,
-    read_timeout_s=RELOAD_READ_TIMEOUT_S,
+    path=_apply_path,
+    read_timeout_s=APPLY_READ_TIMEOUT_S,
     answers=ConfigReloadResult,
-    refusal=UNREADABLE_RELOAD,
-    render=_printed(_reload_listing),
+    refusal=UNREADABLE_APPLY,
+    render=_printed(_apply_listing),
 )
 
 
@@ -4835,7 +4782,11 @@ DIFF = Act(
 # whole with.
 
 
-def _apply_path(args: Invocation) -> str:
+def _import_path(args: Invocation) -> str:
+    # The CLI's `import` posts to the API's apply route, which is the
+    # other half of the seam the act above names (#371): the API's word
+    # for writing a whole document does not move because the CLI's verb
+    # did, and #287 is where the API's own vocabulary is decided.
     return _path("apply")
 
 
@@ -4845,44 +4796,16 @@ def _document_body(args: Invocation) -> object:
     return document
 
 
-APPLY = Act(
+IMPORT = Act(
     method="POST",
-    path=_apply_path,
+    path=_import_path,
     body=_document_body,
     sends=DomainConfig,
-    read_timeout_s=APPLY_READ_TIMEOUT_S,
+    read_timeout_s=IMPORT_READ_TIMEOUT_S,
     answers=AppliedDocument,
     refusal=UNREADABLE_WRITE,
-    render=_applied,
+    render=_imported,
 )
-
-# The two acts an `apply` actually runs, which are the two above with
-# what one invocation makes of them written on: the write rendered
-# without the boundaries a reload is about to cross, and the reload
-# carrying the sentence a failure behind a committed write may claim.
-#
-# Derived from the rows rather than written out beside them, so the
-# request half cannot come apart from the row the contract check
-# enumerates: the method, the path, the body, the shapes and the two
-# timeouts are the ones above, and what differs is what this command
-# prints.
-APPLY_QUIETLY = replace(APPLY, render=_applied_quietly)
-
-APPLY_RELOAD = replace(RELOAD, unanswered=APPLY_UNANSWERED)
-
-
-def _applying(args: Invocation) -> tuple[Act, ...]:
-    """Which acts one `apply` runs.
-
-    The verb does what its name promises: it writes the document and
-    installs it, which is the two acts in that order. `--no-reload`
-    stages instead, and stages is the whole of what it does: the write
-    is the same request either way, and what changes is that nothing
-    installs it and the rendering says so.
-    """
-    if args.no_reload:
-        return (APPLY,)
-    return (APPLY_QUIETLY, APPLY_RELOAD)
 
 
 # The simulated board
@@ -4949,7 +4872,7 @@ NOTHING_TO_CLAIM = (
 NOT_ADMITTED_YET = (
     f"this board was claimed, and the activation poll was still answering keep-waiting "
     f"when the bound expired. A binding to an agent this server is not serving yet flips "
-    f"at the reload that installs it: run `{PROGRAM} reload`, and then this command "
+    f"at the apply that installs it: run `{PROGRAM} apply`, and then this command "
     f"again."
 )
 
@@ -5206,7 +5129,7 @@ def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> Non
         f"It was issued no token and offered no activation code, which is what three "
         f"configurations look like from here: onboarding is turned off on that "
         f"deployment and nothing resolves this MAC; or this MAC is bound to an agent "
-        f"that deployment is not serving yet, which `{PROGRAM} reload` installs; or the "
+        f"that deployment is not serving yet, which `{PROGRAM} apply` installs; or the "
         f"table of boards waiting to be claimed would not take another one.\n"
         f"{_firmware(state.firmware)}"
     )
@@ -5657,16 +5580,8 @@ FILE_HELP = (
 )
 
 DOCUMENT_HELP = (
-    "YAML document to apply, or - to read it from stdin: the sections of the domain "
+    "YAML document to import, or - to read it from stdin: the sections of the domain "
     "configuration, with the entities in each written as they are for set"
-)
-
-# The staging spelling. Named for what it turns off rather than for what
-# it leaves, because what it leaves is what the verb used to do and the
-# verb is what changed: the write is the same request either way.
-NO_RELOAD_HELP = (
-    "write the document and stop there, leaving the running server on what it is "
-    f"already serving until a `{PROGRAM} reload` (default: write it, then reload)"
 )
 
 PAIRS_HELP = (
@@ -5896,9 +5811,9 @@ class Command:
     # nothing: there would be no address to name and no token to demand.
     opens: "Callable[[Invocation, Reached], None] | None" = None
 
-    # Which of the acts above one invocation runs, for the row where an
-    # option decides. `apply` is the one: it writes and then installs
-    # what it wrote, and `--no-reload` stages instead.
+    # Which of the acts above one invocation runs, for the rows where an
+    # option decides. The memory reads and writes are the ones: which
+    # scope was addressed decides which route is asked.
     #
     # A hook from the invocation rather than a tuple cut down after the
     # fact, because the two things that vary are not the same thing.
@@ -6198,7 +6113,7 @@ def _invocation(
 
 def _plain(row: Command) -> Callable[..., None]:
     """A command that addresses nothing: the reads of the whole
-    configuration and of the running server, the reload, and the
+    configuration and of the running server, the apply, and the
     singleton, which is the one entity there is only one of."""
 
     def run(
@@ -6339,7 +6254,7 @@ def _staged_write(row: Command) -> Callable[..., None]:
     return run
 
 
-def _applied_document(row: Command) -> Callable[..., None]:
+def _imported_document(row: Command) -> Callable[..., None]:
     """The whole configuration in one file. No inline fields here: a
     document is several entities and the sections around them, which is
     what a file is for."""
@@ -6349,17 +6264,13 @@ def _applied_document(row: Command) -> Callable[..., None]:
         file: Annotated[
             str, typer.Option("-f", "--file", metavar="PATH", help=DOCUMENT_HELP)
         ],
-        no_reload: Annotated[bool, typer.Option("--no-reload", help=NO_RELOAD_HELP)] = False,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
         force: ForceOption = None,
         no_input: NoInputOption = None,
     ) -> None:
         row.perform(
-            _invocation(
-                row, context, config, api_url, force, no_input,
-                file=file, no_reload=no_reload,
-            )
+            _invocation(row, context, config, api_url, force, no_input, file=file)
         )
 
     return run
@@ -7255,22 +7166,19 @@ COMMANDS: tuple[Command, ...] = (
     # rather than a flag on a noun's `set`, because what it takes is a
     # document and what it promises is one transaction over all of it.
     #
-    # Two acts, because applying a configuration is what the word means
-    # to the person typing it: the document is written and then
-    # installed on the running server. `--no-reload` is the spelling for
-    # the other thing, staging a write for a later reload, and which of
-    # the two an invocation runs is `_applying`'s to say. `does` is what
-    # the row can reach either way, which is what coverage is about.
+    # One act, and the verb says which one (#371). It writes the
+    # document to the store and stops there; installing it on the
+    # running server is `apply`, which is a command rather than the
+    # absent half of a flag.
     Command(
-        words=("apply",),
-        does=(APPLY, RELOAD),
-        selects=_applying,
-        declare=_applied_document,
+        words=("import",),
+        does=IMPORT,
+        declare=_imported_document,
         help=(
-            "write a whole document in one transaction and apply it to the running "
-            "server, refused whole if anything in it will not resolve; additive, "
-            "never deleting, and waiting for the write's answer however long the "
-            "transaction takes; or write it without applying, with --no-reload"
+            "write a whole document to the store in one transaction, refused whole if "
+            "anything in it will not resolve; additive, never deleting, and waiting "
+            "for the answer however long the transaction takes. Nothing running "
+            f"changes until {PROGRAM} apply"
         ),
     ),
     Command(words=("list",), does=LIST, declare=_plain, help="a summary tree"),
@@ -7284,7 +7192,7 @@ COMMANDS: tuple[Command, ...] = (
         words=("export",),
         does=EXPORT_ALL,
         declare=_plain,
-        help="the stored configuration as a document apply takes",
+        help="the stored configuration as a document import takes",
     ),
     # The seat #193 reserved. Flat with the three above it, because its
     # subject is the deployment: it compares the whole stored half
@@ -7439,14 +7347,21 @@ COMMANDS: tuple[Command, ...] = (
     # The one command that changes what the server is doing rather than
     # what is stored, which is why it is a verb of its own rather than a
     # flag on a write: an operator writes several entries and grant
-    # lists and applies them once.
+    # lists and installs them once.
+    #
+    # The help is where the three convergence clocks live now (#371).
+    # They used to be printed on every domain-half write, which said
+    # them nine times for a document that wrote nine entities; here they
+    # are read once, by somebody asking what this command does.
     Command(
-        words=("reload",),
-        does=RELOAD,
+        words=("apply",),
+        does=APPLY,
         declare=_plain,
         help=(
-            "apply the stored configuration to the running server, without a restart "
-            "and without dropping a conversation"
+            "install the stored configuration on the running server, without a "
+            "restart and without dropping a conversation. A conversation already in "
+            "progress meets new tools at its next utterance and new prompt text at "
+            "its next activation, while a changed voice reaches the next conversation"
         ),
     ),
     Command(
