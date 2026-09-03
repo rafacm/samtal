@@ -22,7 +22,7 @@ There is no second way in. Every command that touches the domain
 configuration is a request, so this module opens no database, loads no
 encryption key and knows nothing about how a row is stored. A
 deployment whose server will not start is recovered by booting one on
-an empty database and applying a kept `export`, which is the procedure
+an empty database and importing a kept `export`, which is the procedure
 `docs/reference/cli.md` writes out; surgical access to the rows
 themselves is ordinary SQL and not this grammar's business.
 
@@ -1539,7 +1539,7 @@ def _unreachable(address: Address) -> str:
         f"cannot reach the configuration API at {address.shown}: the request did not "
         f"complete. Check that the server is running and that this is the address "
         f"it serves. A deployment whose server will not start at all is recovered "
-        f"by booting one on an empty database and applying a kept export."
+        f"by booting one on an empty database and importing a kept export."
     )
 
 
@@ -7177,7 +7177,7 @@ COMMANDS: tuple[Command, ...] = (
         help=(
             "write a whole document to the store in one transaction, refused whole if "
             "anything in it will not resolve; additive, never deleting, and waiting "
-            "for the answer however long the transaction takes. Nothing running "
+            "for the answer however long the transaction takes; nothing running "
             f"changes until {PROGRAM} apply"
         ),
     ),
@@ -7359,7 +7359,7 @@ COMMANDS: tuple[Command, ...] = (
         declare=_plain,
         help=(
             "install the stored configuration on the running server, without a "
-            "restart and without dropping a conversation. A conversation already in "
+            "restart and without dropping a conversation: a conversation already in "
             "progress meets new tools at its next utterance and new prompt text at "
             "its next activation, while a changed voice reaches the next conversation"
         ),
