@@ -258,36 +258,73 @@ restated.
   to protect.** The existing pins in `test_health.py` are the
   guard; the plan changes nothing they assert.
 
-## Consumers of `/healthz`, inventoried
+## Consumers of `/healthz`, inventoried and classified
 
-By `grep -rn healthz` over the tracked tree, 2026-09-03: the
-Dockerfile `HEALTHCHECK`, the smoke lane
-(`tests/smoke/test_smoke.py`, `conftest.py`), the unit and
-integration tests named above, `vinga-server/README.md` (the
-exposed-paths sentence and the operations sections),
-`docs/reference/cli.md` (the version-skew procedure),
-`docker-compose.yml` (comments), and historical plans and feature
-docs, which record what was true and are not updated. None move.
+By `git grep -n healthz` over the tracked tree, 2026-09-03, every
+live use classified by what it actually wants; historical records
+(`CHANGELOG.md`, `docs/plans/`, `docs/features/`,
+`docs/architecture/cli-guide-audit.md`) record what was true and
+are not updated.
+
+Liveness, staying on `/healthz`: the Dockerfile `HEALTHCHECK`
+(line 158, gaining the comment naming the choice); the
+`docker-compose.yml` comments around `depends_on`;
+`tests/integration/test_config_api.py:106` and
+`tests/unit/test_config_api.py:399`, which assert the server
+surface answers; and the pins in `tests/unit/test_health.py` and
+`tests/unit/test_build_info.py`.
+
+Readiness waits, moving to `/readyz` because what they wait for is
+"may I start a session": the boot wait in `tests/smoke/serve.sh:50`
+and the smoke lane's `conftest.py`; the boot wait in
+`tests/integration/test_smoke_seeds.py:222`; the serving check in
+`tests/integration/test_cli_live.py:2549`; and the workflow's own
+wait (`vinga-server.yml` around line 1150), whose comment names
+`/healthz` and moves with it. Each site's surrounding context is
+read before it moves; one that turns out to want liveness or a
+revision stays put, recorded in the implementation doc.
+
+Revision inspection, staying on `/healthz`: the workflow's
+revision comparisons (`vinga-server.yml` lines 1002 to 1005 and
+1303), the smoke lane's revision assertion
+(`tests/smoke/test_smoke.py`), the version-skew procedure in
+`docs/reference/cli.md`, and the confirmed-build sentence in
+`docs/conversational-quality-regression-suite.md:82`.
+
+Text the new route stales, updated in M1: the route-count comment
+in `app.py` (lines 995 to 998, "a device needs two paths and a
+healthcheck needs a third" grows a fourth); the exposed-paths
+sentence and the operations sections in `vinga-server/README.md`;
+and the exclusion-set commentary in
+`tests/unit/test_api_contract.py`, whose "/healthz is deliberately
+absent" reasoning extends to name both probes so the union
+assertion's explanation stays complete.
 
 ## Milestones
 
 - [ ] **M1: readiness beside liveness.** `/readyz` on the server
-  application with the closed status set above, backed by
-  composition presence and the registry's `draining` property;
-  the tests named above across startup, serving, dependency
+  application with the closed status set above (`ok`, `draining`,
+  `full`, `unavailable`), backed by composition presence and the
+  registry's `admission` classifier; the registry's
+  `stop_admitting` latch, called from every `handle_exit` path and
+  from `drain`; the composition attribute scoped to its lifespan;
+  the readiness waiters in the smoke lane, the integration tests
+  and the workflow moved to `/readyz` per the inventory; the tests
+  named above across startup, serving, capacity, dependency
   failure, drain and shutdown; the Dockerfile and compose comments
   naming their probe choice; the server README's exposed-paths
   sentence and shutdown section extended with the
   restart-versus-admission guidance; a CHANGELOG entry. Design
   footprint: deepens the health surface `create_app` already owns
-  and adds no module; the admission fact keeps its one home in
-  the registry, and the new handler is the adapter that spares an
-  orchestrator from knowing that. Documentation footprint: the
-  server README (exposed paths, the shutting-down section), the
-  Dockerfile and compose comments, `CHANGELOG.md`; the root
-  README makes no endpoint-level claims and the cli.md version
-  procedure stays on `/healthz`, both confirmed rather than
-  assumed during implementation.
+  and the registry's own interface, and adds no module; the
+  admission fact keeps its one home in the registry, and the new
+  handler is the adapter that spares an orchestrator from knowing
+  that. Documentation footprint: the server README (exposed paths,
+  the shutting-down section), the Dockerfile, compose and
+  `app.py` comments, the `test_api_contract.py` commentary,
+  `CHANGELOG.md`; the root README makes no endpoint-level claims
+  and the cli.md version procedure stays on `/healthz`, both
+  confirmed rather than assumed during implementation.
 
 ## Plan review round
 
@@ -373,3 +410,13 @@ endorsed the no-new-module layout explicitly.
    from live consumers, classify every live use as liveness,
    readiness or revision inspection, move readiness waiters to
    `/readyz`, and name every affected comment and assertion in M1.
+
+   *Resolution*: accepted in full. The inventory section is
+   rebuilt from `git grep -n healthz` with every live use
+   classified (liveness, readiness wait, revision inspection) and
+   the staled text named site by site, including the workflow, the
+   smoke lane's `serve.sh`, the two integration waiters, the
+   `app.py` route-count comment and the `test_api_contract.py`
+   commentary; the M1 footprint now carries the waiter moves and
+   the comment updates, with a read-the-context caveat recorded
+   for any waiter that turns out to want liveness.
