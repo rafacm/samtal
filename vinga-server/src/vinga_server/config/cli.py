@@ -2075,8 +2075,17 @@ EXPORT_HEADER = f"""\
 # this document does not name is left alone, and nothing in it deletes.
 """
 
+# The foot of an export, and the one line of it that has to agree with
+# the header above: the header numbers the steps and this is the step 2
+# in it, so a sentence that put the credentials on the wrong side of the
+# apply would be the file contradicting itself. It said "after applying"
+# while applying meant writing, and #371 moved that word to the install,
+# which is what makes the order explicit here now. A test holds this
+# sentence to naming both verbs in the header's order.
 EXPORT_SECRETS_HEADING = (
-    "# Stored credentials are not exported. Enter each of them after applying:"
+    f"# Stored credentials are not exported. Enter each of them after the "
+    f"`{PROGRAM} import`\n"
+    f"# and before the `{PROGRAM} apply`:"
 )
 
 EXPORT_SLOTS_HEADING = (
