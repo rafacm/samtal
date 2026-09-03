@@ -24,7 +24,7 @@ session in the same breath as the construction it describes, and
 """
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import DrainFinished, DrainIncomplete, DrainStarted
@@ -43,6 +43,12 @@ events = ServerEvents(__name__)
 # period still spends most of itself on the replies.
 CLOSE_MARGIN_S = 1.0
 CLOSE_MARGIN_FRACTION = 0.1
+
+# What the door answers, and the whole of what it can answer: the one
+# state that takes the next conversation, and the two reasons the next
+# conversation is turned away. A closed set because it is reported out
+# loud, over HTTP, to whoever is deciding where to send traffic.
+Admission = Literal["admitting", "draining", "full"]
 
 
 class SessionRegistry:
@@ -78,12 +84,51 @@ class SessionRegistry:
     def draining(self) -> bool:
         return self._draining
 
+    @property
+    def admission(self) -> Admission:
+        """Whether this server may be handed another conversation, and
+        which of the two reasons it may not.
+
+        One classifier over the two facts this object owns, so that the
+        door and anything reporting on the door cannot come to disagree:
+        `try_add` refuses exactly when this is not `admitting`, and the
+        readiness probe says the same word out loud.
+
+        Draining wins over full, because it is the terminal one. A full
+        server has a slot again when a conversation ends; a draining one
+        never admits another, and that is the fact worth reporting to
+        whoever is deciding whether to keep sending it work.
+        """
+        if self._draining:
+            return "draining"
+        if len(self._sessions) >= self._max_sessions:
+            return "full"
+        return "admitting"
+
+    def stop_admitting(self) -> None:
+        """Turn the next conversation away from here on, without waiting
+        for the ones in flight.
+
+        The door half of `drain` below, split out because shutdown begins
+        before the drain does: the signal handler schedules the drain
+        onto the loop rather than running it, and a `drain_s` of zero
+        never runs one at all, so a registry that only latched inside
+        `drain` would keep admitting after the process had begun to go.
+
+        Synchronous and idempotent, which is what makes calling it from a
+        signal handler and on every path out safe and free: setting one
+        bool is atomic under the GIL, and a flag that latches costs
+        nothing to set twice. It never clears; a server that has started
+        refusing conversations is not going to want them again.
+        """
+        self._draining = True
+
     def try_add(self, session: "DeviceSession") -> bool:
         """Take a slot for this session, or answer False when the server
         is full or on its way out. Deliberately not a coroutine: an
         admission decision that can await is one that can race another
         admission."""
-        if self._draining or len(self._sessions) >= self._max_sessions:
+        if self.admission != "admitting":
             return False
         self._sessions.add(session)
         return True
@@ -143,13 +188,13 @@ class SessionRegistry:
         """Stop admitting sessions, and let the ones in flight finish
         speaking before they are closed, bounded by `timeout_s`.
 
-        Draining latches on: this runs on the way out, and a server that
-        has started refusing connections is not going to want them
-        again. Whatever has not finished when the bound expires is left
-        to uvicorn's own shutdown, which fail-closes every remaining
-        websocket with 1012.
+        The door is shut through `stop_admitting` above, as the first
+        statement here, so that this and the shutdown that may have
+        already shut it are latching one flag rather than two. Whatever
+        has not finished when the bound expires is left to uvicorn's own
+        shutdown, which fail-closes every remaining websocket with 1012.
         """
-        self._draining = True
+        self.stop_admitting()
         sessions = list(self._sessions)
         if not sessions:
             await self._settled()
