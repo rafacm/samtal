@@ -44,7 +44,7 @@ STORE_BOOT = "store-boot"
 # or what to run.
 _ANNOUNCED_BY = {
     CHECK_IN: "OTA check",
-    RELOAD: f"{PROGRAM} reload",
+    RELOAD: f"{PROGRAM} apply",
     RESTART: "next server start",
     STORE_BOOT: "starts from this store",
 }

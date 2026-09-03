@@ -156,38 +156,38 @@ BINDING_NOTICE = (
 )
 
 # The second, and unlike the first it is asked for rather than noticed:
-# a running server re-reads the stored configuration and applies it when
-# the reload asks it to. Written on every kind of the domain half, which
+# a running server re-reads the stored configuration and installs it
+# when it is asked to. Written on every kind of the domain half, which
 # is what it has come to be true of (#191): the providers, the MCP
 # servers, the shared fragments, the agents and the layer under them are
 # one apply's business now, and the sentence that used to be written
-# only on the kinds a reload applied whole is written on all of them.
+# only on the kinds an install applied whole is written on all of them.
 #
-# The tail is the part an operator acts on. A reload does not interrupt
-# anything, so what an edit reaches a live conversation at depends on
-# which part of it moved, and the three clocks are named rather than
-# summarized: a sentence that said "immediately" would be wrong about
-# all three.
-RELOAD_NOTICE = (
-    "This applies when the running server is asked to reload: run "
-    f"`{PROGRAM} reload`, which re-reads the stored configuration and applies "
-    "it without a restart and without dropping a conversation. A conversation already "
-    "in progress meets the tools an agent may reach at its next utterance and its "
-    "prompt text at its next activation, while the voice it speaks in and the filled "
-    "pauses it masks with reach the next conversation."
+# One line, and that is a decision rather than an accident (#371). This
+# is printed on every entry of every domain-half write, so a script that
+# writes nine of them prints it nine times, and a sentence long enough
+# to be worth reading once is a wall of text at that count. What is left
+# is the two things an operator acts on: the command that installs, and
+# the command that says what is waiting. The three clocks a change
+# converges at are still true and still published; they moved to
+# `vinga apply --help` and to the domain-config reference, which is
+# where somebody asking that question is already looking.
+APPLY_NOTICE = (
+    f"This is stored and not yet serving: `{PROGRAM} apply` installs the stored "
+    f"configuration on the running server, and `{PROGRAM} diff` lists everything "
+    "pending."
 )
 
 # The third, for the binding whose agent this server is not serving
 # yet. Both halves are true at once, which is why neither of the two
 # above will do: the row itself is live, so the device meets it at its
-# next check-in, and the agent it names arrives at the reload that
+# next check-in, and the agent it names arrives at the apply that
 # installs it rather than at a restart, which is what an operator who
 # has just written both would otherwise be sent away to do.
 BINDING_UNSERVED_NOTICE = (
-    f"The binding applies at the device's next OTA check or connection, but this server "
-    f"is not serving the agent it names yet: run `{PROGRAM} reload`, which "
-    "installs the stored agents without a restart, and the device reaches it at the "
-    "check-in after that."
+    "The binding applies at the device's next OTA check or connection, but this "
+    f"server is not serving the agent it names yet: `{PROGRAM} apply` installs the "
+    "stored agents, and the device reaches it at the check-in after that."
 )
 
 # The fourth, for a server that was handed its configuration rather than
@@ -399,7 +399,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         secret_slots="provider",
         secret_key=is_secret_option,
         missing=NO_SUCH_PROVIDER,
-        notice=RELOAD_NOTICE,
+        notice=APPLY_NOTICE,
     ),
     EntityDescriptor(
         name="mcp-server",
@@ -422,7 +422,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         table="mcp_servers",
         secret_slots="mcp_server",
         missing=NO_SUCH_MCP_SERVER,
-        notice=RELOAD_NOTICE,
+        notice=APPLY_NOTICE,
     ),
     EntityDescriptor(
         name="prompt-fragment",
@@ -459,7 +459,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="prompt_fragments",
         table="prompt_fragments",
         missing=NO_SUCH_FRAGMENT,
-        notice=RELOAD_NOTICE,
+        notice=APPLY_NOTICE,
     ),
     EntityDescriptor(
         name="agent",
@@ -490,7 +490,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="agents",
         table="agents",
         missing=NO_SUCH_AGENT,
-        notice=RELOAD_NOTICE,
+        notice=APPLY_NOTICE,
     ),
     EntityDescriptor(
         name="agent-defaults",
@@ -521,7 +521,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="agent_defaults",
         table="agent_defaults",
         has_delete=False,
-        notice=RELOAD_NOTICE,
+        notice=APPLY_NOTICE,
     ),
 )
 
@@ -713,7 +713,7 @@ __all__ = [
     "NO_SUCH_MCP_SERVER",
     "NO_SUCH_PROVIDER",
     "OPTIONS_NOTE",
-    "RELOAD_NOTICE",
+    "APPLY_NOTICE",
     "RESTART_NOTICE",
     "PROGRAM",
     "SETTINGS",
