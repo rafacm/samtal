@@ -43,7 +43,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import PROGRAM, DatabaseConfig
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -601,4 +601,4 @@ def test_a_running_server_hands_its_own_comparison_to_the_api(
     assert pending["providers"]["applies"] == "reload"
     # And the write's own acknowledgement said the same thing in
     # sentence form, which is the pair an operator sees.
-    assert "asked to reload" in written.json()["notice"]
+    assert f"{PROGRAM} apply" in written.json()["notice"]

@@ -625,7 +625,7 @@ async def test_a_synthesis_failure_reaches_the_response_body_and_the_rendering()
         "reused": [],
         "disabled": ["assistant"],
     }
-    assert "  disabled: assistant" in cli._reload_listing(body)
+    assert "  disabled: assistant" in cli._apply_listing(body)
 
 
 async def test_an_agent_defaults_filler_edit_reaches_an_inheriting_agent() -> None:
