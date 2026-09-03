@@ -153,6 +153,14 @@ USER vinga
 VOLUME /data
 EXPOSE 8003
 
+# Liveness, deliberately, and not readiness. Docker has one health slot
+# and it is not a restart trigger: an unhealthy container is surfaced and
+# gated on (`--wait`, `depends_on: service_healthy`) rather than
+# replaced, so a container that went unhealthy while draining would turn
+# every redeploy into a reported failure. An orchestrator with two probe
+# slots points restart at /healthz and traffic admission at /readyz; the
+# server README says so for whoever is writing that manifest.
+#
 # Assumes the default port; an operator who changes server.port overrides
 # this too, which is documented rather than templated.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

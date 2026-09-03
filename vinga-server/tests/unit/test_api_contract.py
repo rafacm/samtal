@@ -60,12 +60,12 @@ DOCUMENT: dict[str, Any] = json.loads(DOCUMENT_PATH.read_text(encoding="utf-8"))
 # an operation added here without one is a decision rather than an
 # omission.
 #
-# `/healthz` is deliberately absent from this list. The plan named it as
-# an exclusion, and the committed document carries no such operation:
-# the health endpoint is the server application's, and this document is
-# the configuration API's alone. The union assertion below is what says
-# so, rather than an entry claiming to exclude something that is not
-# there.
+# `/healthz` and `/readyz` are deliberately absent from this list. The
+# plan named the first as an exclusion, and the committed document
+# carries neither operation: both probes are the server application's,
+# and this document is the configuration API's alone. The union
+# assertion below is what says so, rather than entries claiming to
+# exclude something that is not there.
 EXCLUDED: dict[tuple[str, str], str] = {
     ("GET", "/providers"): (
         "the collection read. The grammar reads a whole deployment through GET /config "
