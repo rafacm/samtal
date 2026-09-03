@@ -984,7 +984,7 @@ class RejectedAgentNotLoaded(Variant):
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
         "session %s rejected: device %s is bound to agent %s, which this "
-        "server is not serving; install it with: vinga-server config reload"
+        "server is not serving; install it with: vinga-server config apply"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "mac", "unloaded")
 
@@ -1943,7 +1943,7 @@ class OtaCheckAgentNotLoaded(Variant):
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
         "device %s (%s, firmware %s) is bound to agent %s, which this server "
-        "is not serving; install it with: vinga-server config reload"
+        "is not serving; install it with: vinga-server config apply"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware", "named")
 
