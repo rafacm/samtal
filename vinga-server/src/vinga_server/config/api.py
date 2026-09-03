@@ -559,7 +559,7 @@ def problem_response(
 _UNLOADED_AGENT = (
     "this server is not serving an agent of that name. The agents a server can serve "
     "are the agents of the world it has installed, so one written since is served by "
-    "the reload that installs it (`vinga-server config reload`), and one that never "
+    "the apply that installs it (`vinga-server config apply`), and one that never "
     "existed is a name nothing answers to. `vinga-server config list` shows the agents "
     "that are stored."
 )
