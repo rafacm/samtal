@@ -470,7 +470,7 @@ to `main`.
   config.example.yaml, the deploy example pair, examples README,
   both presets, cli-guide, the cli.md versions paragraph), the
   CHANGELOG entry, and the census manifest regenerated in the same
-  commit as the last document edit. PR TBD.
+  commit as the last document edit. PR [#372](https://github.com/rafacm/vinga/pull/372).
 
 ## Plan review round
 
