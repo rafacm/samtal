@@ -366,6 +366,19 @@ def uvicorn_that_waits_out_the_drain(monkeypatch: pytest.MonkeyPatch) -> None:
 DRAIN_SENTINEL = "sk-live-drain-9f3c2a"
 
 
+class ScriptedRegistry:
+    """A registry whose drain is scripted, for the paths where what the
+    drain does is the whole point.
+
+    The door is here rather than in each of them: the shutdown latches it
+    before anything else, so every stand-in for a registry has to be able
+    to be shut, and what these scripts vary is the drain behind it.
+    """
+
+    def stop_admitting(self) -> None:
+        pass
+
+
 class LeakyDrainFailure(Exception):
     """Stands in for a library exception from under the drain, quoting in
     its message what it was handed."""
@@ -418,7 +431,7 @@ async def test_a_drain_that_failed_before_the_settle_says_only_its_class(
     raises can quote a credential, and an exception left on a task is
     printed in full by the collector."""
 
-    class FailingRegistry:
+    class FailingRegistry(ScriptedRegistry):
         async def drain(self, timeout_s: float) -> None:
             raise LeakyDrainFailure(f"the endpoint refused: key={DRAIN_SENTINEL}")
 
@@ -446,7 +459,7 @@ async def test_a_drain_that_fails_during_the_settle_says_only_its_class(
     """And the waited path says the same thing, rather than the
     exception it was handed while waiting."""
 
-    class SlowlyFailingRegistry:
+    class SlowlyFailingRegistry(ScriptedRegistry):
         async def drain(self, timeout_s: float) -> None:
             await asyncio.sleep(0.02)
             raise LeakyDrainFailure(f"the endpoint refused: key={DRAIN_SENTINEL}")
@@ -479,7 +492,7 @@ async def test_a_drain_that_outlives_its_bound_is_abandoned(
     itself when it is done, and serving must not be waiting on that
     decision."""
 
-    class UncooperativeRegistry:
+    class UncooperativeRegistry(ScriptedRegistry):
         def __init__(self) -> None:
             self.released = asyncio.Event()
 
