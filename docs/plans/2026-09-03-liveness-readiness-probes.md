@@ -57,10 +57,11 @@ to build:
   completed, and the lifespan is what builds the composition (a
   provider loading a model can hold it for minutes). During startup
   there is no listener, so any probe gets a connection failure,
-  which every prober treats as not ready. The starting branch below
-  is therefore for apps described but never built (a `TestClient`
-  outside its context manager, an external ASGI runner with the
-  lifespan protocol off), not a state a deployed prober normally
+  which every prober treats as not ready. The no-composition branch
+  below is therefore for apps described but never built (a
+  `TestClient` outside its context manager, an external ASGI runner
+  with the lifespan protocol off) and for the moments after
+  teardown has begun, not a state a deployed prober normally
   observes; the documentation says so rather than leaving it to be
   rediscovered.
 - The OpenAPI drift check (`tests/unit/test_api_contract.py`)
@@ -124,16 +125,28 @@ API leaves the traffic set too, which is worth knowing when sizing
 
 **The response is a closed set, classified where each fact lives.**
 `/readyz` answers `200 {"status": "ok"}` when ready and 503 with
-`{"status": "starting"}`, `{"status": "draining"}` or
+`{"status": "unavailable"}`, `{"status": "draining"}` or
 `{"status": "full"}` when not. Two decision sites, each owning its
 fact: the handler classifies composition presence, and the
 registry's `admission` property classifies its own three states,
 which the handler maps one to one (`admitting` to `ok`). Literals
 only, no message text, no provider names, no dependency detail;
-there is nothing in the body a probe log could leak. The non-ready
-states are worth distinguishing because they are read by operators
-debugging different problems at different ends of a process's
-life.
+there is nothing in the body a probe log could leak.
+`unavailable` means there is no serving composition, which is true
+before the lifespan has built one and again after teardown has
+released it; one literal for the one observable fact, rather than
+a `starting` that would lie at the far end of the process's life.
+
+**The composition attribute is scoped to the lifespan that built
+it.** `_build_composition` assigns `app.state.composition` and
+nothing today ever clears it, so a served-then-torn-down app would
+answer ready with its resources already closed. The build registers
+the clearing on its own exit stack, after every other registration,
+so the unwind (last in, first out) clears the attribute before any
+resource is released: no request can read a composition whose parts
+are already closing. This is the same discipline the 2026-08-18
+lifespan work applied to the API's installed runtime state, now
+applied to the attribute the drain and the probes read.
 
 **Provider and MCP state stay out of readiness by construction.**
 The handler consults composition presence and one registry flag,
@@ -196,12 +209,16 @@ restated.
   holds even though `drain()` never runs or is already running.
   `tests/unit/test_registry.py` pins `stop_admitting` as
   idempotent and `drain` as latching through it first.
-- **Startup**: `tests/unit/test_health.py` gains the described-app
-  case: a `TestClient` outside its context manager has no
-  composition, and `/readyz` answers 503 `starting`. The
-  listener-not-bound half of startup is uvicorn's own documented
-  behavior and is recorded in the README rather than re-proven
-  against uvicorn.
+- **Startup, and the whole lifecycle on one app**:
+  `tests/unit/test_health.py` gains the described-app case: a
+  `TestClient` outside its context manager has no composition, and
+  `/readyz` answers 503 `unavailable`. The integration lane drives
+  the same application through all three phases: `unavailable`
+  before the lifespan is entered, `ok` while serving, and
+  `unavailable` again after the lifespan has exited, never `ok`
+  with resources released. The listener-not-bound half of startup
+  is uvicorn's own documented behavior and is recorded in the
+  README rather than re-proven against uvicorn.
 - **Recoverable dependency failure**: a unit test hands the app a
   composition whose provider and MCP attributes are objects that
   fail the test on any attribute access, with a real registry
@@ -333,6 +350,14 @@ endorsed the no-new-module layout explicitly.
    and test the same application before entry, during serving, and
    after exit, with the final state a closed non-ready status,
    never `200 ok`.
+
+   *Resolution*: accepted in full. The build registers the clearing
+   of `app.state.composition` on its own exit stack after every
+   other registration, so the LIFO unwind clears it before any
+   resource is released. The `starting` literal is renamed
+   `unavailable`, one literal for the one observable fact (no
+   serving composition, before build or after teardown), and the
+   test plan drives one application through all three phases.
 
 4. **P2: the `/healthz` consumer inventory is incomplete.** The
    inventory omits live consumers in
