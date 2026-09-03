@@ -97,11 +97,13 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     worth announcing, eighty-three since a provider built inside a
     container says so when its endpoint is this machine (#340), and
     eighty-four since the memory store's write path gained an event of
-    its own (#314), and eighty-five since memory gained a cleanup that
-    acts for no agent at all (#83)."""
+    its own (#314), eighty-five since memory gained a cleanup that
+    acts for no agent at all (#83), and eighty-six since a handshake
+    refused by a shutdown stopped being reported as a full server
+    (#318)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 85
+    assert len(set(claimed)) == len(claimed) == 86
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -779,6 +781,9 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.ws:conversation #2": (
         ("RejectedAtCapacity", ("device", "event", "reason", "session")),
+    ),
+    "vinga_server.ws:conversation #3": (
+        ("RejectedWhileDraining", ("device", "event", "reason", "session")),
     ),
 }
 

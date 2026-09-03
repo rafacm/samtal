@@ -215,6 +215,29 @@ def test_a_capacity_refusal_is_logged_as_such(caplog: pytest.LogCaptureFixture) 
     assert rejected.reason == "capacity"
 
 
+def test_a_refusal_on_the_way_out_is_not_reported_as_a_full_server(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The two refusals send a reader somewhere else: a full server is a
+    sizing question, and a draining one is a redeploy that will be over
+    in a moment. Said as one word, every rolling restart read as a load
+    problem, at exactly the moment `/readyz` was answering `draining`."""
+    with caplog.at_level("WARNING"):
+        with TestClient(create_app(config_with_agent())) as client:
+            client.app.state.composition.sessions.stop_admitting()
+            with pytest.raises(WebSocketDisconnect):
+                with connect(client):
+                    pass
+
+    (rejected,) = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "session_rejected"
+    ]
+    assert rejected.reason == "draining"
+    assert "shutting down" in rejected.getMessage()
+
+
 def test_a_bad_token_is_refused_before_capacity_is_even_considered(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

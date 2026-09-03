@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 61 events in 86 variants. What was
+This document is that surface written down: 61 events in 87 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -206,7 +206,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `conversations_dropped` | `vinga_server.conversations.store` | WARNING | 1 |
 | `conversations_failed` | `vinga_server.conversations.store` | WARNING | 2 |
 | `conversations_pruned` | `vinga_server.conversations.store` | INFO | 1 |
-| `session_rejected` | `vinga_server.session`, `vinga_server.ws` | WARNING | 4 |
+| `session_rejected` | `vinga_server.session`, `vinga_server.ws` | WARNING | 5 |
 | `session_open` | `vinga_server.session` | INFO | 1 |
 | `session_limit` | `vinga_server.session` | INFO | 1 |
 | `session_idle` | `vinga_server.session` | INFO | 1 |
@@ -436,6 +436,23 @@ refused a websocket handshake from %s: the server is at capacity
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `capacity` |  |
+
+#### Variant 5: `vinga_server.ws` at WARNING
+
+```text
+refused a websocket handshake from %s: the server is shutting down
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `shown` (`COMPOSED`) | no | the `device_or_unidentified` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `draining` |  |
 
 ### `session_open`
 

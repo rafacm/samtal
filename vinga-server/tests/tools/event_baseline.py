@@ -1631,6 +1631,19 @@ def drive_session_rejected_at_capacity(directory: Path) -> None:
                 pass
 
 
+def drive_session_rejected_while_draining(directory: Path) -> None:
+    """The other refusal the endpoint makes before a session can run: the
+    server has been told to stop, so the door is shut whatever the count
+    says."""
+    with TestClient(create_app(apart(config_with_agent(), directory))) as client:
+        client.app.state.composition.sessions.stop_admitting()
+        try:
+            with connect(client):
+                pass
+        except WebSocketDisconnect:
+            pass
+
+
 async def drive_provider_reaches_loopback(_: Path) -> None:
     """One entry built with the image's marker set, which is the pair of
     facts the warning is made of.
@@ -1773,6 +1786,11 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     ),
     Driver((WS, "conversation", 1), drive_auth_rejected, "auth_rejected"),
     Driver((WS, "conversation", 2), drive_session_rejected_at_capacity, "session_rejected"),
+    Driver(
+        (WS, "conversation", 3),
+        drive_session_rejected_while_draining,
+        "session_rejected",
+    ),
 )
 
 

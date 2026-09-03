@@ -25,7 +25,11 @@ from vinga_server.config.models import normalize_mac
 from vinga_server.device.boundary import WEBSOCKET_PATH
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import ServerEvents
-from vinga_server.events.catalog import AuthRejected, RejectedAtCapacity
+from vinga_server.events.catalog import (
+    AuthRejected,
+    RejectedAtCapacity,
+    RejectedWhileDraining,
+)
 from vinga_server.events.values import (
     AuthRejection,
     DeviceId,
@@ -147,9 +151,10 @@ async def conversation(websocket: WebSocket) -> None:
         comp.sessions,
         comp.live,
     )
-    # Capacity is checked after the token, so a full server still answers a
-    # bad token with a refusal about the token.
-    if comp.sessions.admit(session) != "admitting":
+    # Admission is decided after the token, so a full server still answers
+    # a bad token with a refusal about the token.
+    admission = comp.sessions.admit(session)
+    if admission != "admitting":
         # The MAC this server recognizes, or nothing.
         #
         # "Past the refusal above the token verified against this
@@ -163,13 +168,24 @@ async def conversation(websocket: WebSocket) -> None:
         # anything else becomes a null field beside the fixed phrase the
         # empty header already used.
         known = _known_device(device_id)
-        events.emit(
-            lambda: RejectedAtCapacity(
-                device=None if known is None else DeviceId(known),
-                session=SessionId(session.session_id),
-                shown=DeviceOrUnidentified.of(known),
+        device = None if known is None else DeviceId(known)
+        rejected = SessionId(session.session_id)
+        shown = DeviceOrUnidentified.of(known)
+        # The two refusals are said apart, because they send whoever
+        # reads them somewhere else: a full server is a sizing question
+        # and a draining one is a redeploy in progress. The registry
+        # decided which it was in the same step as the refusal, so this
+        # reports its word rather than guessing at one.
+        if admission == "draining":
+            events.emit(
+                lambda: RejectedWhileDraining(
+                    device=device, session=rejected, shown=shown
+                )
             )
-        )
+        else:
+            events.emit(
+                lambda: RejectedAtCapacity(device=device, session=rejected, shown=shown)
+            )
         # The one path where a session that was built never runs, so the
         # `finally` inside `run` never fires for it. The live tap it
         # attached at construction comes off here instead, after the
