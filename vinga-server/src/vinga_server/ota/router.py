@@ -33,8 +33,8 @@ ACTIVATE_SEGMENT = "activate"
 
 
 def spellings(path: str) -> tuple[str, ...]:
-    """Every spelling of one device-facing path: as written, and without
-    its trailing slash, both served by the same handler.
+    """Every spelling of one path: as written, and without its trailing
+    slash, both served by the same handler.
 
     Not a redirect between the two, which is what this was until a
     factory board met it (2026-08-13): the captive portal saved the
@@ -45,6 +45,11 @@ def spellings(path: str) -> tuple[str, ...]:
     say about it either. A device-facing endpoint cannot spend a round
     trip on a redirect it has no evidence the device will follow, so
     every spelling answers.
+
+    The device-facing routes are what it was written for, and the two
+    health probes use it too: their reason is not a factory board but a
+    Location header, which a redirect would fill with the probe URL's
+    own query string.
 
     Lives here because both routers below are built from it, and both
     are built here. It used to live beside the handlers instead, so that

@@ -19,10 +19,13 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.support.events import both_formats
 from vinga_server import __version__
 from vinga_server.app import create_app
 from vinga_server.build_info import REVISION_ENV, revision
 from vinga_server.config import Config
+from vinga_server.events import attach_server_tap, detach_server_tap
+from vinga_server.events.live import LiveEvents
 from vinga_server.registry import SessionRegistry
 
 
@@ -127,6 +130,54 @@ def test_a_full_server_is_not_ready_and_is_ready_again_when_a_slot_frees() -> No
 
     registry.remove(session)
     assert client.get("/readyz").json() == {"status": "ok"}
+
+
+# A credential-shaped value, in the one place a probe URL can carry one.
+PROBE_SENTINEL = "sk-live-probe-4b71ce"
+
+
+async def test_a_value_in_a_probe_url_comes_back_on_no_surface(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both spellings of both probes answer, and none of them quotes the
+    request back.
+
+    A probe URL is what goes into an orchestrator manifest, a compose
+    healthcheck and a CI script, so a token pasted into its query is an
+    ordinary mistake rather than an exotic one. The router's own
+    trailing-slash redirect used to put exactly that in a `Location`
+    header, together with the Host it was asked on, which is what a
+    proxy log and a browser history keep.
+
+    Asserted over every surface this server has, because the claim is
+    "nowhere": the headers, the body, the log in each rendering a
+    deployment keeps it in, and the live event stream.
+    """
+    hub = LiveEvents()
+    attach_server_tap(hub)
+    watching = hub.subscribe()
+    client = serving(SessionRegistry(max_sessions=1))
+    try:
+        with caplog.at_level("DEBUG"):
+            answers = [
+                client.get(f"{path}?token={PROBE_SENTINEL}", follow_redirects=False)
+                for path in ("/readyz", "/readyz/", "/healthz", "/healthz/")
+            ]
+    finally:
+        detach_server_tap(hub)
+
+    # Answered rather than redirected, which is what leaves no header to
+    # carry anything.
+    assert [answer.status_code for answer in answers] == [200, 200, 200, 200]
+    for answer in answers:
+        headers = "\n".join(f"{name}: {value}" for name, value in answer.headers.items())
+        assert PROBE_SENTINEL not in headers
+        assert PROBE_SENTINEL not in answer.text
+    assert PROBE_SENTINEL not in both_formats(caplog)
+    streamed: list[Any] = []
+    while (item := await watching.next(timeout=0)) is not None:
+        streamed.append(item)
+    assert PROBE_SENTINEL not in repr(streamed)
 
 
 def test_a_server_on_its_way_out_says_draining_and_not_full() -> None:
