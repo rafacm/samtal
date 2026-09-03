@@ -64,7 +64,7 @@ class FakeSession:
 def registry_with(*sessions: FakeSession, max_sessions: int = 8) -> SessionRegistry:
     registry = SessionRegistry(max_sessions=max_sessions)
     for session in sessions:
-        assert registry.try_add(cast(Any, session))
+        assert registry.admit(cast(Any, session)) == "admitting"
     return registry
 
 

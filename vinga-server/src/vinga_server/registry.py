@@ -91,7 +91,7 @@ class SessionRegistry:
 
         One classifier over the two facts this object owns, so that the
         door and anything reporting on the door cannot come to disagree:
-        `try_add` refuses exactly when this is not `admitting`, and the
+        `admit` decides through this and answers in these words, and the
         readiness probe says the same word out loud.
 
         Draining wins over full, because it is the terminal one. A full
@@ -123,15 +123,41 @@ class SessionRegistry:
         """
         self._draining = True
 
-    def try_add(self, session: "DeviceSession") -> bool:
-        """Take a slot for this session, or answer False when the server
-        is full or on its way out. Deliberately not a coroutine: an
-        admission decision that can await is one that can race another
-        admission."""
-        if self.admission != "admitting":
-            return False
+    def admit(self, session: "DeviceSession") -> Admission:
+        """Take a slot for this session, and say what was decided:
+        `admitting` when it got one, and which of the two refusals it met
+        when it did not.
+
+        The answer is the classifier's own word rather than a yes or a
+        no, because the caller has something to say about the difference:
+        a device turned away from a full server and one turned away from
+        a server that is shutting down are different diagnoses, and
+        collapsing them made a redeploy look like a capacity problem.
+
+        Deliberately not a coroutine: an admission decision that can
+        await is one that can race another admission. What it cannot
+        refuse to race is the latch, which `stop_admitting` sets from a
+        signal handler, so it can land between any two lines here. That
+        is why the flag is read again after the insertion: a session
+        admitted by a classification the signal then invalidated would be
+        a conversation started on a process already shutting down.
+        Capacity needs no second look, since this is the only thing that
+        adds to the set and no signal handler calls it.
+        """
+        decision = self.admission
+        if decision != "admitting":
+            return decision
+        held = session in self._sessions
         self._sessions.add(session)
-        return True
+        if self._draining:
+            # The signal won the race. The slot goes back, unless this
+            # session was already holding one: a conversation admitted
+            # before the shutdown began keeps the slot it is speaking
+            # through, and only this second attempt is refused.
+            if not held:
+                self._sessions.discard(session)
+            return "draining"
+        return "admitting"
 
     def bound(self, session: "DeviceSession", generation: Generation) -> None:
         """This session is talking through this world, from now until it

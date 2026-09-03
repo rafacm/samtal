@@ -56,7 +56,7 @@ async def test_draining_refuses_new_sessions() -> None:
     assert registry.draining
     # A server on its way out does not want the next conversation, even
     # though every slot is now free.
-    assert not registry.try_add(cast(Any, FakeSession()))
+    assert registry.admit(cast(Any, FakeSession())) != "admitting"
 
 
 async def test_draining_an_idle_server_is_immediate() -> None:
@@ -281,7 +281,7 @@ async def test_the_signal_shuts_the_door_before_the_drain_gets_its_turn() -> Non
     # Nothing has run on the loop yet: the drain task has not been
     # created, let alone reached its own first statement.
     assert registry.admission == "draining"
-    assert not registry.try_add(cast(Any, FakeSession()))
+    assert registry.admit(cast(Any, FakeSession())) != "admitting"
     # And the drain still happens, so the door is not all that shut.
     for _ in range(100):
         await asyncio.sleep(0.02)
@@ -301,7 +301,7 @@ async def test_a_zero_drain_shuts_the_door_it_never_drains_behind() -> None:
 
     assert server.should_exit
     assert registry.admission == "draining"
-    assert not registry.try_add(cast(Any, FakeSession()))
+    assert registry.admit(cast(Any, FakeSession())) != "admitting"
 
 
 def test_a_signal_with_no_loop_to_schedule_on_still_shuts_the_door() -> None:

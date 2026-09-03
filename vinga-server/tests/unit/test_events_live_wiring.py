@@ -164,7 +164,7 @@ async def test_a_session_rejected_at_capacity_gives_the_hub_back(
         real(self)
 
     monkeypatch.setattr(DeviceSession, "detach_live", spy)
-    monkeypatch.setattr(SessionRegistry, "try_add", lambda self, session: False)
+    monkeypatch.setattr(SessionRegistry, "admit", lambda self, session: "full")
 
     with entered_app(config_with_agent()) as (app, client):
         hub = app.state.composition.live
