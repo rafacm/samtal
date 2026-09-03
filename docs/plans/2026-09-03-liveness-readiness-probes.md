@@ -243,3 +243,62 @@ docs, which record what was true and are not updated. None move.
   README makes no endpoint-level claims and the cli.md version
   procedure stays on `/healthz`, both confirmed rather than
   assumed during implementation.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-03, against commit `9299f2a9`; the reviewer ran
+8m39s. Verdict: ready after the P1/P2 amendments; the reviewer
+endorsed the no-new-module layout explicitly.
+
+1. **P1: shutdown begins before the admission flag changes.** The
+   plan defines the transition as `SessionRegistry.drain`'s first
+   statement, but `DrainingServer.handle_exit` sets its own
+   `_draining` and only schedules the registry drain; with
+   `drain_s <= 0` it never calls it, and a second signal can enter
+   uvicorn shutdown before the scheduled task runs. During those
+   paths `/readyz` would stay `ok` and `try_add` would keep
+   admitting after shutdown has begun, and the plan's tests call
+   `registry.drain()` directly so they bypass the defect. The plan
+   should add a synchronous, idempotent registry operation that
+   latches admission closed, call it in `handle_exit` before any
+   scheduling or delegation on every path, have `drain()` reuse it,
+   and test through the real `handle_exit` seam.
+
+2. **P1: "a full server stays ready" contradicts the settled
+   readiness meaning.** The issue's settled definition is "may the
+   process admit a new device conversation", and a process at
+   `max_sessions` may not. Redefining "may admit" as "past startup
+   and not draining" is an issue change the plan cannot make. The
+   plan should derive readiness from a public registry admission
+   predicate covering both lifecycle and capacity, have `try_add`
+   use the same predicate, add a closed literal for the capacity
+   state, and test readiness false at the cap and true again when a
+   slot frees.
+
+3. **P2: composition presence is not an honest lifespan-state
+   seam.** `_build_composition` assigns `app.state.composition` and
+   nothing ever clears it, so a previously served app would report
+   ready after teardown, with its resources already closed; the
+   fresh-`TestClient` startup test cannot catch that. The 2026-08-18
+   lifespan record already treats clearing installed runtime state
+   after teardown as necessary. The plan should scope the attribute
+   to the active lifespan, clearing it before resource unwinding,
+   and test the same application before entry, during serving, and
+   after exit, with the final state a closed non-ready status,
+   never `200 ok`.
+
+4. **P2: the `/healthz` consumer inventory is incomplete.** The
+   inventory omits live consumers in
+   `.github/workflows/vinga-server.yml`, `tests/smoke/serve.sh`,
+   `tests/integration/test_cli_live.py`,
+   `tests/integration/test_config_api.py`,
+   `tests/integration/test_smoke_seeds.py` and
+   `tests/unit/test_config_api.py`, plus explanatory text in
+   `docs/conversational-quality-regression-suite.md`, and the new
+   unauthenticated route stales the route-count comment at
+   `app.py` lines 995 to 998. The plan should record the complete
+   `git grep -n healthz` inventory, separate historical mentions
+   from live consumers, classify every live use as liveness,
+   readiness or revision inspection, move readiness waiters to
+   `/readyz`, and name every affected comment and assertion in M1.
