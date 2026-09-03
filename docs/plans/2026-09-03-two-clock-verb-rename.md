@@ -335,8 +335,19 @@ marked new.
   commit as the last document edit, never by hand.
 - **Generated-document drift checks** (unit and integration lanes)
   hold the four regenerated references to their generators.
-- **`test_config_cli_respelling.py` and its differential stay
-  untouched**: they are the #223 record, census class historical.
+- **`test_config_cli_respelling.py`'s transcript and steps stay
+  frozen, its substitution table grows.** The differential drives the
+  current grammar against the #223 transcript, and its `RESPELLINGS`
+  table is the licensed difference, with the #341 export-header entry
+  as the precedent. This change adds narrowly labeled #371 entries
+  for exactly the deliberate output changes: the old `RELOAD_NOTICE`
+  text to the new `APPLY_NOTICE` text, the old
+  `BINDING_UNSERVED_NOTICE` text to the new one, and the old export
+  header's three steps to the new ones. The transcript file and the
+  step list are not recaptured and not respelled; a difference the
+  table does not explain stays a failure. (The module is census class
+  historical, so its quoted old spellings are untouched by the
+  guard.)
 
 ## Risks
 
@@ -436,6 +447,11 @@ module's own rule is that later intentional changes get labeled
 `RESPELLINGS` entries (its #341 entry is the precedent). The plan
 should add narrowly labeled #371 substitutions rather than recapture
 or respell the transcript.
+
+*Resolution*: adopted. The Tests section now says the transcript and
+steps stay frozen while `RESPELLINGS` gains labeled #371 entries for
+the two notice texts and the export header, following the module's
+own #341 precedent.
 
 **4. P1: the pre-cutover export fixture conflicts with the census and
 with its byte comparison.** `pre-cutover-export.yaml` is committed as
