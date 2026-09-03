@@ -2450,14 +2450,15 @@ def test_a_preset_imports_onto_an_empty_store(
 NOT_INSTALLED = ["apply"]
 
 
-def test_every_published_recipe_runs_against_the_server(
+def test_every_published_recipe_line_but_the_preset_apply_runs(
     live: Live,
     isolated: Live,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Every command `docs/reference/cli.md` publishes, in the order it
-    publishes them, against a server that booted on an empty database.
+    """Every command `docs/reference/cli.md` publishes except one, in the
+    order it publishes them, against a server that booted on an empty
+    database.
 
     The recipes are read out of the example fragments rather than
     written beside them, which keeps them from naming a file that moved.
@@ -2471,13 +2472,14 @@ def test_every_published_recipe_runs_against_the_server(
     is where those commands read them from and the reason none of them
     takes the value as an argument.
 
-    One departure from verbatim, and it is the preset test's: the bare
-    `apply` each preset's recipe ends with is skipped. An operator runs
-    it, and installing a preset builds what it names, which here is a
-    cloud stack whose credentials the recipe stores two lines later and
-    a local stack whose models are a download. The words being checked
-    are the recipe's own, so the exception lives where the run happens
-    rather than in the document.
+    The exception is in the name because a claim this test cannot make
+    should not be one a reader has to open it to find: the bare `apply`
+    each preset's recipe ends with is not run. An operator runs it, and
+    installing a preset builds what it names, which here is a cloud
+    stack whose credentials the recipe stores two lines later and a
+    local stack whose models are a download. The published page says the
+    same thing, in `RECIPES_INTRO`, so the reference does not claim
+    coverage this lane does not give it.
     """
     monkeypatch.chdir(SERVER)
     monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
@@ -2490,6 +2492,11 @@ def test_every_published_recipe_runs_against_the_server(
     assert published, "no recipe is published, so what follows is vacuous"
     assert NOT_INSTALLED in [line.split() for line in published], (
         "the skipped line is no longer published, so the exception is about nothing"
+    )
+    # And the page discloses it, so a reader of the reference is not told
+    # a list is run that is one line short of being run.
+    assert f"{cli.PROGRAM} {' '.join(NOT_INSTALLED)}" in cli.RECIPES_INTRO, (
+        "the published recipes intro does not name the line this lane skips"
     )
 
     for line in published:
