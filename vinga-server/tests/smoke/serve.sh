@@ -40,6 +40,11 @@ VINGA_SEED_LOG="${TMPDIR:-/tmp}/vinga-seed-server.log"
 VINGA_SEED_PID=""
 
 server_ready() {
+    # Readiness rather than liveness, because what this waits for is a
+    # server that can be worked with rather than one that is merely
+    # running, and because it is what the name of this function has
+    # always meant.
+    #
     # Not curl: the image carries a Python interpreter and deliberately
     # not much else, which is what the container healthcheck already
     # relies on.
@@ -47,7 +52,7 @@ server_ready() {
 import sys
 import urllib.request
 
-urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/healthz", timeout=2).read()
+urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/readyz", timeout=2).read()
 PY
 }
 

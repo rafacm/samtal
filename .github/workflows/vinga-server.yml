@@ -1147,7 +1147,7 @@ jobs:
       #
       # The CLI writes through the configuration API, so the seeding
       # script starts a server of its own inside this container, waits
-      # for /healthz, configures it over loopback and stops it again.
+      # for /readyz, configures it over loopback and stops it again.
       # That is why this container is given what a server needs: the two
       # secrets, and nothing else, because an empty domain half builds no
       # provider and so needs no provider credential.

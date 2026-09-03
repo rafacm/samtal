@@ -2546,7 +2546,11 @@ def test_the_lane_s_server_booted_from_the_environment_alone(
     """
     assert CONFIG_ENV not in os.environ
 
-    with urllib.request.urlopen(f"{deployed.origin}/healthz", timeout=10) as response:
+    # Readiness rather than liveness: what this claims is that the server
+    # the lane has been talking to is up on its own port and able to take
+    # a conversation, which is the stronger of the two answers and the
+    # one the rest of this lane depends on.
+    with urllib.request.urlopen(f"{deployed.origin}/readyz", timeout=10) as response:
         assert response.status == 200
 
     engine = open_database(deployed.database)
