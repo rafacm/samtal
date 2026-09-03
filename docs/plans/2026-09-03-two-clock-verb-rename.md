@@ -262,6 +262,15 @@ change falsifies, found through the authority taxonomy in
 - **`vinga-server/config.example.yaml`**: the three comment lines
   naming `config apply`, `config apply --no-reload` and
   `config reload` respell to the new grammar.
+- **`vinga-server/config.deploy.example.sh`,
+  `config.deploy.example.yaml` and `examples/README.md`**: the deploy
+  seeding script's `apply --no-reload` invocation and its staging
+  paragraph, the profile's "one `config apply` against the running
+  server" sentence, and the examples README's fragment/preset
+  definitions all respell to the import/apply grammar. These are
+  exactly the stale spellings the census cannot flag, because a stale
+  `vinga apply -f` resolves to the newly valid `apply` row; the
+  named-file sweep and the guard below are the mitigation.
 - **`vinga-server/examples/presets/local-stack.yaml` and
   `cloud-stack.yaml`**: header comments become
   `vinga import -f <preset>` followed by `vinga apply`. The
@@ -333,6 +342,18 @@ marked new.
   no-such-command error naming `reload`; `vinga apply -f x.yaml`
   exits 2 with no-such-option `-f`; `vinga import -f -` is the
   registered write. These are the pre-release stance made falsifiable.
+- **A semantic guard for the swapped verb (new).** The census scanner
+  stops at the first option, so a stale live `vinga apply -f ...` or
+  `apply --no-reload` passes the registered-command guard by naming
+  the new `apply`. A new test beside the census asserts that no live
+  (`respell`) match's raw line pairs an `apply` invocation with `-f`,
+  `--file` or `--no-reload`; the historical classes stay exempt.
+- **`NOTHING_APPLIED` becomes the empty-import line.** Its sentence
+  ("nothing was applied. An applied document's top-level keys...")
+  is write-sense prose the census cannot see; it is renamed
+  `NOTHING_IMPORTED` and reworded for the import grammar, and the
+  manual audit covers write-sense "apply/applied" prose as well as
+  `reload`.
 - **The census is both tool and test.** After the sweep,
   `test_every_live_spelling_names_a_command_the_tree_has` is the
   proof no live document still prescribes `vinga reload`; the
@@ -499,6 +520,13 @@ document's...") that becomes the empty-import line. The plan should
 add a semantic guard for live `apply` invocations carrying `-f` or
 `--no-reload`, audit write-sense "apply/applied" prose as well as
 `reload`, and name those files.
+
+*Resolution*: adopted. The documentation footprint now names the
+deploy example pair and the examples README, the Tests section gains
+the option-aware guard for live `apply` invocations and the
+`NOTHING_IMPORTED` rewording, and the manual audit widens to
+write-sense apply prose. Internal API shape names keep the decided
+vocabulary.
 
 **6. P2: `DIFF_INTRO` keeps explaining the `reload` token with a
 command that no longer exists.** The token stays, but its
