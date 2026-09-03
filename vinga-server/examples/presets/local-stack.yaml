@@ -1,17 +1,20 @@
 # A whole deployment that runs on this host and reaches no vendor:
 # local transcription, a local model behind an OpenAI-shaped endpoint, a
 # local voice, and the endpointer that runs on every audio frame anyway.
-# One document, written in one transaction:
+# One document, written in one transaction and then installed on the
+# running server:
 #
-#   vinga apply -f examples/presets/local-stack.yaml
+#   vinga import -f examples/presets/local-stack.yaml
+#   vinga apply
 #
-# Applying orders the writes for you. A write whose references do not
+# The import orders the writes for you. A write whose references do not
 # resolve is refused, and a document is refused whole rather than half
-# applied, so there is no creation order to get right here: the
+# written, so there is no creation order to get right here: the
 # providers, the defaults naming them and the agent inheriting them all
-# arrive together. Applying is additive and never deletes, so a section
+# arrive together. Importing is additive and never deletes, so a section
 # this document does not name is left alone and the same document twice
-# changes nothing.
+# changes nothing. Nothing the import wrote is serving until the apply
+# behind it installs it.
 #
 # Nothing here holds a credential. A keyless local runner needs none,
 # and an endpoint that authenticates names the variable holding its key
