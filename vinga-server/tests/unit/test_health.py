@@ -122,7 +122,7 @@ def test_a_full_server_is_not_ready_and_is_ready_again_when_a_slot_frees() -> No
     registry = SessionRegistry(max_sessions=1)
     client = serving(registry)
     session = cast(Any, object())
-    assert registry.try_add(session)
+    assert registry.admit(session) == "admitting"
 
     full = client.get("/readyz")
     assert full.status_code == 503
@@ -185,7 +185,7 @@ def test_a_server_on_its_way_out_says_draining_and_not_full() -> None:
     reports: a full server has a slot again when a conversation ends, and
     a draining one never admits another."""
     registry = SessionRegistry(max_sessions=1)
-    assert registry.try_add(cast(Any, object()))
+    assert registry.admit(cast(Any, object())) == "admitting"
     registry.stop_admitting()
 
     response = serving(registry).get("/readyz")

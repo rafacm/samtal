@@ -80,7 +80,7 @@ async def test_the_shutdown_drain_closes_as_drain(
 ) -> None:
     session, _, task = await open_session(config_with_agent())
     registry = SessionRegistry(max_sessions=8)
-    assert registry.try_add(session)
+    assert registry.admit(session) == "admitting"
 
     with caplog.at_level("INFO"):
         await registry.drain(timeout_s=5)
@@ -176,7 +176,7 @@ async def test_the_first_cause_wins(caplog: pytest.LogCaptureFixture) -> None:
     whichever site happened to run last."""
     session, websocket, task = await open_session(idle_config(0.2))
     registry = SessionRegistry(max_sessions=8)
-    assert registry.try_add(session)
+    assert registry.admit(session) == "admitting"
 
     with caplog.at_level("INFO"):
         drain = asyncio.create_task(registry.drain(timeout_s=5))
@@ -211,7 +211,7 @@ async def test_a_disconnect_a_drain_arrives_behind_is_still_a_client_close(
     # drain arriving mid-close becomes a fact rather than a race.
     session._watchdog.stop = held  # type: ignore[method-assign]
     registry = SessionRegistry(max_sessions=8)
-    assert registry.try_add(session)
+    assert registry.admit(session) == "admitting"
 
     with caplog.at_level("INFO"):
         # The device hangs up, and the close gets as far as its first

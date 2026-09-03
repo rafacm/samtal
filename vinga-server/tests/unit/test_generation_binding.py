@@ -129,7 +129,7 @@ async def test_a_device_id_that_is_not_a_mac_holds_nothing() -> None:
     to hold and nothing for its removal to release."""
     generations, registry = serving()
     session = connection(served(), Turned("not-a-mac"), registry, generations)
-    registry.try_add(session)
+    registry.admit(session)
 
     await session.run()
     registry.remove(session)
@@ -145,7 +145,7 @@ async def test_a_device_bound_to_nothing_holds_nothing() -> None:
     session = connection(
         served(), Turned(UNBOUND), registry, generations, bindings=Bound([])
     )
-    registry.try_add(session)
+    registry.admit(session)
 
     await session.run()
     registry.remove(session)
@@ -163,7 +163,7 @@ async def test_a_connection_cancelled_while_the_bindings_resolve_holds_nothing()
     session = connection(
         served(), Turned(BOUND), registry, generations, bindings=bindings
     )
-    registry.try_add(session)
+    registry.admit(session)
 
     running = asyncio.create_task(session.run())
     await asyncio.wait_for(bindings.asked.wait(), timeout=5)
@@ -192,7 +192,7 @@ async def test_a_disconnect_before_the_hello_releases_the_world_it_bound() -> No
     generations, registry = serving()
     socket = Vanishing(BOUND)
     session = connection(served(), socket, registry, generations)
-    registry.try_add(session)
+    registry.admit(session)
 
     await session.run()
 
@@ -218,7 +218,7 @@ async def test_a_world_installed_during_the_lookup_is_the_one_that_is_bound() ->
     booted = generations.current()
     bindings = Waiting(["assistant"])
     session = connection(config, Vanishing(BOUND), registry, generations, bindings=bindings)
-    registry.try_add(session)
+    registry.admit(session)
 
     running = asyncio.create_task(session.run())
     await asyncio.wait_for(bindings.asked.wait(), timeout=5)
@@ -286,7 +286,7 @@ async def test_an_agent_deleted_during_the_lookup_turns_the_device_away() -> Non
     bindings = Waiting(["helper"])
     socket = Turned(BOUND)
     session = connection(config, socket, registry, generations, bindings=bindings)
-    registry.try_add(session)
+    registry.admit(session)
 
     running = asyncio.create_task(session.run())
     await asyncio.wait_for(bindings.asked.wait(), timeout=5)
@@ -317,7 +317,7 @@ async def test_an_agent_added_during_the_lookup_is_served_at_once() -> None:
     registry = SessionRegistry(max_sessions=4, generations=generations)
     bindings = Waiting(["helper"])
     session = connection(before, Vanishing(BOUND), registry, generations, bindings=bindings)
-    registry.try_add(session)
+    registry.admit(session)
 
     running = asyncio.create_task(session.run())
     await asyncio.wait_for(bindings.asked.wait(), timeout=5)

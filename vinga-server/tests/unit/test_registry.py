@@ -18,7 +18,7 @@ from tests.support.wire import connect, shake_hands
 from vinga_server.app import create_app
 from vinga_server.config.secrets import SecretStore
 from vinga_server.generation import Generation, Generations
-from vinga_server.registry import SessionRegistry
+from vinga_server.registry import Admission, SessionRegistry
 
 
 def fake_session() -> Any:
@@ -29,26 +29,26 @@ def fake_session() -> Any:
 def test_sessions_are_admitted_up_to_the_cap() -> None:
     registry = SessionRegistry(max_sessions=2)
     first, second, third = fake_session(), fake_session(), fake_session()
-    assert registry.try_add(first)
-    assert registry.try_add(second)
-    assert not registry.try_add(third)
+    assert registry.admit(first) == "admitting"
+    assert registry.admit(second) == "admitting"
+    assert registry.admit(third) != "admitting"
     assert len(registry) == 2
 
 
 def test_removing_a_session_frees_its_slot() -> None:
     registry = SessionRegistry(max_sessions=1)
     first, second = fake_session(), fake_session()
-    assert registry.try_add(first)
-    assert not registry.try_add(second)
+    assert registry.admit(first) == "admitting"
+    assert registry.admit(second) != "admitting"
     registry.remove(first)
-    assert registry.try_add(second)
+    assert registry.admit(second) == "admitting"
 
 
 def test_removing_is_idempotent() -> None:
     """It runs in a session's finally, and nothing promises it ran once."""
     registry = SessionRegistry(max_sessions=1)
     session = fake_session()
-    registry.try_add(session)
+    registry.admit(session)
     registry.remove(session)
     registry.remove(session)
     registry.remove(fake_session())
@@ -56,13 +56,13 @@ def test_removing_is_idempotent() -> None:
 
 
 def test_a_full_registry_says_which_of_the_two_reasons_it_is() -> None:
-    """The classifier `try_add` refuses through, and the one a readiness
+    """The classifier `admit` decides through, and the one a readiness
     probe reports: one answer over both facts, so the door and anything
     reporting on the door cannot come to disagree."""
     registry = SessionRegistry(max_sessions=1)
     assert registry.admission == "admitting"
     session = fake_session()
-    registry.try_add(session)
+    registry.admit(session)
 
     assert registry.admission == "full"
 
@@ -75,7 +75,7 @@ def test_a_server_on_its_way_out_is_draining_rather_than_full() -> None:
     slot again when a conversation ends, a draining one never admits
     another."""
     registry = SessionRegistry(max_sessions=1)
-    registry.try_add(fake_session())
+    registry.admit(fake_session())
 
     registry.stop_admitting()
 
@@ -94,7 +94,51 @@ def test_shutting_the_door_latches_and_costs_nothing_to_repeat() -> None:
 
     assert registry.draining
     assert registry.admission == "draining"
-    assert not registry.try_add(fake_session())
+    assert registry.admit(fake_session()) != "admitting"
+
+
+class LatchedMidDecision(SessionRegistry):
+    """A registry whose shutdown lands in the one window a check and an
+    act leave open.
+
+    `stop_admitting` is called from a signal handler, and a signal
+    handler runs between two bytecodes of whatever the main thread was
+    doing, so the moment after `admit` has classified and before it has
+    taken the slot is a moment the latch can fire in. Overriding the
+    classification is how a test occupies that window deterministically,
+    rather than running threads and hoping.
+    """
+
+    @property
+    def admission(self) -> Admission:
+        decision = super().admission
+        self.stop_admitting()
+        return decision
+
+
+def test_a_signal_landing_mid_decision_takes_the_slot_back() -> None:
+    """What a session admitted here would be: a conversation started on a
+    process whose shutdown had already begun, holding a slot the drain
+    had already counted."""
+    registry = LatchedMidDecision(max_sessions=1)
+
+    assert registry.admit(fake_session()) == "draining"
+
+    assert len(registry) == 0
+
+
+def test_a_session_already_admitted_keeps_its_slot_through_that_race() -> None:
+    """The rollback gives back the slot this call took, and not the one
+    an earlier call took: a conversation admitted before the shutdown
+    began is one the drain has to reach."""
+    registry = SessionRegistry(max_sessions=2)
+    session = fake_session()
+    assert registry.admit(session) == "admitting"
+    registry.stop_admitting()
+
+    assert registry.admit(session) == "draining"
+
+    assert len(registry) == 1
 
 
 async def test_the_drain_shuts_the_door_before_it_waits_for_anything() -> None:
@@ -111,7 +155,7 @@ async def test_the_drain_shuts_the_door_before_it_waits_for_anything() -> None:
             seen.append(registry.admission)
             return True
 
-    assert registry.try_add(cast(Any, Watching()))
+    assert registry.admit(cast(Any, Watching())) == "admitting"
 
     await registry.drain(timeout_s=1.0)
 
@@ -121,8 +165,8 @@ async def test_the_drain_shuts_the_door_before_it_waits_for_anything() -> None:
 def test_the_same_session_does_not_take_two_slots() -> None:
     registry = SessionRegistry(max_sessions=2)
     session = fake_session()
-    assert registry.try_add(session)
-    assert registry.try_add(session)
+    assert registry.admit(session) == "admitting"
+    assert registry.admit(session) == "admitting"
     assert len(registry) == 1
 
 
@@ -248,7 +292,7 @@ def test_an_admitted_session_holds_no_world_until_it_binds() -> None:
     registry = SessionRegistry(max_sessions=2, generations=Recording(one_world()))
     admitted = fake_session()
 
-    assert registry.try_add(admitted)
+    assert registry.admit(admitted) == "admitting"
 
     assert registry.held() == []
 
@@ -258,7 +302,7 @@ async def test_a_bound_session_is_holding_its_world_until_it_is_removed() -> Non
     holder = Recording(world)
     registry = SessionRegistry(max_sessions=2, generations=holder)
     session = fake_session()
-    registry.try_add(session)
+    registry.admit(session)
 
     registry.bound(session, world)
     assert registry.held() == [world]
@@ -277,7 +321,7 @@ async def test_removing_a_bound_session_asks_the_holder_to_let_go() -> None:
     holder = Recording(world)
     registry = SessionRegistry(max_sessions=2, generations=holder)
     session = fake_session()
-    registry.try_add(session)
+    registry.admit(session)
     registry.bound(session, world)
 
     registry.remove(session)
@@ -292,7 +336,7 @@ async def test_removing_a_session_that_never_bound_asks_nothing() -> None:
     holder = Recording(one_world())
     registry = SessionRegistry(max_sessions=2, generations=holder)
     session = fake_session()
-    registry.try_add(session)
+    registry.admit(session)
 
     registry.remove(session)
     await registry.drain(timeout_s=1.0)

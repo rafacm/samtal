@@ -149,7 +149,7 @@ async def conversation(websocket: WebSocket) -> None:
     )
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.
-    if not comp.sessions.try_add(session):
+    if comp.sessions.admit(session) != "admitting":
         # The MAC this server recognizes, or nothing.
         #
         # "Past the refusal above the token verified against this
