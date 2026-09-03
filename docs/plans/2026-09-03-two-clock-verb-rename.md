@@ -313,6 +313,18 @@ change falsifies, found through the authority taxonomy in
   `docs/reference/cli.md` generated region, prose outside the markers
   swept by hand; `docs/reference/domain-config.md`;
   `docs/reference/events.md`; `docs/reference/api-openapi.json`.
+- **`docs/reference/cli.md`, "Versions, and the two halves
+  disagreeing"**: the section claims a mismatched pair fails legibly
+  at the API seam (absent route, unrecognized shape). This rename
+  preserves every route and shape while changing server-produced
+  command prose, so the skew it creates is textual: a new CLI against
+  an old server is told to run `vinga reload`, which it no longer
+  has, and an old CLI against a new server is told to run
+  `vinga apply`, which in its own grammar is the write. The section
+  gains a paragraph naming this skew, keeping the no-alias decision
+  and the standing one-sentence policy (run the CLI from the same
+  release line as the server) as the answer: command notices from a
+  mismatched pair are not to be followed until the halves match.
 - **Untouched by design**: `docs/plans/`, `docs/features/`,
   `docs/adr/`, `CHANGELOG.md` history, `cli-guide-audit.md`, the
   respelling differential fixtures. All census class `historical`;
@@ -572,6 +584,11 @@ an old CLI against a new server is told to run `vinga apply`, which
 in its grammar is the write. Update the versions guidance to describe
 this skew and require same-release halves before following returned
 command notices.
+
+*Resolution*: adopted. The documentation footprint now carries the
+versions-section paragraph: the skew is textual rather than
+API-seam-visible, and the same-release policy is the answer for
+returned command notices.
 
 **9. P2: no pin proves `--no-reload` was deleted from `import`.**
 Add `vinga import --no-reload -f -` as an exit-2 no-such-option pin.
