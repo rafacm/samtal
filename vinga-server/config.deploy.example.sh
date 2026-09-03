@@ -9,13 +9,13 @@
 # verbatim by tests/integration/test_config_examples.py against a real
 # server, so its values are checked rather than merely written down.
 #
-# One document and one command, which is what examples/presets/ holds
-# too. This one is not a preset because a preset is a starting point
-# somebody adapts, and this is a specific deployment's measured
-# settings: a CPU quota, a language ladder, a Swedish voice, and the
-# deliberate absence of a default agent. What it shares with a preset is
-# the shape, and the shape is the point: apply orders the writes, so
-# there is no creation order to get right, and it is refused whole if
+# One document, which is what examples/presets/ holds too. This one is
+# not a preset because a preset is a starting point somebody adapts, and
+# this is a specific deployment's measured settings: a CPU quota, a
+# language ladder, a Swedish voice, and the deliberate absence of a
+# default agent. What it shares with a preset is the shape, and the
+# shape is the point: the import orders the writes, so there is no
+# creation order to get right, and the document is refused whole if
 # anything in it will not resolve rather than leaving half a deployment
 # behind.
 #
@@ -142,7 +142,7 @@ agents:
 # agent, is issued no token, and is refused at the handshake. With the
 # OTA endpoint guarded only by its unguessable path, a publicly exposed
 # deployment wants that refusal. Omitting the key leaves the setting
-# alone, which is what applying does with every section a document does
+# alone, which is what importing does with every section a document does
 # not name.
 devices:
   "aa:bb:cc:dd:ee:ff":
