@@ -85,20 +85,24 @@ nothing. `/healthz`'s body stays byte-identical, and the existing
 pins in `tests/unit/test_health.py` staying green untouched is the
 proof.
 
-**Readiness reads the registry's `draining` flag, nothing else.**
-The handler answers ready exactly when `app.state.composition` is
-present and `composition.sessions.draining` is false. This is the
-atomicity the issue asks for, got by locality rather than by
-ordering: readiness and admission read the same flag from the same
-home, so they cannot disagree. The transition into draining is
-`SessionRegistry.drain`'s first statement, so readiness is false
-before the first session is asked to finish and stays false for the
-rest of the process's life (the registry never clears the flag).
-The window between the SIGTERM arriving and the scheduled drain
-task's first statement running is a window in which sessions are
-still admitted, and readiness truthfully still says so; the
-criterion is "before or atomically with the transition into
-draining", and the transition is that statement.
+**Admission latches closed in `handle_exit`, and readiness reads
+the latch.** The registry gains one synchronous, idempotent
+operation, `stop_admitting()`, which sets the same flag `try_add`
+consults; `drain()` calls it as its own first statement, and
+`DrainingServer.handle_exit` calls it before anything else on every
+path where a composition exists: before scheduling the drain task,
+before passing a second signal or a `drain_s <= 0` shutdown through
+to uvicorn, and before giving up for want of a running loop.
+Setting one bool under the GIL is safe from a signal context, and
+idempotence is what makes calling it on every path free. Readiness
+and admission still read one flag from one home, so they cannot
+disagree; what the latch adds is that the flag turns the moment
+shutdown begins rather than when the scheduled drain task first
+runs, closing the two paths the plan's first cut left open: the
+window between the signal and the task's first statement, and the
+zero-drain configuration, which never calls `drain()` at all. The
+registry never clears the flag, so readiness stays false for the
+rest of the process's life.
 
 **A full server stays ready.** `try_add` also refuses at
 `max_sessions`, and readiness deliberately does not reflect that.
@@ -173,6 +177,16 @@ restated.
   `/readyz` answers 503 `draining` while `/healthz` still answers
   200 with its unchanged body, which is the liveness-through-drain
   criterion in one assertion pair.
+- **The latch, through the real shutdown seam**:
+  `tests/unit/test_drain.py` grows cases that drive
+  `DrainingServer.handle_exit` itself, with a composition stub
+  carrying a real registry on the app's state: on the normal path,
+  admission is refused and readiness reads non-admitting the moment
+  the call returns, before the loop has run the scheduled drain
+  task; on a `drain_s = 0` server and on a second signal, the same
+  holds even though `drain()` never runs or is already running.
+  `tests/unit/test_registry.py` pins `stop_admitting` as
+  idempotent and `drain` as latching through it first.
 - **Startup**: `tests/unit/test_health.py` gains the described-app
   case: a `TestClient` outside its context manager has no
   composition, and `/readyz` answers 503 `starting`. The
@@ -264,6 +278,15 @@ endorsed the no-new-module layout explicitly.
    latches admission closed, call it in `handle_exit` before any
    scheduling or delegation on every path, have `drain()` reuse it,
    and test through the real `handle_exit` seam.
+
+   *Resolution*: accepted in full. The registry gains
+   `stop_admitting()`, synchronous and idempotent; `drain()` calls
+   it first, and `handle_exit` calls it before anything else on
+   every path with a composition, including `drain_s <= 0` and the
+   second signal. The readiness section now describes the latch,
+   and the test plan drives `DrainingServer.handle_exit` itself
+   with a real registry behind a composition stub, plus registry
+   pins for idempotence and for `drain` latching through it.
 
 2. **P1: "a full server stays ready" contradicts the settled
    readiness meaning.** The issue's settled definition is "may the
