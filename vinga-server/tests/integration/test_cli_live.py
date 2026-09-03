@@ -1822,23 +1822,36 @@ def _configuration_body(exported: str) -> str:
     grammar of the build that printed the file, so two exports from
     different releases differ there by design rather than by drift.
 
-    The credential annotations second. They are the other part two
-    exports of one configuration may differ in: the heading and its
-    commands are present only when something is stored, and what is
-    being compared is the configuration rather than which credentials
-    happen to be filled in at the moment it was printed.
+    The credential annotations second, and they are taken off as a
+    block rather than line by line. They are the other part two exports
+    of one configuration may differ in: the heading and its commands are
+    present only when something is stored, and what is being compared is
+    the configuration rather than which credentials happen to be filled
+    in at the moment it was printed.
+
+    A block and not a predicate, because the heading is prose and prose
+    grows a line: it did in #371's review round, when the heading gained
+    a second line saying where in the header's steps the credentials go,
+    and a rule that matched its first line let the second through into
+    the compared body. The block is the tail of the file by
+    construction, since an export is the header, the configuration and
+    then the annotations, so what is dropped is everything from the
+    heading onwards.
 
     What is left is the whole of the configuration, compared byte for
     byte.
     """
     lines = exported.splitlines(keepends=True)
     body = list(itertools.dropwhile(lambda line: line.startswith("#"), lines))
-    kept = [
-        line
-        for line in body
-        if " secret set " not in line and "Stored credentials are not exported" not in line
-    ]
-    return "".join(kept).rstrip() + "\n"
+    annotated = next(
+        (
+            number
+            for number, line in enumerate(body)
+            if "Stored credentials are not exported" in line
+        ),
+        len(body),
+    )
+    return "".join(body[:annotated]).rstrip() + "\n"
 
 
 # One refusal per family, and where each of them is composed
