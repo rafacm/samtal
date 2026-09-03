@@ -31,7 +31,7 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
 from tests.support.mcp_stdio_server import SHIPPED_ENV, SHIPPED_INSTRUCTIONS
 from vinga_server.config import Config
-from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.config.models import API_MOUNT_PATH, PROGRAM
 from vinga_server.memory.store import MemoryScope
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -334,7 +334,7 @@ async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it
 ) -> None:
     """The issue's verification for the shared half, end to end: one
     block of text, written in one place, reaching two agents and not the
-    third, and an edit of it reaching both of them at the reload the
+    third, and an edit of it reaching both of them at the apply the
     write says it will, on the server that was already running.
     """
     config = sharing_config()
@@ -362,11 +362,11 @@ async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it
             "/prompt-fragments/household", json={"text": REWRITTEN}
         )
         assert written.status_code == 200, written.text
-        assert "asked to reload" in written.json()["notice"]
+        assert f"{PROGRAM} apply" in written.json()["notice"]
 
-        # Written and not applied: this server is still serving the
+        # Written and not installed: this server is still serving the
         # fragment it started with, and the comparison says so under the
-        # kind's own reload label.
+        # kind's own reload label, which is the API's token.
         during, _ = await simulate(port, HOUSE_MAC)
         assert FRAGMENT in spoken(during)
         assert REWRITTEN not in spoken(during)
@@ -378,7 +378,7 @@ async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it
             "changed": ["household"],
         }
 
-        # The reload the write named, on the server that is already
+        # The install the write named, on the server that is already
         # running and without dropping anything.
         applied = await control.post("/runtime/config/reload")
         assert applied.status_code == 200, applied.text
