@@ -1,7 +1,7 @@
 """One document, applied whole: what it writes, what it leaves alone,
 and what it refuses.
 
-The repository half of `config apply`. What makes this a verb of the
+The repository half of `config import`. What makes this a verb of the
 repository rather than a loop above it is the transaction: a document
 that creates an agent and binds a device to it in the same breath passes
 through states no single write would accept, so the reference check runs

@@ -198,6 +198,16 @@ _HISTORICAL_PATHS = (
     # tree answers to. A guard that flagged its own examples would be a
     # guard nobody could state a rule in.
     "vinga-server/tests/unit/test_command_spellings.py",
+    # And the pre-cutover export, which is a build's own output
+    # committed as it was printed. Nothing left in the repository can
+    # produce those bytes again: the header it opens with quotes the
+    # grammar of the build that wrote it, and the integration lane
+    # feeds the file back through today's grammar to prove a kept
+    # export still rebuilds a store. Respelling it would destroy the
+    # only thing it is for, exactly as respelling the transcript above
+    # would. Classified `respell` until #371 asked what it was, which
+    # is the misclassification a verb rename exposes.
+    "vinga-server/tests/integration/data/pre-cutover-export.yaml",
     # And the CLI guide's source audit, the dated 2026-08-24 walk of
     # four published guides that the guide's practices were
     # dispositioned from. Its rows quote the merged grammar as the
@@ -493,6 +503,94 @@ def test_every_live_spelling_names_a_command_the_tree_has() -> None:
         if row.kind == "respell" and not names_something(row.invocation)
     ]
     assert stale == []
+
+
+# The half a registered-command guard cannot see
+#
+# `_command_line` stops at the first token that is not a bare word, so
+# `vinga apply -f deployment.yaml` is recorded as `vinga apply`, and the
+# guard above then finds `apply` in the tree and passes it. That is the
+# right reading for every rename this census had met: a retired word
+# stayed retired, so a stale line named nothing.
+#
+# #371 is the shape that breaks it. It swapped two verbs rather than
+# retiring one, so `apply` still names a row and what moved is what the
+# row takes: the new `apply` installs the stored configuration and takes
+# no document at all. A line left in the old grammar therefore names a
+# command that exists and asks it to do something it cannot, which is
+# the same failure the census exists to prevent, arriving one layer
+# deeper. So the options are read too, off the raw line, for the one
+# invocation whose meaning moved.
+
+# What the new `apply` does not take: the document options the old one
+# did, and the flag that used to turn its second act off.
+_APPLY_REJECTS = ("-f", "--file", "--no-reload")
+
+# One `apply` invocation and everything typed after it, up to where a
+# command line ends in prose or in a shell. The tail is the half this
+# reads, which is exactly the half the scanner above discards.
+_APPLY_TAIL = re.compile(
+    r"(?<![\w./-])(?:vinga-server config|vinga config|vinga|config)[ \t]+apply(?![\w-])"
+    rf"([^{re.escape(_TERMINATORS)}]*)"
+)
+
+
+def _carries_a_document(line: str) -> bool:
+    """Whether one raw line asks an `apply` for something it cannot
+    take."""
+    return any(
+        option in match.group(1)
+        for match in _APPLY_TAIL.finditer(line)
+        for option in _APPLY_REJECTS
+    )
+
+
+def option_bearing_applies(path: str, text: str) -> list[str]:
+    """Every live `apply` in one file written the way the old one was.
+
+    Classified through the same scanner as everything else, so the
+    historical records and the generated artifacts are exempt here for
+    the reasons they are exempt there.
+    """
+    lines = text.splitlines()
+    return [
+        row.rendered()
+        for row in _matches(path, text, _command_words())
+        if row.kind == "respell"
+        and _typed(row.invocation) == ("apply",)
+        and _carries_a_document(lines[row.line - 1])
+    ]
+
+
+def test_no_live_apply_is_written_the_way_the_old_one_was() -> None:
+    """The standing guard over the stale half of the verb swap."""
+    stale = [
+        row
+        for path in tracked()
+        if path != str(MANIFEST.relative_to(REPO_ROOT)) and (text := _text(path)) is not None
+        for row in option_bearing_applies(path, text)
+    ]
+
+    assert stale == []
+
+
+def test_a_stale_apply_is_flagged_and_the_new_one_is_not() -> None:
+    """The guard held to going red, which is the half a passing
+    assertion cannot show: the first three lines are the old grammar
+    left behind, and the last two are what replaced it."""
+    page = "\n".join(
+        [
+            "run `vinga apply -f deployment.yaml`",
+            "run `vinga-server config apply --file deployment.yaml`",
+            "run `vinga apply --no-reload -f -`",
+            "run `vinga import -f deployment.yaml`",
+            "run `vinga apply`",
+        ]
+    )
+
+    flagged = option_bearing_applies("docs/somewhere.md", page)
+
+    assert [row.split(":")[1].split(" ")[0] for row in flagged] == ["1", "2", "3"]
 
 
 def test_the_guides_rejected_shapes_still_appear() -> None:

@@ -17,7 +17,7 @@ text they choked on.
 The timeouts are here for the same reason they are constants: the read
 bound outlasts the database's busy timeout so that contention reaches
 the operator as the sentence the API answers with rather than as a
-client-side transport error, and the reload's bound outlasts the
+client-side transport error, and the apply's bound outlasts the
 registry's own envelope so that nobody is left not knowing what is
 running.
 """
@@ -35,7 +35,7 @@ from tests.support.config_cli import API_SECRET_ENV, OTHER_SECRET, SECRET, TOKEN
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
 from tests.support.stores import holding_the_write_lock, the_lock_held
-from vinga_server.config import cli, entities
+from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
 from vinga_server.config.cli import outcomes
 from vinga_server.config.loader import ConfigError
@@ -293,7 +293,7 @@ def test_a_server_that_cannot_be_reached_says_so_and_names_the_recovery_path(
 
     captured = capsys.readouterr()
     assert "cannot reach the configuration API at http://127.0.0.1:1" in captured.err
-    assert "applying a kept export" in captured.err
+    assert "importing a kept export" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -387,7 +387,7 @@ def test_a_query_carrying_base_sends_the_path_and_the_query_it_was_given(
     monkeypatch.setattr(cli, "build_client", factory)
 
     assert run(
-        "--api-url", REACHABLE_NOWHERE, "apply", "--no-reload", "-f", "-", stdin="{}\n"
+        "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
     ) == 0
 
     (sent,) = asked
@@ -566,7 +566,7 @@ def test_no_request_this_command_makes_narrates_itself(
 
     with caplog.at_level(logging.DEBUG):
         assert run(
-            "--api-url", REACHABLE_NOWHERE, "apply", "--no-reload", "-f", "-", stdin="{}\n"
+            "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
         ) == 0
 
     assert SECRET not in _logged(caplog)
@@ -622,7 +622,7 @@ def test_neither_library_can_narrate_while_the_request_is_open(
 
     with caplog.at_level(logging.DEBUG):
         assert run(
-            "--api-url", REACHABLE_NOWHERE, "apply", "--no-reload", "-f", "-", stdin="{}\n"
+            "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
         ) == 0
 
     # The records really were written, so their absence below is the
@@ -651,7 +651,7 @@ def test_the_quiet_lasts_exactly_as_long_as_the_request(
     )
 
     assert run(
-        "--api-url", REACHABLE_NOWHERE, "apply", "--no-reload", "-f", "-", stdin="{}\n"
+        "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
     ) == 0
 
     assert {name: logging.getLogger(name).level for name in cli.REQUEST_LOGGERS} == before
@@ -755,14 +755,14 @@ def test_the_client_carries_the_token_it_was_built_with() -> None:
         client.close()
 
 
-def test_reload_gives_the_server_longer_to_answer_than_a_write(
+def test_apply_gives_the_server_longer_to_answer_than_a_write(
     run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The client must not give up on a reload the server then applies:
-    that would leave nobody knowing what is running, which is the exact
-    ambiguity this whole feature exists to remove. So the bound is the
-    server's own envelope with room to spare, and the command really
-    does use it.
+    """The client must not give up on an install the server then
+    carries out: that would leave nobody knowing what is running, which
+    is the exact ambiguity this whole feature exists to remove. So the
+    bound is the server's own envelope with room to spare, and the
+    command really does use it.
 
     Driven through a real `httpx.Client` over a mock transport rather
     than through the fixture's TestClient, which carries a timeout from
@@ -774,8 +774,8 @@ def test_reload_gives_the_server_longer_to_answer_than_a_write(
         + mcp_module.STOP_TIMEOUT_S
         + mcp_module.CANCEL_TIMEOUT_S
     )
-    assert cli.RELOAD_READ_TIMEOUT_S > cli.READ_TIMEOUT_S
-    assert cli.RELOAD_READ_TIMEOUT_S >= 2 * envelope
+    assert cli.APPLY_READ_TIMEOUT_S > cli.READ_TIMEOUT_S
+    assert cli.APPLY_READ_TIMEOUT_S >= 2 * envelope
 
     made: list[httpx.Client] = []
     empty = {
@@ -801,23 +801,23 @@ def test_reload_gives_the_server_longer_to_answer_than_a_write(
     monkeypatch.setattr(cli, "build_client", factory)
 
     assert run("mcp-server", "status") == 0
-    assert run("reload") == 0
+    assert run("apply") == 0
 
-    status_client, reload_client = made
+    status_client, apply_client = made
     assert status_client.timeout.read == cli.READ_TIMEOUT_S
-    assert reload_client.timeout.read == cli.RELOAD_READ_TIMEOUT_S
+    assert apply_client.timeout.read == cli.APPLY_READ_TIMEOUT_S
     # And the connect bound is untouched: a server that is not there
     # must not take a minute to say so.
-    assert reload_client.timeout.connect == cli.CONNECT_TIMEOUT_S
+    assert apply_client.timeout.connect == cli.CONNECT_TIMEOUT_S
 
 
-def test_apply_waits_for_the_server_however_long_it_takes(
+def test_import_waits_for_the_server_however_long_it_takes(
     run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The reload's argument taken to its conclusion where no finite
+    """The apply's argument taken to its conclusion where no finite
     envelope exists.
 
-    An apply is one transaction that loads the whole existing
+    An import is one transaction that loads the whole existing
     configuration and validates the whole resulting one, and nothing
     about the request bounds the size of the store it lands in, so there
     is no number to derive. A bound that expired after the commit would
@@ -826,10 +826,10 @@ def test_apply_waits_for_the_server_however_long_it_takes(
     still says so quickly.
 
     Driven through a real `httpx.Client` over a mock transport for the
-    reason the reload's case is: the fixture's TestClient carries a
+    reason the apply's case is: the fixture's TestClient carries a
     timeout from another copy of httpx entirely.
     """
-    assert cli.APPLY_READ_TIMEOUT_S is None
+    assert cli.IMPORT_READ_TIMEOUT_S is None
 
     made: list[httpx.Client] = []
 
@@ -847,111 +847,11 @@ def test_apply_waits_for_the_server_however_long_it_takes(
 
     monkeypatch.setattr(cli, "build_client", factory)
 
-    assert run("apply", "--no-reload", "-f", "-", stdin="{}\n") == 0
+    assert run("import", "-f", "-", stdin="{}\n") == 0
 
-    (applied,) = made
-    assert applied.timeout.read is None
-    assert applied.timeout.connect == cli.CONNECT_TIMEOUT_S
-
-
-def test_the_two_acts_of_an_apply_carry_their_own_bounds(
-    run, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The default `apply` is two requests, and a bound is a fact of the
-    endpoint rather than of the command that reached it (#341).
-
-    So the write waits however long its transaction takes and the reload
-    behind it waits the server's own envelope: neither inherits the
-    other, and the unbounded one does not become the whole command's
-    answer to a reload that stopped answering.
-    """
-    made: list[httpx.Client] = []
-    reloaded = {
-        "mcp": dict.fromkeys(outcomes(McpReloadResult), []) | {"servers": {}},
-        "prompts": {"changed": []},
-        "fillers": None,
-        "providers": None,
-        "agents": None,
-    }
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json=reloaded if "reload" in request.url.path else {"entries": []}
-        )
-
-    def factory(base_url: str, token: str | None = None) -> httpx.Client:
-        client = httpx.Client(
-            base_url=base_url,
-            transport=httpx.MockTransport(answer),
-            timeout=httpx.Timeout(cli.READ_TIMEOUT_S, connect=cli.CONNECT_TIMEOUT_S),
-        )
-        made.append(client)
-        return client
-
-    monkeypatch.setattr(cli, "build_client", factory)
-
-    assert run("apply", "-f", "-", stdin="{}\n") == 0
-
-    write, reload_behind_it = made
-    assert write.timeout.read is None
-    assert reload_behind_it.timeout.read == cli.RELOAD_READ_TIMEOUT_S
-    assert reload_behind_it.timeout.connect == cli.CONNECT_TIMEOUT_S
-
-
-# One entry of an applied document, as the API answers one: enough for
-# the write above to have written something, so the failure below is a
-# failure behind a commit rather than beside one.
-_WROTE_ENTRY = {
-    "section": "agents",
-    "identity": "sam",
-    "outcome": "wrote",
-    "notice": entities.APPLY_NOTICE,
-}
-
-
-def test_a_committed_write_whose_reload_dies_in_transport_says_what_it_knows(
-    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The ambiguous half of the pair (#341), and the reason the
-    sentence claims nothing about the running server.
-
-    The write was acknowledged and the reload's request died on the way
-    to its answer, which says nothing about whether the reload ran: it
-    is carried out in tasks that outlive the connection that asked for
-    it, so a server whose client went away can still finish applying.
-    What the operator is told is what happened here, and the two
-    commands that settle the rest.
-
-    Driven over a mock transport because a transport failure is the
-    subject: the fixture's client answers through an application and
-    cannot fail on the wire.
-    """
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        if "reload" in request.url.path:
-            raise httpx.ReadTimeout("timed out", request=request)
-        return httpx.Response(200, json={"entries": [_WROTE_ENTRY]})
-
-    monkeypatch.setattr(
-        cli,
-        "build_client",
-        lambda base_url, token: httpx.Client(
-            base_url=base_url, transport=httpx.MockTransport(answer)
-        ),
-    )
-
-    assert run("--api-url", REACHABLE_NOWHERE, "apply", "-f", "-", stdin="{}\n") == 1
-
-    printed = capsys.readouterr()
-    # What was written is printed, because it was written.
-    assert printed.out.splitlines() == ["agents.sam: wrote"]
-    refused, unanswered = printed.err.split("\n", 1)
-    # The transport's own refusal, naming the sanitized address and
-    # nothing of the operator's query string.
-    assert "cannot reach the configuration API" in refused
-    assert SECRET not in printed.err
-    assert unanswered == cli.APPLY_UNANSWERED + "\n"
-    assert "Traceback" not in printed.err
+    (imported,) = made
+    assert imported.timeout.read is None
+    assert imported.timeout.connect == cli.CONNECT_TIMEOUT_S
 
 
 def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(

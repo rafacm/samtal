@@ -26,6 +26,11 @@ from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
 from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.config.api import APPLY_BODY_LIMIT, build_api
+from vinga_server.config.entities import (
+    APPLY_NOTICE,
+    BINDING_UNSERVED_NOTICE,
+    PROGRAM,
+)
 from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES, DatabaseConfig
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
@@ -283,15 +288,13 @@ def test_the_default_agent_notice_is_about_the_row_too(
     assert store.read_default_agent() == "sam"
 
 
-def test_an_agent_write_carries_the_one_reload_sentence(
+def test_an_agent_write_carries_the_one_apply_sentence(
     serving_client: TestClient,
 ) -> None:
     """An agent entry used to fall on both sides of the line and carried
-    a sentence of its own that said which fields were which. A reload
-    applies the whole entry now, so what it says is the one thing every
-    reloaded kind says, and the three clocks it distinguishes are named:
-    they differ, and an acknowledgement that said "immediately" would be
-    wrong about all three.
+    a sentence of its own that said which fields were which. An apply
+    installs the whole entry now, so what it says is the one thing every
+    kind of this half says.
     """
     _pipeline(serving_client)
 
@@ -300,11 +303,41 @@ def test_an_agent_write_carries_the_one_reload_sentence(
     body = answer.json()
     assert body["wrote"] == "agent sam"
     assert boundaries(body["notice"]) == {RELOAD}
-    # The three moments a reload reaches a conversation at, which is the
-    # semantic content of this notice and the reason it is longer than
-    # the others.
+    assert body["notice"] == APPLY_NOTICE
+
+
+# The shape of the sentence, and not only the boundary in it
+#
+# `boundaries()` answers in tokens, which is what keeps a suite from
+# going red over an edit that changed no boundary. The other side of
+# that is that it passes ANY sentence containing the announcing phrase,
+# so the two decisions #371 made about this sentence need assertions of
+# their own: it is one line, because it is printed once per entry of
+# every domain-half write, and it names the read that says what is
+# waiting as well as the command that installs it.
+
+
+def test_the_per_write_notice_is_one_line_naming_both_commands() -> None:
+    """The shortening, pinned as behavior rather than as prose."""
+    assert "\n" not in APPLY_NOTICE
+    assert f"{PROGRAM} apply" in APPLY_NOTICE
+    assert f"{PROGRAM} diff" in APPLY_NOTICE
+
+
+def test_the_unserved_binding_notice_names_the_command_that_installs() -> None:
+    """The one sentence that names two boundaries at once, held to
+    naming the command that crosses the second of them."""
+    assert f"{PROGRAM} apply" in BINDING_UNSERVED_NOTICE
+
+
+def test_the_three_clocks_are_not_in_a_per_write_sentence() -> None:
+    """Where they went is `vinga apply --help` and the domain-config
+    reference, which is where somebody asking when a change lands is
+    already looking. Per write they were noise: the Quick Start run that
+    prompted #371 printed them six times.
+    """
     for clock in ("next activation", "next utterance", "next conversation"):
-        assert clock in body["notice"], clock
+        assert clock not in APPLY_NOTICE, clock
 
 
 # The third sentence: what a reload applies

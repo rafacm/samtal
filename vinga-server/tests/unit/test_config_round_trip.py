@@ -433,9 +433,9 @@ def test_the_cli_resubmits_a_masked_document_it_printed(
 #
 # The per-entity contract above is a read that is a write. This is the
 # whole-store one: what `config export` prints is a document
-# `config apply` takes, and applying it onto an empty store and entering
-# the credentials it names produces a store whose own export is the same
-# bytes.
+# `config import` takes, and importing it onto an empty store and
+# entering the credentials it names produces a store whose own export is
+# the same bytes.
 #
 # The order is the supported one and the test does not shortcut it. A
 # stored credential is not in an exported body at all, and it cannot be:
@@ -548,12 +548,12 @@ def test_an_export_reproduces_the_store_it_came_from(
 
     # A fresh store, built from the export and from nothing else.
     #
-    # Staged, which is what the export's own header says to do and what
-    # a rebuild needs: the credentials go in after the document and
-    # before anything is installed, so the reload is the step after
-    # them rather than the one in the middle of them.
+    # An import, which is what the export's own header says to run and
+    # what a rebuild needs: the credentials go in after the document and
+    # before anything is installed, so the apply is the step after them
+    # rather than the one in the middle of them.
     second = runner(monkeypatch, database=spare_database)
-    assert second("apply", "--no-reload", "-f", "-", stdin=exported) == 0
+    assert second("import", "-f", "-", stdin=exported) == 0
     _enter_secrets(second, _exported_secret_commands(exported))
     capsys.readouterr()
 
@@ -562,11 +562,11 @@ def test_an_export_reproduces_the_store_it_came_from(
     assert capsys.readouterr().out == exported
 
 
-def test_an_exported_document_applies_onto_the_store_it_came_from(
+def test_an_exported_document_imports_onto_the_store_it_came_from(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The other direction, which is what makes an export safe to keep
-    and re-run: applied back onto its own store it changes nothing, and
+    and re-run: imported back onto its own store it changes nothing, and
     the credentials stored on those entities are still there."""
     run = runner(monkeypatch)
     _seed(run)
@@ -574,13 +574,13 @@ def test_an_exported_document_applies_onto_the_store_it_came_from(
     run("export")
     exported = capsys.readouterr().out
 
-    # Staged, because what is being asked about is the store: this
-    # application has no running server around it, and installing is
-    # the other half of the verb (`--no-reload`, #341).
-    assert run("apply", "--no-reload", "-f", "-", stdin=exported) == 0
+    # An import, because what is being asked about is the store: this
+    # application has no running server around it, and installing what
+    # was written is `apply`, a command of its own (#371).
+    assert run("import", "-f", "-", stdin=exported) == 0
 
-    applied = capsys.readouterr()
-    assert {line.split(": ")[-1] for line in applied.out.splitlines()} == {"unchanged"}
+    imported = capsys.readouterr()
+    assert {line.split(": ")[-1] for line in imported.out.splitlines()} == {"unchanged"}
     run("export")
     assert capsys.readouterr().out == exported
 

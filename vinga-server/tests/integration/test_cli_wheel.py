@@ -161,7 +161,7 @@ def session_manifest(device: str) -> dict[str, object]:
     }
 
 # The deployment this lane configures, every provider a mock so the
-# running server can actually build what it is asked to reload.
+# running server can actually build what it is asked to install.
 DEPLOYMENT: dict[str, object] = {
     "providers": {
         "llm": {"brain": {"type": "mock", "reply": "You said {text}."}},
@@ -178,8 +178,8 @@ DEPLOYMENT: dict[str, object] = {
 # The entries written to be taken away again, referenced by nothing, so
 # that a delete is refused by nothing but a bug. The provider is a real
 # engine type rather than a mock because a credential is stored on it,
-# and it is unreferenced for the same reason the reload below succeeds:
-# a provider no agent names is a provider no reload has to build.
+# and it is unreferenced for the same reason the apply below succeeds:
+# a provider no agent names is a provider no apply has to build.
 SCRATCH: dict[str, object] = {
     "provider.yaml": {"type": "anthropic", "model": "m", "api_key_env": "ANTHROPIC_API_KEY"},
     "mcp-server.yaml": {
@@ -500,18 +500,17 @@ def test_the_binary_exists_and_answers(installed: Path, elsewhere: Path, live: L
 # One operator's session, from an empty database
 
 
-def test_a_whole_deployment_applies_from_the_installed_wheel(run) -> None:
+def test_a_whole_deployment_imports_from_the_installed_wheel(run) -> None:
     """The bootstrap, and the first command of the session: one
     document, one transaction, every section named, against a server
     that booted on an empty database.
 
-    Staged (`--no-reload`), because this lane's session has the same
-    shape the in-process one has: the agent written here is one the
-    server is not serving until the reload further down, which is what
-    that test is about. An apply installs what it wrote since #341, and
-    installing it here would answer the question two tests early.
+    An import and nothing else, which is the whole of what the verb does
+    (#371) and the shape this lane's session has: the agent written here
+    is one the server is not serving until the apply further down, which
+    is what that test is about.
     """
-    written = answered(run("apply", "--no-reload", "-f", "deployment.yaml"), "apply")
+    written = answered(run("import", "-f", "deployment.yaml"), "import")
 
     assert written.strip()
     assert set(line.split(": ")[-1] for line in written.splitlines()) == {"wrote"}
@@ -548,15 +547,15 @@ def test_the_settings_are_written_and_read_back(run) -> None:
     assert answered(run(*defaults), *defaults).startswith("wrote ")
 
 
-def test_the_running_server_is_read_after_a_reload(run) -> None:
+def test_the_running_server_is_read_after_an_apply(run) -> None:
     """The three reads that are of the process rather than of the
     database, and the act that makes them different.
 
     `agent preview` is the pin: the server this lane booted was given an
     empty domain half, so the agent the document above wrote is one it
-    is not serving, and the reload is what installs it.
+    is not serving, and the apply is what installs it.
     """
-    assert answered(run("reload"), "reload").strip()
+    assert answered(run("apply"), "apply").strip()
 
     previewed = answered(run("agent", "preview", "sam"), "agent preview")
     assert "You are Sam." in previewed
@@ -910,7 +909,7 @@ def test_the_documents_render_from_the_installed_wheel(run) -> None:
 
     rendered = answered(run("cli-reference"), "cli-reference")
     assert rendered.strip()
-    assert f"{cli.PROGRAM} apply -f examples/" in rendered, (
+    assert f"{cli.PROGRAM} import -f examples/" in rendered, (
         "the recipes rendered empty, so the example fragments are not in the wheel"
     )
 
