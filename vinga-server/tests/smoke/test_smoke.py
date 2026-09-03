@@ -72,6 +72,16 @@ def test_the_server_is_alive(wait_for_server, base_url: str) -> None:
     assert body["revision"]
 
 
+def test_the_server_is_ready_for_a_conversation(wait_for_server, base_url: str) -> None:
+    """The other probe, read against the shipped image: a container that
+    has just started is not draining and has no session, so an
+    orchestrator pointing traffic admission here gets a 200 with the one
+    word it decides on."""
+    with urllib.request.urlopen(f"{base_url}/readyz", timeout=10) as response:
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+
+
 def test_the_container_knows_which_build_it_is(wait_for_server, base_url: str) -> None:
     """#41: the route from build argument to ARG to ENV to what the
     server reports exists only inside a real image, so this is the one
