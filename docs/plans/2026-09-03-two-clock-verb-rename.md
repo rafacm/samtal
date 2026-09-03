@@ -370,3 +370,89 @@ to `main`.
   config.example.yaml, both presets, cli-guide), the CHANGELOG
   entry, and the census manifest regenerated in the same commit as
   the last document edit. PR: TBD.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, 2026-09-03,
+against commit 79ca37d2, runtime ~8 minutes. Verdict as received:
+**not ready**. Findings condensed but faithful; each carries a
+resolution appended with its amendment commit.
+
+**1. P1: the plan deletes shared command machinery other commands
+still require.** `info` and `conversation show` have tuple `does`
+values, and all three memory commands use `selects`
+(`cli.py:7243/7356/7381`); `_performed` is the shared sequencing for
+all of them. The plan should delete only the apply-specific selector
+and acts, preserving `Command.selects`, tuple `does`, and
+`_performed`; `Act.unanswered` may go only after verifying it has no
+other user.
+
+**2. P1: the recipe generator cannot represent the planned preset
+import/apply pairs.** `docgen._TOPIC_COMMANDS` recognizes only
+`apply` as a preset command and refuses unknown lines
+(`docgen.py:768/938`), and recipes deduplicate commands across both
+presets (`docgen.py:815`), so two identical trailing `vinga apply`
+lines collapse and one preset reads as left unapplied. The live lane
+also deliberately avoids installing presets (`test_cli_live.py:2399`).
+The plan should update the recipe machinery to recognize `import`,
+keep each preset's ordered pair intact, keep the live verification
+from building either stack, and pin that every preset import is
+immediately followed by an apply.
+
+**3. P1: the respelling differential fails on the notice and export
+changes.** `test_config_cli_respelling.py` drives the current grammar
+against a frozen transcript with a licensed substitution table
+(`RESPELLINGS`), and the transcript records the old notice and the
+old export header; the plan's "untouched" claim cannot hold. The
+module's own rule is that later intentional changes get labeled
+`RESPELLINGS` entries (its #341 entry is the precedent). The plan
+should add narrowly labeled #371 substitutions rather than recapture
+or respell the transcript.
+
+**4. P1: the pre-cutover export fixture conflicts with the census and
+with its byte comparison.** `pre-cutover-export.yaml` is committed as
+printed by a build that no longer exists, currently census class
+`respell` (manifest lines 1174-1177), so removing `reload` fails the
+guard; and `test_a_pre_cutover_export_applies_into_an_empty_postgres_database`
+compares a fresh export against the fixture stripping only `secret
+set` lines, so the planned `EXPORT_HEADER` change breaks the
+comparison, and the test itself types `apply --no-reload -f`. The
+plan should keep the fixture byte-for-byte, classify that path
+historical in the census, drive the current `import` when consuming
+it, and compare the configuration body excluding the version-specific
+header as well as the secret footer.
+
+**5. P2: the census is blind to the stale half of a semantic verb
+swap.** The scanner stops at the first option, so a stale
+`vinga apply -f ...` resolves to the newly valid `apply` row and
+passes. The footprint misses `config.deploy.example.sh:41`,
+`config.deploy.example.yaml:165`, `examples/README.md:5`, and the
+`NOTHING_APPLIED` sentence ("nothing was applied. An applied
+document's...") that becomes the empty-import line. The plan should
+add a semantic guard for live `apply` invocations carrying `-f` or
+`--no-reload`, audit write-sense "apply/applied" prose as well as
+`reload`, and name those files.
+
+**6. P2: `DIFF_INTRO` keeps explaining the `reload` token with a
+command that no longer exists.** The token stays, but its
+operator-facing explanation must say the boundary is crossed by
+`vinga apply`, and the mapping deserves a pin; neither the footprint
+nor M1 names `DIFF_INTRO`.
+
+**7. P2: the notice tests do not enforce the shortening or the
+`vinga diff` pointer.** `boundaries()` passes any sentence containing
+`vinga apply`. Add semantic assertions: `APPLY_NOTICE` contains no
+newline and names both `vinga apply` and `vinga diff`.
+
+**8. P2: command-bearing notices skew across independently versioned
+halves.** `docs/reference/cli.md` (Versions section, ~line 241)
+claims a mismatched pair fails at the API seam; this change preserves
+every route and shape while changing server-produced command prose,
+so a new CLI against an old server is told to run `vinga reload` and
+an old CLI against a new server is told to run `vinga apply`, which
+in its grammar is the write. Update the versions guidance to describe
+this skew and require same-release halves before following returned
+command notices.
+
+**9. P2: no pin proves `--no-reload` was deleted from `import`.**
+Add `vinga import --no-reload -f -` as an exit-2 no-such-option pin.
