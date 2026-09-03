@@ -46,7 +46,7 @@ from vinga_server.config.cli import (
     nested,
     outcomes,
 )
-from vinga_server.config.entities import RELOAD_NOTICE as RELOAD_NOTICE_TEXT
+from vinga_server.config.entities import APPLY_NOTICE as APPLY_NOTICE_TEXT
 from vinga_server.config.loader import ConfigError, ReloadInProgressError
 from vinga_server.config.responses import (
     AgentsReload,
@@ -1133,7 +1133,7 @@ def _entry(**overrides: object) -> dict[str, object]:
         "section": "agents",
         "identity": "sam",
         "outcome": "wrote",
-        "notice": RELOAD_NOTICE_TEXT,
+        "notice": APPLY_NOTICE_TEXT,
     } | overrides
 
 
@@ -1214,7 +1214,7 @@ def test_an_unprintable_identity_never_leaves_as_an_exception() -> None:
 @pytest.mark.parametrize(
     ("outcome", "notice"),
     [
-        pytest.param("unchanged", RELOAD_NOTICE_TEXT, id="unchanged-with-a-boundary"),
+        pytest.param("unchanged", APPLY_NOTICE_TEXT, id="unchanged-with-a-boundary"),
         pytest.param("wrote", None, id="wrote-with-none"),
     ],
 )

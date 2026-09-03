@@ -905,7 +905,7 @@ _WROTE_ENTRY = {
     "section": "agents",
     "identity": "sam",
     "outcome": "wrote",
-    "notice": entities.RELOAD_NOTICE,
+    "notice": entities.APPLY_NOTICE,
 }
 
 
