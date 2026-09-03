@@ -7,8 +7,47 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-09-03
 
+### Added
+
+- **Readiness is its own probe, `/readyz`** (#318). `/healthz` says the
+  process is alive and serving its control surface; `/readyz` says it
+  may be handed a new device conversation, which is the other question
+  and diverges from the first exactly when it matters. It answers
+  `200 {"status": "ok"}` or 503 with one word: `draining` while a
+  shutdown finishes the conversations in flight, `full` at
+  `max_sessions`, `unavailable` when there is no serving composition.
+  An orchestrator with two probe slots points restart at `/healthz` and
+  traffic admission at `/readyz`; the server README says so, the image
+  `HEALTHCHECK` says why it stays on liveness, and the compose file says
+  what its own gate means. Recoverable provider and MCP failures cannot
+  reach it: the handler asks composition presence and one registry flag
+  and nothing else. `/healthz` is unchanged, body and all.
+
 ### Changed
 
+- **Admission has one classifier, and it latches when a shutdown
+  begins** (#318). The registry answers `admission` (`admitting`,
+  `draining` or `full`, draining winning) and `try_add` refuses exactly
+  when it is not `admitting`, so the door and the probe reporting on the
+  door cannot disagree. `stop_admitting` shuts it synchronously, and
+  `DrainingServer.handle_exit` calls it before anything else on every
+  path: the drain used to be scheduled onto the loop, so the server went
+  on admitting until that task ran, for the whole of a `drain_s: 0`
+  shutdown, and after a second signal.
+- **The composition lives exactly as long as the lifespan that built
+  it** (#318). `app.state.composition` was assigned and never cleared,
+  so an application that had been served once went on answering
+  requests with engines, a writer and providers its teardown had
+  already closed. The removal is registered on the build's exit stack
+  after every other registration, so the unwind takes it away before
+  anything behind it is released.
+- **The lanes wait for readiness rather than liveness** (#318). The
+  smoke lane's `serve.sh` and its server fixture, the seeding wait in
+  the integration lane and the live CLI lane's serving check all polled
+  `/healthz` while waiting for a server they were about to work with.
+  The image healthcheck, the revision comparisons and the version-skew
+  procedure in the CLI reference are liveness and revision reads and
+  stay where they were.
 - **The two-clock verbs are renamed so each names its own act** (#371).
   `vinga apply` becomes `vinga import`: it writes a whole document to
   the store in one transaction and stops there. `vinga reload` becomes
