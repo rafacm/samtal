@@ -216,10 +216,14 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
 
 
 def _ready(port: int) -> bool:
-    """The server answering, which is when the script starts writing: an
-    interrupt landing before that would prove less than this needs to."""
+    """The server ready, which is when the script starts writing: an
+    interrupt landing before that would prove less than this needs to.
+
+    The same probe the script itself waits on, so this waits for the
+    moment the script is waiting for rather than an earlier one.
+    """
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1):
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/readyz", timeout=1):
             return True
     except OSError:
         return False

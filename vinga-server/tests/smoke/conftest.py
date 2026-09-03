@@ -69,17 +69,22 @@ def device_auth(ota_url: str):
 
 @pytest.fixture(scope="session")
 def wait_for_server(base_url: str) -> None:
-    """A container that has just started may not be listening yet."""
+    """A container that has just started may not be listening yet.
+
+    Readiness is what is waited for, because every case behind this
+    fixture goes on to talk to the server as a device would, and
+    readiness is the answer to whether it may.
+    """
     import time
 
     deadline = time.monotonic() + 60
     while True:
         try:
-            with urllib.request.urlopen(f"{base_url}/healthz", timeout=5):
+            with urllib.request.urlopen(f"{base_url}/readyz", timeout=5):
                 return
         except (urllib.error.URLError, OSError):
             if time.monotonic() > deadline:
                 pytest.fail(
-                    f"no server answered at {base_url}/healthz within 60 s", pytrace=False
+                    f"no server answered at {base_url}/readyz within 60 s", pytrace=False
                 )
             time.sleep(1)
