@@ -61,12 +61,14 @@ that wants the one-shot types two commands.
   second act is the overloading this issue exists to remove, one
   spelling later.
 - The machinery it would keep alive is the machinery this rename gets
-  to delete. The two-act command is why `Command.selects` exists, why
-  `Act.unanswered` exists, why `APPLY_UNANSWERED` has to explain what
-  an answered write followed by an unanswered install can honestly
-  claim, and why the applied document has two renderings. With no
-  two-act command, all of it goes; with `import --apply`, all of it
-  stays for one flag.
+  to delete. The two-act apply is the only user of `Act.unanswered`
+  and of `APPLY_UNANSWERED`, the sentence explaining what an answered
+  write followed by an unanswered install can honestly claim, and it
+  is why the applied document has two renderings. With no two-act
+  command those go; with `import --apply` they stay for one flag.
+  (`Command.selects`, tuple `does` and `_performed` are shared
+  machinery serving other rows and stay regardless; see the review
+  round.)
 - The footgun answer is the notice, not a flag. An operator who
   imports and stops is told, on the same write, exactly which command
   installs and which command shows what is pending. The verb no
@@ -177,15 +179,15 @@ the three untouched ones. It does and it does not, respectively.
   written document with its boundaries) becomes `_imported`.
   `AppliedDocument` and every other API shape name stays, per the seam
   above.
-- **The two-act machinery is deleted whole**, held to the deletion
-  test: `_applying`, `APPLY_QUIETLY`, `APPLY_RELOAD`,
-  `APPLY_UNANSWERED`, `_applied_quietly`, `Invocation.no_reload`,
-  `NO_RELOAD_HELP`, the `no_reload` parameter of `_applied_document`,
-  and `Command.selects`. If `Act.unanswered` and the multi-act
-  sequencing in `_performed` have no remaining user (grep says the
-  apply row was the only tuple-`does` row, verified again at
-  implementation time), they go too, and `Command.does` may narrow
-  back to one act if nothing else holds the tuple shape. Every
+- **Only the apply-specific machinery is deleted**, held to the
+  deletion test and to grep: `_applying`, `APPLY_QUIETLY`,
+  `APPLY_RELOAD`, `APPLY_UNANSWERED`, `_applied_quietly`,
+  `Invocation.no_reload`, `NO_RELOAD_HELP`, the `no_reload` parameter
+  of `_applied_document`, and the `selects=_applying` entry on the
+  row. The shared machinery stays: `Command.selects` (the three
+  memory commands use it), tuple `does` (`info` and the conversation
+  reads use it), `acts()` and `_performed`. `Act.unanswered` goes
+  only after grep confirms `APPLY_RELOAD` was its sole user. Every
   deletion is verified by grep, not memory.
 - **The help texts.** `import`'s help says what it does and names the
   boundary: write a whole document to the store in one transaction,
@@ -386,6 +388,12 @@ all of them. The plan should delete only the apply-specific selector
 and acts, preserving `Command.selects`, tuple `does`, and
 `_performed`; `Act.unanswered` may go only after verifying it has no
 other user.
+
+*Resolution*: adopted. The open-question bullet no longer claims
+`Command.selects` for the deletion, and the smaller-decisions bullet
+now lists exactly the apply-specific pieces, names the shared
+machinery that stays with its other users, and conditions
+`Act.unanswered`'s deletion on a grep for other users.
 
 **2. P1: the recipe generator cannot represent the planned preset
 import/apply pairs.** `docgen._TOPIC_COMMANDS` recognizes only
