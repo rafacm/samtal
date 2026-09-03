@@ -429,9 +429,11 @@ marked new.
   `EXPORT_HEADER` does. Mitigation, adopted from the round: the test
   consumes the fixture with the current `import` command, and the
   comparison excludes the version-specific reproduction header along
-  with the secret footer, comparing the configuration body, which is
-  the half the test's own docstring claims (the document is rendered
-  from the domain models, not from the rows).
+  with the secret footer, comparing the configuration body, and the
+  test's docstring and the comparison helper's documentation are
+  rewritten to say exactly that: the byte-for-byte claim narrows to
+  the YAML configuration body, with the header and the credential
+  annotations both named as excluded.
 - **The two renderings' deletion could drop a pinned behavior**
   (the stderr flush ordering lived in `_applied_entries`).
   Mitigation: the surviving rendering keeps the shared helper and its
@@ -452,16 +454,23 @@ move together. A docs-first or code-first split would merge a red
 to `main`.
 
 - [ ] **M1: the rename, whole.** `config/cli.py` grammar
-  (`import` row, `apply` row, two-act machinery deleted),
-  `config/entities.py` notices (`APPLY_NOTICE` one-liner,
-  `BINDING_UNSERVED_NOTICE` respelled), `events/catalog.py` and
-  `config/api.py` prescriptive strings, `docgen.py` introduction,
+  (`import` row, `apply` row, the apply-specific machinery deleted,
+  `DIFF_INTRO` reworded), `config/entities.py` notices
+  (`APPLY_NOTICE` one-liner, `BINDING_UNSERVED_NOTICE` respelled),
+  `events/catalog.py` and `config/api.py` prescriptive strings,
+  `docgen.py` introduction and recipe machinery (`("import",)`
+  topic, per-preset import/apply pairs kept whole), the
   `tests/support/notices.py` phrase table, the test sweep with the
-  three new loud-failure pins, the four regenerated references, the
-  hand-maintained pages (root README, vinga-server README,
-  config.example.yaml, both presets, cli-guide), the CHANGELOG
-  entry, and the census manifest regenerated in the same commit as
-  the last document edit. PR: TBD.
+  four loud-failure pins, the notice and `DIFF_INTRO` semantic pins,
+  the recipe adjacency pin, the option-aware stale-`apply` guard,
+  the labeled #371 `RESPELLINGS` entries, the pre-cutover fixture
+  reclassified historical with its test driving `import` and
+  comparing the configuration body, the four regenerated references,
+  the hand-maintained pages (root README, vinga-server README,
+  config.example.yaml, the deploy example pair, examples README,
+  both presets, cli-guide, the cli.md versions paragraph), the
+  CHANGELOG entry, and the census manifest regenerated in the same
+  commit as the last document edit. PR: TBD.
 
 ## Plan review round
 
@@ -595,3 +604,27 @@ Add `vinga import --no-reload -f -` as an exit-2 no-such-option pin.
 
 *Resolution*: adopted. The loud-failure pins grow to four, with
 `vinga import --no-reload -f -` exiting 2 on no-such-option.
+
+## Plan review delta round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-terra`, 2026-09-03,
+against commit ddfb9c7b, runtime ~4 minutes, scope: the nine
+resolutions and anything the amendments introduced. Verdict as
+received: **ready after amendments**.
+
+**1. P2: M1's completion contract is stale after the amendments.**
+It said "three new loud-failure pins" against the Tests section's
+four, and omitted the docgen, historical-fixture and semantic-census
+work the amendments added.
+
+*Resolution*: adopted. The M1 checklist item now enumerates the
+amended work and says four pins.
+
+**2. P2: the pre-cutover test's docstring becomes false once the
+header is excluded.** Its byte-for-byte claim must narrow with the
+comparison.
+
+*Resolution*: adopted. The risk entry now requires the docstring and
+the comparison helper's documentation to state that only the YAML
+configuration body is compared, header and credential annotations
+excluded.
