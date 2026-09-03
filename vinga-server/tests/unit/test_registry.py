@@ -55,6 +55,69 @@ def test_removing_is_idempotent() -> None:
     assert len(registry) == 0
 
 
+def test_a_full_registry_says_which_of_the_two_reasons_it_is() -> None:
+    """The classifier `try_add` refuses through, and the one a readiness
+    probe reports: one answer over both facts, so the door and anything
+    reporting on the door cannot come to disagree."""
+    registry = SessionRegistry(max_sessions=1)
+    assert registry.admission == "admitting"
+    session = fake_session()
+    registry.try_add(session)
+
+    assert registry.admission == "full"
+
+    registry.remove(session)
+    assert registry.admission == "admitting"
+
+
+def test_a_server_on_its_way_out_is_draining_rather_than_full() -> None:
+    """Both hold, and the terminal one is the answer: a full server has a
+    slot again when a conversation ends, a draining one never admits
+    another."""
+    registry = SessionRegistry(max_sessions=1)
+    registry.try_add(fake_session())
+
+    registry.stop_admitting()
+
+    assert registry.admission == "draining"
+
+
+def test_shutting_the_door_latches_and_costs_nothing_to_repeat() -> None:
+    """The shutdown calls this on every path out and from a signal
+    handler, so it has to be idempotent to be free, and it has to latch
+    because a server that has started refusing conversations is not going
+    to want them again."""
+    registry = SessionRegistry(max_sessions=1)
+
+    registry.stop_admitting()
+    registry.stop_admitting()
+
+    assert registry.draining
+    assert registry.admission == "draining"
+    assert not registry.try_add(fake_session())
+
+
+async def test_the_drain_shuts_the_door_before_it_waits_for_anything() -> None:
+    """Latched at `drain`'s entry rather than at its return: the grace
+    period is spent on the conversations already in flight, and a device
+    arriving during it must not be let in."""
+    registry = SessionRegistry(max_sessions=2)
+    seen: list[str] = []
+
+    class Watching:
+        async def request_shutdown(
+            self, code=1001, reason="", grace_s=10.0, close_reason=None
+        ) -> bool:
+            seen.append(registry.admission)
+            return True
+
+    assert registry.try_add(cast(Any, Watching()))
+
+    await registry.drain(timeout_s=1.0)
+
+    assert seen == ["draining"]
+
+
 def test_the_same_session_does_not_take_two_slots() -> None:
     registry = SessionRegistry(max_sessions=2)
     session = fake_session()

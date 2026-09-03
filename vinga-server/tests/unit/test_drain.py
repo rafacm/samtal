@@ -267,9 +267,60 @@ async def test_the_first_signal_drains_before_uvicorn_exits() -> None:
     assert session.shutdown is not None
 
 
+async def test_the_signal_shuts_the_door_before_the_drain_gets_its_turn() -> None:
+    """The window this closes. `handle_exit` runs in a signal handler, so
+    it schedules the drain onto the loop rather than running it, and
+    between the signal and that task's first statement the registry used
+    to go on admitting conversations to a process already on its way
+    out."""
+    registry = registry_with(FakeSession(speaking_for=0.1))
+    server = draining_server(registry)
+
+    server.handle_exit(signal.SIGTERM, None)
+
+    # Nothing has run on the loop yet: the drain task has not been
+    # created, let alone reached its own first statement.
+    assert registry.admission == "draining"
+    assert not registry.try_add(cast(Any, FakeSession()))
+    # And the drain still happens, so the door is not all that shut.
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        if server.should_exit:
+            break
+    assert server.should_exit
+
+
+async def test_a_zero_drain_shuts_the_door_it_never_drains_behind() -> None:
+    """`drain_s = 0` never calls `drain()` at all, so a flag that only
+    turned in there would never turn on this path: the server would go on
+    admitting for the whole of uvicorn's own shutdown."""
+    registry = registry_with()
+    server = draining_server(registry, drain_s=0.0)
+
+    server.handle_exit(signal.SIGTERM, None)
+
+    assert server.should_exit
+    assert registry.admission == "draining"
+    assert not registry.try_add(cast(Any, FakeSession()))
+
+
+def test_a_signal_with_no_loop_to_schedule_on_still_shuts_the_door() -> None:
+    """Nothing can be scheduled, so nothing drains. The door shuts
+    anyway, because setting one bool needs no loop, which is also what
+    makes it safe to do from a signal handler."""
+    registry = registry_with()
+    server = draining_server(registry)
+
+    server.handle_exit(signal.SIGTERM, None)
+
+    assert server.should_exit
+    assert registry.admission == "draining"
+
+
 async def test_a_second_signal_forces_the_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     hub = LiveEvents()
-    server = draining_server(registry_with(FakeSession(speaking_for=30)), live=hub)
+    registry = registry_with(FakeSession(speaking_for=30))
+    server = draining_server(registry, live=hub)
     watching = hub.subscribe()
     counts = readers_when_uvicorn_stopped(monkeypatch, hub)
 
@@ -285,6 +336,9 @@ async def test_a_second_signal_forces_the_exit(monkeypatch: pytest.MonkeyPatch) 
     # stream left open is a response uvicorn's shutdown waits out.
     assert counts == [0], "uvicorn was told to stop with a tail still open"
     assert await anext(aiter(watching), None) is None, "the tail was not ended"
+    # And it does not reopen the door the first signal shut, which is
+    # what it would have had to shut itself had it arrived first.
+    assert registry.admission == "draining"
 
 
 async def test_a_signal_before_the_composition_exists_is_passed_straight_through() -> None:
