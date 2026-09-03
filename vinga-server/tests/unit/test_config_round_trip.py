@@ -36,6 +36,7 @@ from tests.support.problems import paths
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs
+from vinga_server.config import cli
 from vinga_server.config.api import build_api
 from vinga_server.config.entities import PROGRAM
 from vinga_server.config.loader import ConfigError
@@ -441,9 +442,42 @@ def test_the_cli_resubmits_a_masked_document_it_printed(
 # stored credential is not in an exported body at all, and it cannot be:
 # the mask is not a value a creating write accepts, so an export with
 # masks injected would fail on the empty store it is most needed for,
-# and a secret write cannot run before the entity exists. So the
-# sequence is apply, then the secret sets, which is what the export's
-# own header says.
+# and a secret write cannot run before the entity exists. Nor can the
+# credentials come last: an apply builds the engines the document names,
+# and an engine is built with the credential the store holds for it. So
+# the sequence is import, then the secret sets, then apply, which is
+# what the export's own header says and what the case below holds its
+# foot to as well.
+
+
+def test_the_export_footer_puts_the_credentials_where_the_header_does() -> None:
+    """The one line of an export that has to agree with another line of
+    the same file.
+
+    The header numbers three steps and the credentials are the second of
+    them; the footer is the sentence an operator reads when they get
+    down to the commands, and a file whose two halves disagree about the
+    order is worse than one that says nothing, because the half that is
+    wrong is the half nearest the commands being pasted.
+
+    It said "after applying" and was true while applying meant writing
+    (#341). #371 moved that word onto the install, which left the footer
+    telling an operator to enter the credentials after the engines that
+    need them had already been built. The order is explicit now, and
+    this reads it off the header rather than restating it.
+    """
+    importing = f"{PROGRAM} import"
+    applying = f"{PROGRAM} apply"
+
+    for named in (cli.EXPORT_HEADER, cli.EXPORT_SECRETS_HEADING):
+        assert importing in named, named
+        assert applying in named, named
+        assert named.index(importing) < named.index(applying), named
+
+    # And the sentence that was true of the old grammar is gone rather
+    # than merely outnumbered.
+    assert "after applying" not in cli.EXPORT_SECRETS_HEADING
+
 
 # The three ways a secret reaches an entity, all three seeded below,
 # because they travel three different ways. An environment reference is
