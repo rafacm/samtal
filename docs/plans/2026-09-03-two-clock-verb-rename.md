@@ -207,11 +207,17 @@ the three untouched ones. It does and it does not, respectively.
   the new `import` installs nothing, so it cannot leave an install
   unanswered. The sentence's forwarding role (run `diff`, then the
   installer) survives only in the one-line `APPLY_NOTICE`.
-- **`_RETIRED_WORDS` in the census is already right.** `apply` and
-  `reload` are both in it from the #223 re-cut, so the retired-word
-  families keep matching; `import` joins the live words through the
-  registered tree itself. No census code changes, only the manifest
-  regeneration.
+- **The census changes one list, not its rules.** `apply` and
+  `reload` are both in `_RETIRED_WORDS` from the #223 re-cut, so the
+  retired-word families keep matching, and `import` joins the live
+  words through the registered tree itself. The one code change:
+  `vinga-server/tests/integration/data/pre-cutover-export.yaml` joins
+  `_HISTORICAL_PATHS`, with a comment in the census's own style. The
+  fixture is the pre-cutover build's output committed as it was
+  printed, nothing left in the repository can produce it again, and
+  its header quotes `vinga reload`; it is a record exactly the way
+  the respelling transcript beside it already is, and today's
+  `respell` class is the misclassification this rename exposes.
 - **The simulator's two sentences** (`NOT_ADMITTED_YET` and the
   not-admitted listing) respell `{PROGRAM} reload` to
   `{PROGRAM} apply` with no other change.
@@ -366,6 +372,16 @@ marked new.
   sentence). Mitigation: a manual `grep -rni 'reload'` over
   non-historical paths at implementation time, reading each hit, on
   top of the census.
+- **The pre-cutover test's comparison spans the header.**
+  `test_a_pre_cutover_export_applies_into_an_empty_postgres_database`
+  compares a fresh export against the fixture stripping only the
+  `secret set` lines, and the fixture's header cannot change while
+  `EXPORT_HEADER` does. Mitigation, adopted from the round: the test
+  consumes the fixture with the current `import` command, and the
+  comparison excludes the version-specific reproduction header along
+  with the secret footer, comparing the configuration body, which is
+  the half the test's own docstring claims (the document is rendered
+  from the domain models, not from the rows).
 - **The two renderings' deletion could drop a pinned behavior**
   (the stderr flush ordering lived in `_applied_entries`).
   Mitigation: the surviving rendering keeps the shared helper and its
@@ -465,6 +481,13 @@ plan should keep the fixture byte-for-byte, classify that path
 historical in the census, drive the current `import` when consuming
 it, and compare the configuration body excluding the version-specific
 header as well as the secret footer.
+
+*Resolution*: adopted. The census decision now moves the fixture into
+`_HISTORICAL_PATHS` (a record misclassified as live, exposed by this
+rename), and a new risk entry has the pre-cutover test driving
+`import` and comparing the configuration body with both the
+reproduction header and the secret footer excluded. The fixture's
+bytes do not move.
 
 **5. P2: the census is blind to the stale half of a semantic verb
 swap.** The scanner stops at the first option, so a stale
