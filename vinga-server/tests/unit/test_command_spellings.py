@@ -523,8 +523,12 @@ def test_every_live_spelling_names_a_command_the_tree_has() -> None:
 # invocation whose meaning moved.
 
 # What the new `apply` does not take: the document options the old one
-# did, and the flag that used to turn its second act off.
-_APPLY_REJECTS = ("-f", "--file", "--no-reload")
+# did, and the flag that used to turn its second act off. Compared as
+# whole tokens and never as substrings, which is not fussiness: `-f` is
+# inside `--force`, and `--force` is a global option every command in
+# this grammar takes, so a substring rule reports the one shape an
+# operator is most likely to type correctly.
+_APPLY_REJECTS = frozenset({"-f", "--file", "--no-reload"})
 
 # One `apply` invocation and everything typed after it, up to where a
 # command line ends in prose or in a shell. The tail is the half this
@@ -535,13 +539,43 @@ _APPLY_TAIL = re.compile(
 )
 
 
-def _carries_a_document(line: str) -> bool:
-    """Whether one raw line asks an `apply` for something it cannot
-    take."""
+def _span(lines: list[str], first: int) -> str:
+    """One command as it was typed, which is not always one line.
+
+    A shell continues a command onto the next line with a trailing
+    backslash, and the documents here use that for exactly the invocation
+    this reads: a long command with its options underneath it. Reading
+    the physical line alone would find the verb and none of what follows
+    it, which is the same blindness the scanner above has and this exists
+    to close.
+
+    Joined with a single space and the backslashes dropped, so what comes
+    back is the token sequence a shell would see. `first` is a 1-based
+    line number, as a `Spelling` records it.
+    """
+    taken: list[str] = []
+    number = first - 1
+    while number < len(lines):
+        line = lines[number]
+        taken.append(line.rstrip().removesuffix("\\").strip())
+        if not line.rstrip().endswith("\\"):
+            break
+        number += 1
+    return " ".join(taken)
+
+
+def _carries_a_document(span: str) -> bool:
+    """Whether one command span asks an `apply` for something it cannot
+    take.
+
+    The tail is split the way a shell splits it and each token is read as
+    the option it names, so `--file=deployment.yaml` is `--file` and
+    `--force` is itself.
+    """
     return any(
-        option in match.group(1)
-        for match in _APPLY_TAIL.finditer(line)
-        for option in _APPLY_REJECTS
+        token.split("=", 1)[0] in _APPLY_REJECTS
+        for match in _APPLY_TAIL.finditer(span)
+        for token in match.group(1).split()
     )
 
 
@@ -558,7 +592,7 @@ def option_bearing_applies(path: str, text: str) -> list[str]:
         for row in _matches(path, text, _command_words())
         if row.kind == "respell"
         and _typed(row.invocation) == ("apply",)
-        and _carries_a_document(lines[row.line - 1])
+        and _carries_a_document(_span(lines, row.line))
     ]
 
 
@@ -574,23 +608,61 @@ def test_no_live_apply_is_written_the_way_the_old_one_was() -> None:
     assert stale == []
 
 
-def test_a_stale_apply_is_flagged_and_the_new_one_is_not() -> None:
-    """The guard held to going red, which is the half a passing
-    assertion cannot show: the first three lines are the old grammar
-    left behind, and the last two are what replaced it."""
-    page = "\n".join(
-        [
-            "run `vinga apply -f deployment.yaml`",
-            "run `vinga-server config apply --file deployment.yaml`",
-            "run `vinga apply --no-reload -f -`",
-            "run `vinga import -f deployment.yaml`",
-            "run `vinga apply`",
-        ]
-    )
+# The shapes the option guard is held to, one per row
+#
+# Written as pages rather than as file paths, for the reason the cases
+# at the foot of this module are: a fixture cannot go stale when the site
+# it was found at is fixed, and what is being checked is the rule.
+#
+# The two halves are equally load-bearing. A shape it must flag is a
+# document left in the old grammar; a shape it must not flag is a
+# document written correctly, and a guard that cried wolf over
+# `apply --force` would be a guard somebody turns off.
+STALE_APPLIES = [
+    ("the document option", "run `vinga apply -f deployment.yaml`", True),
+    ("the long document option", "run `vinga config apply --file deployment.yaml`", True),
+    ("the deleted flag", "run `vinga apply --no-reload -f -`", True),
+    ("an attached value", "run `vinga apply --file=deployment.yaml`", True),
+    (
+        "the document option a line down",
+        "vinga apply \\\n  -f deployment.yaml",
+        True,
+    ),
+    (
+        "the long document option a line down",
+        "vinga-server config apply \\\n  --file deployment.yaml",
+        True,
+    ),
+    (
+        "the deleted flag a line down",
+        "vinga apply \\\n  --no-reload",
+        True,
+    ),
+    ("the global force flag", "run `vinga apply --force`", False),
+    ("the global force flag a line down", "vinga apply \\\n  --force", False),
+    ("the address option", "run `vinga apply --api-url https://voice.example/api`", False),
+    ("the install alone", "run `vinga apply`", False),
+    ("the write that takes a document", "run `vinga import -f deployment.yaml`", False),
+]
 
-    flagged = option_bearing_applies("docs/somewhere.md", page)
 
-    assert [row.split(":")[1].split(" ")[0] for row in flagged] == ["1", "2", "3"]
+@pytest.mark.parametrize(
+    ("page", "flagged"),
+    [(page, flagged) for _, page, flagged in STALE_APPLIES],
+    ids=[what for what, _, _ in STALE_APPLIES],
+)
+def test_the_option_guard_reads_whole_tokens_and_whole_commands(
+    page: str, flagged: bool
+) -> None:
+    """The guard held to going red and to staying quiet.
+
+    `-f` is a substring of `--force`, which every command of this
+    grammar takes, so the tokens are compared whole. And a command
+    continued onto the next line is one command, so the span is read
+    rather than the line: the shape a deployment script writes is
+    exactly the shape a line-at-a-time rule cannot see.
+    """
+    assert bool(option_bearing_applies("docs/somewhere.md", page)) is flagged, page
 
 
 def test_the_guides_rejected_shapes_still_appear() -> None:
