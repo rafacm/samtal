@@ -345,11 +345,20 @@ marked new.
   rendering keeps the existing `_applied` pins (entries on stdout,
   distinct notices once each on stderr, the empty-document line, the
   flush-order property).
-- **Old spellings fail loudly, pinned (new).** Three pins in
+- **Old spellings fail loudly, pinned (new).** Four pins in
   `test_config_cli.py`: `vinga reload` exits 2 with Click's
   no-such-command error naming `reload`; `vinga apply -f x.yaml`
-  exits 2 with no-such-option `-f`; `vinga import -f -` is the
-  registered write. These are the pre-release stance made falsifiable.
+  exits 2 with no-such-option `-f`; `vinga import --no-reload -f -`
+  exits 2 with no-such-option `--no-reload` (the flag was deleted,
+  not transferred); `vinga import -f -` is the registered write.
+  These are the pre-release stance made falsifiable.
+- **The shortened notice is pinned as behavior (new).** Beside the
+  boundary-token assertions, two semantic pins on the constants:
+  `APPLY_NOTICE` contains no newline and names both `vinga apply`
+  and `vinga diff`; `BINDING_UNSERVED_NOTICE` names `vinga apply`.
+  `boundaries()` alone passes any sentence containing the announcing
+  phrase, so the one-line shape and the `diff` pointer need their own
+  assertions.
 - **A semantic guard for the swapped verb (new).** The census scanner
   stops at the first option, so a stale live `vinga apply -f ...` or
   `apply --no-reload` passes the registered-command guard by naming
@@ -551,6 +560,9 @@ and the pin that holds the mapping.
 `vinga apply`. Add semantic assertions: `APPLY_NOTICE` contains no
 newline and names both `vinga apply` and `vinga diff`.
 
+*Resolution*: adopted. The Tests section pins the no-newline shape
+and both command names on `APPLY_NOTICE`.
+
 **8. P2: command-bearing notices skew across independently versioned
 halves.** `docs/reference/cli.md` (Versions section, ~line 241)
 claims a mismatched pair fails at the API seam; this change preserves
@@ -563,3 +575,6 @@ command notices.
 
 **9. P2: no pin proves `--no-reload` was deleted from `import`.**
 Add `vinga import --no-reload -f -` as an exit-2 no-such-option pin.
+
+*Resolution*: adopted. The loud-failure pins grow to four, with
+`vinga import --no-reload -f -` exiting 2 on no-such-option.
