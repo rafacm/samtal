@@ -21,19 +21,36 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `HEALTHCHECK` says why it stays on liveness, and the compose file says
   what its own gate means. Recoverable provider and MCP failures cannot
   reach it: the handler asks composition presence and one registry flag
-  and nothing else. `/healthz` is unchanged, body and all.
+  and nothing else. `/healthz` is unchanged, body and all. Both probes
+  answer both spellings of their path, `/readyz` and `/readyz/`, rather
+  than redirecting between them: a redirect's `Location` carries the
+  request's own query string back to whoever sent it, and a probe URL is
+  what goes into a manifest or a CI script.
+- **A handshake refused by a shutdown says so** (#318). The
+  `session_rejected` event gained a variant with `reason: draining` and
+  a sentence naming the shutdown, beside the capacity one. The two send
+  a reader somewhere else, and reported as one word every rolling
+  restart read as a load problem.
 
 ### Changed
 
 - **Admission has one classifier, and it latches when a shutdown
   begins** (#318). The registry answers `admission` (`admitting`,
-  `draining` or `full`, draining winning) and `try_add` refuses exactly
-  when it is not `admitting`, so the door and the probe reporting on the
-  door cannot disagree. `stop_admitting` shuts it synchronously, and
+  `draining` or `full`, draining winning) and `admit` decides through
+  it, so the door and the probe reporting on the door cannot disagree.
+  `stop_admitting` shuts it synchronously, and
   `DrainingServer.handle_exit` calls it before anything else on every
   path: the drain used to be scheduled onto the loop, so the server went
   on admitting until that task ran, for the whole of a `drain_s: 0`
-  shutdown, and after a second signal.
+  shutdown, and after a second signal. A signal that arrives while the
+  lifespan is still building is remembered and applied to the registry
+  the build publishes, since uvicorn binds its listener before it
+  notices it was told to stop.
+- **`server.ota_path` refuses the two probe paths** (#318). The probes
+  are registered before the OTA router, so an endpoint configured at
+  `/healthz/` or `/readyz/` would never be reached and a board's
+  check-in would be answered with a health body. Refused at load, beside
+  the reservations of `/api/` and `/x/`.
 - **The composition lives exactly as long as the lifespan that built
   it** (#318). `app.state.composition` was assigned and never cleared,
   so an application that had been served once went on answering
