@@ -110,21 +110,21 @@ def test_the_table_marks_exactly_the_destructive_commands() -> None:
 def test_a_replacement_write_is_not_destructive() -> None:
     """The half decided rather than left implicit.
 
-    A `set` overwrites an entity whole and `apply` overwrites many, and
-    neither is confirmed: the API acknowledges exactly what was written,
-    the previous value is recoverable by writing it back and `export` is
-    the documented way to have it, and a prompt in the middle of the
-    most-scripted command in the grammar is what the automation rule
-    forbids. A rebinding is the same shape, and `reload` changes what a
-    server is doing rather than what is stored.
+    A `set` overwrites an entity whole and `import` overwrites many,
+    and neither is confirmed: the API acknowledges exactly what was
+    written, the previous value is recoverable by writing it back and
+    `export` is the documented way to have it, and a prompt in the
+    middle of the most-scripted command in the grammar is what the
+    automation rule forbids. A rebinding is the same shape, and `apply`
+    changes what a server is doing rather than what is stored.
     """
     never = {
         ("provider", "set"),
         ("agent-defaults", "set"),
-        ("apply",),
+        ("import",),
         ("device", "bind"),
         ("device", "pending", "claim"),
-        ("reload",),
+        ("apply",),
         ("default-agent", "set"),
     }
 

@@ -36,7 +36,7 @@ from tests.support.mcp_stdio_server import (
 from tests.support.tools_mcp import Applying, reading
 from vinga_server import logs
 from vinga_server.config import Config, McpServerConfig
-from vinga_server.config.cli import RELOAD_READ_TIMEOUT_S
+from vinga_server.config.cli import APPLY_READ_TIMEOUT_S
 from vinga_server.runtime.prompt import Guidance, ServerInstructions, ServerPrompt
 from vinga_server.tools.mcp import (
     CONNECT_TIMEOUT_S,
@@ -758,7 +758,7 @@ def test_the_bounds_add_up_to_the_documented_envelope() -> None:
     assert CONNECT_TIMEOUT_S + PROMPT_DISCOVERY_TIMEOUT_S <= 20.0
     assert (
         CONNECT_TIMEOUT_S + PROMPT_DISCOVERY_TIMEOUT_S + STOP_TIMEOUT_S
-        < RELOAD_READ_TIMEOUT_S
+        < APPLY_READ_TIMEOUT_S
     )
 
 

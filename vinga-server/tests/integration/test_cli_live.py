@@ -23,7 +23,7 @@ What that buys, and what nothing in-process can show:
 - A refusal is composed by the API, serialized, sent, parsed by the CLI
   and printed. That the sentence survives the round trip intact is a
   claim about the wire, and this is where it is made.
-- `apply` has no read timeout at all (`cli.APPLY_READ_TIMEOUT_S`), which
+- `import` has no read timeout at all (`cli.IMPORT_READ_TIMEOUT_S`), which
   a mock transport cannot demonstrate: there is nothing to wait for.
   Both halves of the bound are proven here against a server that really
   takes time to answer.
@@ -52,6 +52,7 @@ skips rather than lies when the module was not run whole.
 import asyncio
 import contextlib
 import io
+import itertools
 import json
 import logging
 import os
@@ -447,9 +448,9 @@ SIMULATED_MAC = board.DEFAULT_MAC
 #
 # Small on purpose: what the lane is about is the commands, and a
 # document this size names every section, exercises every reference edge
-# apply has to resolve in one transaction, and leaves the reload with
+# an import has to resolve in one transaction, and leaves the apply with
 # something to build. The two MCP entries are granted by no agent, so
-# nothing is ever connected for them and a reload starts and stops
+# nothing is ever connected for them and an apply starts and stops
 # nothing.
 
 # Named rather than written into the document below, because the
@@ -486,7 +487,7 @@ DEPLOYMENT: dict[str, object] = {
 
 @pytest.fixture(scope="module")
 def deployed(live: Live, tmp_path_factory: pytest.TempPathFactory) -> Live:
-    """The lane's store, configured through `config apply` over the
+    """The lane's store, configured through `config import` over the
     wire.
 
     The bootstrap is the acceptance case of the whole issue, and it is a
@@ -494,20 +495,19 @@ def deployed(live: Live, tmp_path_factory: pytest.TempPathFactory) -> Live:
     one document, one transaction, every section named, against a server
     that booted on an empty database.
 
-    Staged, which is the one thing about it that is a choice. Since #341
-    an apply installs what it wrote, and this lane's sequence is built on
-    the store and the running server being two different things for a
-    while: the agent written here is one the server is not serving until
-    `test_the_running_server_is_read_after_a_reload` reloads, which is
-    what that test is about. The default is driven where it can be
-    driven honestly, on a document of its own, below that test.
+    An import and nothing else, which is the whole of what the verb does
+    (#371), and what this lane's sequence is built on: the store and the
+    running server are two different things for a while, so the agent
+    written here is one the server is not serving until
+    `test_the_running_server_is_read_after_an_apply` installs it, which
+    is what that test is about.
     """
-    document_path = written(tmp_path_factory.mktemp("apply"), "deployment.yaml", DEPLOYMENT)
-    assert run("apply", "--no-reload", "-f", document_path) == 0
+    document_path = written(tmp_path_factory.mktemp("import"), "deployment.yaml", DEPLOYMENT)
+    assert run("import", "-f", document_path) == 0
     return live
 
 
-def test_a_whole_deployment_applies_over_the_wire(
+def test_a_whole_deployment_imports_over_the_wire(
     deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """What the bootstrap above did, read back through a second command.
@@ -531,18 +531,16 @@ def test_a_whole_deployment_applies_over_the_wire(
 def test_the_same_document_twice_changes_nothing(
     deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Idempotence over the wire: the document the fixture applied,
-    applied again, reports every entry unchanged and writes nothing.
+    """Idempotence over the wire: the document the fixture imported,
+    imported again, reports every entry unchanged and writes nothing.
 
     The outcome listing is the assertion because it is the only order an
-    apply observably has, and `unchanged` on every line is the claim
+    import observably has, and `unchanged` on every line is the claim
     that the comparison happened rather than the rows being rewritten.
-    Staged like the bootstrap, and for the same reason: what is being
-    asked about is the store.
     """
     document_path = written(tmp_path, "deployment.yaml", DEPLOYMENT)
 
-    assert run("apply", "--no-reload", "-f", document_path) == 0
+    assert run("import", "-f", document_path) == 0
 
     captured = capsys.readouterr()
     outcomes = [line.split(": ")[-1] for line in captured.out.splitlines()]
@@ -853,15 +851,15 @@ def test_a_credential_is_stored_masked_and_cleared(
 # so the difference a reload makes is observable in one session.
 
 
-def test_the_running_server_is_read_after_a_reload(
+def test_the_running_server_is_read_after_an_apply(
     deployed: Live, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The reload, and the two reads that are about the process.
+    """The apply, and the two reads that are about the process.
 
     `prompt` is the pin: the server this lane booted was given an empty
     domain half, so the agent every other test has been writing to is
-    one it is not serving, and asking for its prompt is refused until a
-    reload installs it. That sequence needs a server with a lifetime,
+    one it is not serving, and asking for its prompt is refused until an
+    apply installs it. That sequence needs a server with a lifetime,
     which is what this lane has and the acceptance suites do not.
     """
     assert run("agent", "preview", "sam") == 1
@@ -869,9 +867,9 @@ def test_the_running_server_is_read_after_a_reload(
     assert unserved.out == ""
     assert "Traceback" not in unserved.err
 
-    assert run("reload") == 0
-    applied = capsys.readouterr().out
-    assert "sam" in applied
+    assert run("apply") == 0
+    installed = capsys.readouterr().out
+    assert "sam" in installed
 
     assert run("agent", "preview", "sam") == 0
     assembled = capsys.readouterr().out
@@ -881,7 +879,7 @@ def test_the_running_server_is_read_after_a_reload(
     assert "The bins go out on Tuesday." in assembled
 
     # And the third read of the process: what the store still holds
-    # that this server is not serving, which after the reload above is
+    # that this server is not serving, which after the apply above is
     # nothing to name.
     assert run("diff") == 0
     compared = capsys.readouterr().out
@@ -952,27 +950,27 @@ def test_info_names_the_deployment_it_reached(
     assert SECRET not in said
 
 
-# The document that installs itself
+# The document, and the apply that installs it
 #
-# One controlled document, applied the way an operator applies one: the
-# default, both acts, over the wire. It sits here because the reload
-# above has already happened, so the world this lands in is one the lane
-# has already read back, and because the two tests either side of it are
-# what its own claim is measured against: the staged bootstrap left an
-# agent unserved, and this leaves nothing waiting.
+# One controlled document, imported and then installed the way an
+# operator does it: two commands, over the wire. It sits here because
+# the apply above has already happened, so the world this lands in is
+# one the lane has already read back, and because the two tests either
+# side of it are what its own claim is measured against: the bootstrap
+# left an agent unserved, and this leaves nothing waiting.
 #
 # What it writes is chosen so that the claim is provable rather than
-# plausible. A reload prints every section's heading whether or not
-# anything moved, so a document naming a kind the reload merely reports
+# plausible. An apply prints every section's heading whether or not
+# anything moved, so a document naming a kind the apply merely reports
 # on would pass against a server that reinstalled the world it already
 # had. A fragment the lane's agent includes cannot: the text reaches an
-# assembled prompt only if the reload behind this apply built the world
+# assembled prompt only if the apply after this import built the world
 # this document describes, and `agent preview` is a read of the running
 # process rather than of the store.
 #
-# The agent's body is repeated whole because an applied document
+# The agent's body is repeated whole because an imported document
 # replaces an entity rather than editing it, which is the same reason
-# `export` is the document `apply` takes.
+# `export` is the document `import` takes.
 
 WIRED = "The dog is called Bosse."
 
@@ -984,40 +982,47 @@ INSTALLED: dict[str, object] = {
 }
 
 
-def test_an_apply_installs_what_it_wrote(
+def test_an_apply_installs_what_an_import_wrote(
     deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The default `apply`, end to end against a real server (#341).
+    """The pair, end to end against a real server (#371).
 
-    Two requests in one command, and both answers are the real ones: the
-    write is a transaction on a Postgres, and the reload behind it is a
-    running server composing a new world and swapping it in. What an
-    operator reads is what was written and then what the reload made of
-    it, with nothing on stderr, because the boundary a notice would have
-    named is the answer printed underneath it.
+    Two commands, and both answers are the real ones: the import is a
+    transaction on a Postgres, and the apply is a running server
+    composing a new world and swapping it in. What an operator reads is
+    what was written, the boundary that write is waiting on, and then
+    what the apply made of it.
 
     The proof that the world which arrived is this one is the read
     underneath, and it is a read of the process: `agent preview`
     assembles the prompt the running server would send, and the fragment
-    in it exists only in the document this command just applied. The
-    reload's own listing says the same thing from the other side, naming
-    the agent whose assembled prompt moved.
+    in it exists only in the document just installed. The apply's own
+    listing says the same thing from the other side, naming the agent
+    whose assembled prompt moved.
     """
     document_path = written(tmp_path, "wired.yaml", INSTALLED)
 
-    assert run("apply", "-f", document_path) == 0
+    assert run("import", "-f", document_path) == 0
+
+    written_out = capsys.readouterr()
+    assert written_out.out.splitlines() == [
+        "prompt_fragments.wire: wrote",
+        "agents.sam: wrote",
+    ]
+    # The write is waiting, and the sentence under it says on what.
+    assert f"{cli.PROGRAM} apply" in written_out.err
+
+    assert run("apply") == 0
 
     printed = capsys.readouterr()
     lines = printed.out.splitlines()
-    assert lines[:2] == ["prompt_fragments.wire: wrote", "agents.sam: wrote"]
-    # The reload's own listing, which is the second act's answer: the
-    # agent whose assembled prompt this document moved, and then what
-    # every MCP entry is doing.
+    # The apply's own listing: the agent whose assembled prompt this
+    # document moved, and then what every MCP entry is doing.
     assert "prompts:" in lines
     assert "  changed: sam" in lines
     assert "mcp:" in lines
     assert "house" in printed.out
-    # And nothing waiting, which is the whole of what the default buys.
+    # And nothing waiting, which is the whole of what the apply buys.
     assert printed.err == ""
 
     # The read that says the running server is serving this document
@@ -1037,7 +1042,7 @@ def test_an_apply_installs_what_it_wrote(
 # else is: what it talks to is a real uvicorn, so the address policy, the
 # request boundary and the reading of a real reply all run for real.
 #
-# It sits after the reload because that is where the agent this
+# It sits after the apply because that is where the agent this
 # deployment names becomes one this server is serving, which is what
 # turns a claimed board into an admitted one rather than a bound board
 # waiting on a restart.
@@ -1527,7 +1532,7 @@ def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     assert printed.err.strip()
 
 
-def test_the_store_exports_as_a_document_it_applies_back_unchanged(
+def test_the_store_exports_as_a_document_it_imports_back_unchanged(
     deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The round trip, against a store this lane wrote through nine
@@ -1546,11 +1551,11 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
     path = tmp_path / "exported.yaml"
     path.write_text(exported, encoding="utf-8")
 
-    assert run("apply", "--no-reload", "-f", str(path)) == 0
-    applied = capsys.readouterr()
-    outcomes = [line.split(": ")[-1] for line in applied.out.splitlines()]
+    assert run("import", "-f", str(path)) == 0
+    imported = capsys.readouterr()
+    outcomes = [line.split(": ")[-1] for line in imported.out.splitlines()]
     assert outcomes and set(outcomes) == {"unchanged"}
-    assert applied.err == ""
+    assert imported.err == ""
 
     assert run("export") == 0
     assert capsys.readouterr().out == exported
@@ -1560,7 +1565,7 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
 #
 # The one procedure that used to have a flag of its own. A deployment
 # whose server will not start is repaired by stopping it, dropping and
-# recreating the database, booting clean and applying a kept export, and
+# recreating the database, booting clean and importing a kept export, and
 # the stored credentials come back through the commands the export
 # annotated. That is a claim about a server with a lifetime and a store
 # of its own, which is why it is here rather than in an acceptance
@@ -1632,7 +1637,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
 
     Seed a deployment and store a credential on it, keep the export,
     stop the server, drop and recreate the database, rotate to a key the
-    old one is not in, boot another server on the empty one, apply the
+    old one is not in, boot another server on the empty one, import the
     export, re-run the secret set command the export annotated, and
     start the server once more. Then read the credential back, and
     export.
@@ -1668,7 +1673,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
 
     with serving(database) as before:
         seeded = ("--api-url", before.api_url)
-        assert run(*seeded, "apply", "--no-reload", "-f", document_path) == 0
+        assert run(*seeded, "import", "-f", document_path) == 0
         # A deployment that can be started, which an empty database also
         # is and a store holding agents and nothing bound to one is not.
         # The rebuild has to reach a server that boots, so what it puts
@@ -1697,14 +1702,14 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
 
     with serving(database) as after:
         rebuilt = ("--api-url", after.api_url)
-        # Clean, which is what makes the apply below a reproduction
+        # Clean, which is what makes the import below a reproduction
         # rather than a no-op against what was already there.
         assert run(*rebuilt, "show") == 0
         assert document(capsys.readouterr().out)["agents"] == {}
 
         path = tmp_path / "exported.yaml"
         path.write_text(exported, encoding="utf-8")
-        assert run(*rebuilt, "apply", "--no-reload", "-f", str(path)) == 0
+        assert run(*rebuilt, "import", "-f", str(path)) == 0
         outcomes = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
         # Every entry the document names was written, the default agent
         # included, because the store it landed in was empty: an
@@ -1743,7 +1748,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
 PRE_CUTOVER_EXPORT = Path(__file__).resolve().parent / "data" / "pre-cutover-export.yaml"
 
 
-def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
+def test_a_pre_cutover_export_imports_into_an_empty_postgres_database(
     blank_database: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1753,19 +1758,25 @@ def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
 
     #283 migrates no data. What crosses is the document: a deployment
     exports its configuration with the build it is running, upgrades,
-    boots on an empty database and applies what it kept, then enters its
+    boots on an empty database and imports what it kept, then enters its
     credentials again through the commands the export annotated. This is
     that path, with a real pre-cutover export as its input.
 
-    The comparison at the end is the proof rather than a formality. The
-    export format is rendered from the domain models and not from the
-    rows, so it does not depend on the backend; asserting it byte for
-    byte is what says so, and what would catch a model change that
-    silently reshaped a document an operator is holding. The
-    `secret set` annotation is the one line that cannot match, because
-    an export names where a credential goes and never its value, so the
-    fixture's commands are run rather than compared and the two
-    documents are compared with those lines taken off.
+    The comparison at the end is the proof rather than a formality, and
+    what it compares is the YAML configuration body. The export format
+    is rendered from the domain models and not from the rows, so it does
+    not depend on the backend; asserting the body byte for byte is what
+    says so, and what would catch a model change that silently reshaped
+    a document an operator is holding.
+
+    Two parts of the file are excluded and neither is configuration.
+    The header is the reproduction procedure, which names the commands
+    of the build that printed it, so a kept export from an older
+    grammar carries an older procedure and always will: the fixture's
+    header says `apply --no-reload` and `reload`, the words this build
+    spells `import` and `apply`. And the credential annotations name
+    where a credential goes and never its value, so the fixture's
+    commands are run rather than compared.
     """
     monkeypatch.delenv(CONFIG_ENV, raising=False)
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
@@ -1782,7 +1793,7 @@ def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
 
         path = tmp_path / "kept.yaml"
         path.write_text(kept, encoding="utf-8")
-        assert run(*rebuilt, "apply", "--no-reload", "-f", str(path)) == 0
+        assert run(*rebuilt, "import", "-f", str(path)) == 0
         outcomes = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
         assert outcomes and set(outcomes) == {"wrote"}
 
@@ -1799,24 +1810,32 @@ def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
         assert stored_plaintext(database, RECOVERED_SLOT) == SECRET
 
         assert run("--api-url", after.api_url, "export") == 0
-        assert _without_secret_commands(capsys.readouterr().out) == (
-            _without_secret_commands(kept)
-        )
+        assert _configuration_body(capsys.readouterr().out) == _configuration_body(kept)
 
 
-def _without_secret_commands(exported: str) -> str:
-    """One export with its `secret set` annotations taken off.
+def _configuration_body(exported: str) -> str:
+    """One export's YAML configuration, with the two parts that are not
+    configuration taken off.
 
-    They are the one part two exports of one configuration may differ
-    in: the heading and its commands are present only when something is
-    stored, and the point of the comparison is the configuration rather
-    than which credentials happen to be filled in at the moment it was
-    printed.
+    The header first, which is the leading run of comment lines: it is
+    the procedure for reproducing the deployment, written in the command
+    grammar of the build that printed the file, so two exports from
+    different releases differ there by design rather than by drift.
+
+    The credential annotations second. They are the other part two
+    exports of one configuration may differ in: the heading and its
+    commands are present only when something is stored, and what is
+    being compared is the configuration rather than which credentials
+    happen to be filled in at the moment it was printed.
+
+    What is left is the whole of the configuration, compared byte for
+    byte.
     """
     lines = exported.splitlines(keepends=True)
+    body = list(itertools.dropwhile(lambda line: line.startswith("#"), lines))
     kept = [
         line
-        for line in lines
+        for line in body
         if " secret set " not in line and "Stored credentials are not exported" not in line
     ]
     return "".join(kept).rstrip() + "\n"
@@ -1938,8 +1957,8 @@ REFUSALS: tuple[Refusal, ...] = (
         True,
     ),
     Refusal(
-        ("apply",),
-        ("apply", "-f", REFUSED_DOCUMENT),
+        ("import",),
+        ("import", "-f", REFUSED_DOCUMENT),
         "document: the top-level keys of an applied document are the sections of the "
         "domain configuration, which are " + ", ".join(DOMAIN_KEYS) + ". Something else "
         "was written, and it is not quoted back",
@@ -2006,7 +2025,7 @@ REFUSALS: tuple[Refusal, ...] = (
         "pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back",
         True,
     ),
-    Refusal(("reload",), ("reload", "extra"), USAGE, False),
+    Refusal(("apply",), ("apply", "extra"), USAGE, False),
     Refusal(
         ("ota-url",),
         ("ota-url", "--config", MISSING_CONFIG),
@@ -2035,7 +2054,7 @@ REFUSALS: tuple[Refusal, ...] = (
 # appended value would fall outside the tail.
 UNREACHABLE_HEAD = "cannot reach the configuration API at "
 
-UNREACHABLE_TAIL = "booting one on an empty database and applying a kept export."
+UNREACHABLE_TAIL = "booting one on an empty database and importing a kept export."
 
 
 def test_every_family_of_the_grammar_has_a_refusal() -> None:
@@ -2052,12 +2071,13 @@ def test_every_family_of_the_grammar_has_a_refusal() -> None:
 
 
 def refusing(argv: Sequence[str], directory: Path) -> tuple[str, ...]:
-    """One refusal's command line, with the document the apply case
+    """One refusal's command line, with the document the import case
     needs written where it can be found.
 
     The document carries the planted credential in the section it will
-    be refused for, which is what makes the apply row's leak check about
-    something: a refusal that quoted the document back would carry it.
+    be refused for, which is what makes the import row's leak check
+    about something: a refusal that quoted the document back would carry
+    it.
     """
     return tuple(
         written(directory, "refused.yaml", {"nonsense_section": {"note": PLANTED}})
@@ -2207,7 +2227,7 @@ def test_a_fragment_that_will_not_parse_never_travels(
     assert document(capsys.readouterr().out)["prompt"] == "You are Sam."
 
 
-# The two bounds `apply` rides, over real HTTP
+# The two bounds `import` rides, over real HTTP
 #
 # Both of them are about a transaction whose length nothing about the
 # request predicts, and both are what a mock transport cannot show: one
@@ -2221,8 +2241,8 @@ def test_a_fragment_that_will_not_parse_never_travels(
 # A read bound short enough that this server cannot meet it. Deliberately
 # short so the test finishes, the way `test_config_api.py` shortens the
 # database's busy timeout for the same reason: what is being compared is
-# `apply` against an ordinary read, on the same server, through the same
-# client implementation, with the same store behind it.
+# `import` against an ordinary read, on the same server, through the
+# same client implementation, with the same store behind it.
 IMPATIENT_S = 0.005
 
 
@@ -2252,23 +2272,23 @@ def test_a_large_document_is_waited_out_however_long_it_takes(
     """A batch at the top of the accepted range, against a client that
     is not allowed to give up.
 
-    `apply`'s read timeout is None, and the reason is that no finite one
-    can be derived: the transaction loads the whole existing store and
-    validates the whole resulting one, whose size no request bound
+    `import`'s read timeout is None, and the reason is that no finite
+    one can be derived: the transaction loads the whole existing store
+    and validates the whole resulting one, whose size no request bound
     limits, and a client that gave up on a write the server then
     committed would leave nobody able to say what is stored.
 
     The comparison is what makes that observable in a lane's wall clock.
     An ordinary read of this same server, through the same client
     implementation, with its bound cut to a value this server cannot
-    meet, gives up and says so. The apply, whose request demonstrably
+    meet, gives up and says so. The import, whose request demonstrably
     took longer than that bound, does not. (Each command builds a client
     of its own and closes it, so what the two share is the server and
     the code that talks to it, not one open connection.)
 
-    Staged, so that what is timed is the one request the bound is about:
-    a reload behind it would put a second, differently bounded request
-    into the same wall clock.
+    One request and no second one, which is what makes the wall clock
+    readable: an import writes and stops, and installing what it wrote
+    is a command of its own.
     """
     entries = APPLY_LIMIT - 1
     many = {f"agent-{number:03d}": {"prompt": "You are one of many."} for number in range(entries)}
@@ -2276,13 +2296,11 @@ def test_a_large_document_is_waited_out_however_long_it_takes(
     monkeypatch.setattr(cli, "COMMANDS", impatient(("show",), IMPATIENT_S))
 
     started = time.monotonic()
-    assert run(
-        "apply", "--no-reload", "-f", document_path, "--api-url", isolated.api_url
-    ) == 0
+    assert run("import", "-f", document_path, "--api-url", isolated.api_url) == 0
     took = time.monotonic() - started
 
-    applied = capsys.readouterr()
-    outcomes = [line.split(": ")[-1] for line in applied.out.splitlines()]
+    imported = capsys.readouterr()
+    outcomes = [line.split(": ")[-1] for line in imported.out.splitlines()]
     assert len(outcomes) == entries
     assert set(outcomes) == {"wrote"}
     assert took > IMPATIENT_S
@@ -2319,7 +2337,7 @@ def test_an_over_limit_document_is_refused_with_the_store_unmutated(
             }
         },
     )
-    argv = ("apply", "-f", document_path, "--api-url", isolated.api_url)
+    argv = ("import", "-f", document_path, "--api-url", isolated.api_url)
 
     assert run(*argv) == 1
 
@@ -2360,13 +2378,13 @@ def test_an_over_limit_document_is_refused_with_the_store_unmutated(
 # directory is `vinga-server/`, which is where the recipes say to run
 # them from.
 #
-# The presets are the one exception, and it is in their test's name.
-# Since #341 applying a preset installs it, and installing a preset
-# means building what it names: a local stack downloads speech models
-# and dials an Ollama nobody is running here. So the presets are staged
-# rather than applied, which is a claim about the document rather than
-# about the deployment it describes, and the name says which of the two
-# is being made.
+# One published command is not run, and it is the bare `vinga apply`
+# each preset's recipe ends with. Installing a preset means building
+# what it names: a local stack downloads speech models and dials an
+# Ollama nobody is running here. So what these two exercise is the
+# import, which is a claim about the document rather than about the
+# deployment it describes, and the names say which of the two is being
+# made.
 
 # Where the example fragments and the presets are, which is the
 # directory every recipe's `-f examples/...` is relative to.
@@ -2376,7 +2394,7 @@ PRESETS = sorted((SERVER / "examples" / docgen.PRESET_DIR).glob("*.yaml"))
 
 
 @pytest.mark.parametrize("preset", PRESETS, ids=[path.stem for path in PRESETS])
-def test_a_preset_stages_onto_an_empty_store(
+def test_a_preset_imports_onto_an_empty_store(
     live: Live,
     isolated: Live,
     monkeypatch: pytest.MonkeyPatch,
@@ -2391,26 +2409,26 @@ def test_a_preset_stages_onto_an_empty_store(
     transaction and the document has to be complete enough to leave a
     store that reads back.
 
-    Written twice, because the second half of the claim is that applying
-    is idempotent: the same document again reports every entry unchanged
-    and writes nothing, which is what makes a preset safe to keep in
-    version control and re-run.
+    Written twice, because the second half of the claim is that
+    importing is idempotent: the same document again reports every entry
+    unchanged and writes nothing, which is what makes a preset safe to
+    keep in version control and re-run.
 
-    `--no-reload`, which is the one way this is not the command the
-    documentation prints. An operator applying a preset installs it, and
-    installing one means building the engines it names: the local stack
-    downloads its speech models and dials an Ollama, and neither is a
-    thing this lane may make a test depend on. The half that is dropped
-    is exercised on a document of this lane's own, further up.
+    The command is verbatim the first one the preset's own header
+    prints. What is not run is the second, the `vinga apply` that
+    installs it: installing a preset builds the engines it names, and
+    the local stack downloads its speech models and dials an Ollama,
+    neither of which is a thing this lane may make a test depend on. The
+    apply is exercised on a document of this lane's own, further up.
     """
     monkeypatch.chdir(SERVER)
     monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
 
-    assert run("apply", "--no-reload", "-f", str(preset.relative_to(SERVER))) == 0
+    assert run("import", "-f", str(preset.relative_to(SERVER))) == 0
     first = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
     assert first and set(first) == {"wrote"}
 
-    assert run("apply", "--no-reload", "-f", str(preset.relative_to(SERVER))) == 0
+    assert run("import", "-f", str(preset.relative_to(SERVER))) == 0
     again = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
     assert again == ["unchanged"] * len(first)
 
@@ -2424,12 +2442,12 @@ def test_a_preset_stages_onto_an_empty_store(
         assert shown["providers"][stage].keys() >= entries.keys()
 
 
-def _staged(argv: list[str]) -> list[str]:
-    """One published command line, with an apply staged rather than
-    installed. Everything else is run exactly as it is published."""
-    if argv[:1] != ["apply"]:
-        return argv
-    return [argv[0], "--no-reload", *argv[1:]]
+# The one published line this lane does not run, for the reason the
+# preset test above does not run it: it installs the presets that were
+# just imported, and installing them builds what they name. Held to
+# still being published by the assertion below, so the exception cannot
+# outlive the recipe it is about.
+NOT_INSTALLED = ["apply"]
 
 
 def test_every_published_recipe_runs_against_the_server(
@@ -2453,13 +2471,13 @@ def test_every_published_recipe_runs_against_the_server(
     is where those commands read them from and the reason none of them
     takes the value as an argument.
 
-    One departure from verbatim, and it is the preset test's: an apply
-    is staged. A published preset is applied and installed by the
-    operator who runs it, and installing a preset builds what it names,
-    which here is a cloud stack whose credentials the recipe stores two
-    lines later and a local stack whose models are a download. The words
-    that are being checked are the recipe's own, so the staging is added
-    where the run happens rather than published into the document.
+    One departure from verbatim, and it is the preset test's: the bare
+    `apply` each preset's recipe ends with is skipped. An operator runs
+    it, and installing a preset builds what it names, which here is a
+    cloud stack whose credentials the recipe stores two lines later and
+    a local stack whose models are a download. The words being checked
+    are the recipe's own, so the exception lives where the run happens
+    rather than in the document.
     """
     monkeypatch.chdir(SERVER)
     monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
@@ -2470,11 +2488,16 @@ def test_every_published_recipe_runs_against_the_server(
         for line in recipe.commands
     ]
     assert published, "no recipe is published, so what follows is vacuous"
+    assert NOT_INSTALLED in [line.split() for line in published], (
+        "the skipped line is no longer published, so the exception is about nothing"
+    )
 
     for line in published:
         argv = line.split()
+        if argv == NOT_INSTALLED:
+            continue
         secret = argv[1:3] == ["secret", "set"]
-        assert run(*_staged(argv), stdin=SECRET if secret else None) == 0, line
+        assert run(*argv, stdin=SECRET if secret else None) == 0, line
         assert capsys.readouterr().out.strip(), line
 
     # The deployment those commands add up to, read back through the

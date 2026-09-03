@@ -204,7 +204,7 @@ def test_the_ota_line_names_the_restart_rather_than_the_binding(
     # The one action that puts the agent in front of the board, and no
     # restart: the world this server serves is one apply away from the
     # world the store describes.
-    assert "vinga-server config reload" in caplog.text
+    assert "vinga-server config apply" in caplog.text
     assert "restart" not in caplog.text
     assert "bind it under devices" not in caplog.text
     record = next(r for r in caplog.records if getattr(r, "event", None) == "ota_check")
@@ -235,7 +235,7 @@ def test_the_session_line_names_the_reload_too(
                     websocket.receive_text()
 
     assert "bound to agent poet, which this server is not serving" in caplog.text
-    assert "vinga-server config reload" in caplog.text
+    assert "vinga-server config apply" in caplog.text
     assert "restart" not in caplog.text
     rejection = next(
         r for r in caplog.records if getattr(r, "event", None) == "session_rejected"

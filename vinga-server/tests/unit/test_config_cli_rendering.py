@@ -2,7 +2,7 @@
 
 Five commands ask the running server rather than the database: `device
 pending list` lists the boards waiting to be claimed, `status` says what
-each MCP server is doing, `reload` applies a changed registry and says
+each MCP server is doing, `apply` installs a changed registry and says
 what it did, `agent preview` assembles an agent's prompt block by block,
 and `diff` says what the store holds that the server is not serving.
 None of them writes anything, and all five are rendered rather than
@@ -37,10 +37,10 @@ from tests.support.config_cli import SECRET, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import RELOAD, boundaries
-from vinga_server.config import Config, cli, printing
+from vinga_server.config import Config, cli, entities, printing
 from vinga_server.config.cli import (
+    APPLY_SECTIONS,
     DIFF_SECTIONS,
-    RELOAD_SECTIONS,
     flags,
     named_lists,
     nested,
@@ -408,12 +408,12 @@ def test_prompt_says_what_the_server_answered_for_an_unserved_agent(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Printed verbatim from what the server answered, which sends an
-    operator to the reload that installs an agent."""
+    operator to the apply that installs an agent."""
     run.runtime["agent_prompt"] = _previewing(_assembled())
 
     assert run("agent", "preview", "stranger") == 1
 
-    assert "config reload" in capsys.readouterr().err
+    assert "config apply" in capsys.readouterr().err
 
 
 def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]) -> None:
@@ -502,7 +502,7 @@ def _applied(
     return reload
 
 
-def test_reload_prints_what_it_did_and_what_is_running(
+def test_apply_prints_what_it_did_and_what_is_running(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
@@ -520,7 +520,7 @@ def test_reload_prints_what_it_did_and_what_is_running(
         stopped=("gone",),
     )
 
-    assert run("reload") == 0
+    assert run("apply") == 0
 
     printed = capsys.readouterr().out
     assert "mcp:" in printed
@@ -569,17 +569,17 @@ def test_a_section_answered_null_is_named_rather_than_missing() -> None:
     body = _reload_answer()
     body["agents"] = None
 
-    assert f"agents: {cli.NOT_APPLIED}" in cli._reload_listing(body)
+    assert f"agents: {cli.NOT_APPLIED}" in cli._apply_listing(body)
 
 
-def test_the_reload_listing_renders_every_field_of_every_section() -> None:
+def test_the_apply_listing_renders_every_field_of_every_section() -> None:
     """The named failure to test for: a section's field that is neither
     a list of names nor a flag would drop silently out of the rendering
     above, and an operator would be reading an answer with a hole in it.
 
     Read off the models rather than listed here, so a field added to a
     section is either rendered or fails this."""
-    for section, shape in RELOAD_SECTIONS.items():
+    for section, shape in APPLY_SECTIONS.items():
         rendered = set(outcomes(shape)) | set(flags(shape))
         # The MCP status document is the one field rendered by a
         # listing of its own rather than by the rules above, which is
@@ -588,22 +588,22 @@ def test_the_reload_listing_renders_every_field_of_every_section() -> None:
         assert unrendered == ({"servers"} if section == "mcp" else set())
 
 
-def test_reload_prints_the_refusal_the_api_answered(
+def test_apply_prints_the_refusal_the_api_answered(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """No server to reload is a 503 with a sentence, and the sentence is
     what an operator reads: this client adds nothing to it."""
-    assert run("reload") == 1
+    assert run("apply") == 1
 
     assert "no running server" in capsys.readouterr().err
 
 
-def test_reload_refuses_an_answer_it_cannot_read(
+def test_apply_refuses_an_answer_it_cannot_read(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"started": "weather"})
 
-    assert run("reload") == 1
+    assert run("apply") == 1
 
     assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
 
@@ -646,7 +646,7 @@ def _reload_answer(**overrides: object) -> dict[str, object]:
         ),
     ],
 )
-def test_reload_prints_nothing_from_an_answer_of_the_wrong_shape(
+def test_apply_prints_nothing_from_an_answer_of_the_wrong_shape(
     body: object, run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The status rules apply to the reload's answer too: `_names`
@@ -656,7 +656,7 @@ def test_reload_prints_nothing_from_an_answer_of_the_wrong_shape(
     than in output or a traceback."""
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
 
-    assert run("reload") == 1
+    assert run("apply") == 1
 
     captured = capsys.readouterr()
     assert cli.UNRECOGNIZED_ANSWER in captured.err
@@ -704,6 +704,24 @@ def test_the_comparison_prints_every_kind_and_its_boundary() -> None:
         assert f"{kind}: applies at " in rendered
     assert "devices: applies at check-in" in rendered
     assert "providers: applies at reload" in rendered
+
+
+def test_the_comparison_head_names_the_command_that_crosses_each_label(
+) -> None:
+    """The labels are the API's tokens and stay spelled as the API
+    spells them, `reload` included: it names the mechanism truthfully,
+    and a client generated from the contract reads the same word.
+
+    What the head has to say is which command an operator runs to cross
+    one, and for `reload` that command is `vinga apply` (#371). The
+    per-kind assertions above read only the labels, so the mapping
+    between a kept token and the verb that moved needs a pin of its own.
+    """
+    rendered = cli._diff_listing(DIFF_EMPTY)
+
+    head = rendered.split("\n\n")[0]
+    assert "`reload`" in head
+    assert f"`{cli.PROGRAM} apply`" in head
 
 
 def test_the_comparison_names_what_moved_and_where_it_reaches() -> None:
@@ -837,23 +855,20 @@ def test_no_token_the_comparison_refuses_is_retained_on_its_chain(answered: obje
     assert SECRET not in _chain(caught.value)
 
 
-# Applying, and the reload behind it
+# Importing, and the apply that follows it
 #
-# `apply` writes the document and then installs it (#341), which makes
-# it the one row whose acts an invocation chooses between: the default
-# runs both, `--no-reload` stages the write for a later reload. The
+# `import` writes the document to the store and stops there (#371), and
+# `apply` is the separate command that installs what is stored. The
 # cases belong in this file rather than beside the acceptance spine's
-# other apply cases because what decides the behavior is a running
+# other write cases because what decides the behavior is a running
 # server, and this is the file that injects one.
 #
-# What each of the three surfaces is: two requests in order under the
-# default and one under the flag, the notices dropped under the default
-# because the reload's own listing follows them and kept under the flag
-# because nothing else will say it, and the sentence a committed write
-# whose reload did not answer may add.
+# What each surface is: one request per command, the notices the import
+# prints because nothing else will say what the write is waiting on, and
+# the order the two streams are read in.
 
 # The MCP entry every case here configures, which is referenced by one
-# agent and connected by nobody: what these are about is the reload's
+# agent and connected by nobody: what these are about is the apply's
 # answer rather than a live connection.
 ENTRY = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
 
@@ -865,7 +880,7 @@ providers:
       reply: Hello.
 """
 
-# What the entry above is called in an applied document's answer, which
+# What the entry above is called in an imported document's answer, which
 # is the section and the identity under it.
 WROTE = "providers.llm.brain: wrote"
 
@@ -873,9 +888,9 @@ HELD = "a reload of this server's configuration is already running."
 
 
 def _held():
-    """A running server whose reload is refused because another one has
-    it, which is the 409 an operator most plausibly meets behind a
-    committed write: two people administering one deployment."""
+    """A running server whose apply is refused because another one has
+    it, which is the 409 an operator most plausibly meets: two people
+    administering one deployment."""
 
     async def reload() -> ConfigReloadResult:
         raise ReloadInProgressError(HELD)
@@ -883,45 +898,17 @@ def _held():
     return reload
 
 
-def test_apply_installs_what_it_wrote(run, capsys: pytest.CaptureFixture[str]) -> None:
-    """The default, which is the verb doing what its name promises.
-
-    Two requests in one command, and the order is readable in the
-    output: what was written, and then what the reload made of it.
-    """
-    servers = _configured({"weather": ENTRY}, {"sam": ["weather"]})
-    run.runtime["mcp_servers"] = servers
-    run.runtime["reload"] = _applied(
-        servers, providers=ProvidersReload(built=["llm.brain"], reused=[], retired=[])
-    )
-
-    assert run("apply", "-f", "-", stdin=WRITTEN) == 0
-
-    printed = capsys.readouterr()
-    lines = printed.out.splitlines()
-    assert lines[0] == WROTE
-    assert "  built: llm.brain" in lines
-    # Two clients, because each request builds one and closes it: the
-    # write and the reload are two requests rather than a flag on one.
-    assert len(run.clients) == 2
-    # And nothing on stderr. The boundary the notice names is the
-    # reload, and the reload is the answer above it: printing the
-    # sentence here would tell an operator to run the command whose
-    # answer they are reading.
-    assert printed.err == ""
-
-
-def test_no_reload_stages_the_write_and_says_what_it_is_waiting_on(
+def test_an_import_says_what_the_write_is_waiting_on(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The staging spelling, which is the rendering that keeps the
-    notices: nothing in this command installs the write, so the
-    boundary it is waiting at is the operator's to know.
+    """The whole of what the verb promises: the document is written and
+    nothing is installed, so the boundary it is waiting at is the
+    operator's to know.
 
-    One request, which is the other half of the claim: the flag turns
-    the second act off rather than quietening it.
+    One request, which is the other half of the claim: there is no
+    second act behind this one to quieten or to turn off.
     """
-    assert run("apply", "--no-reload", "-f", "-", stdin=WRITTEN) == 0
+    assert run("import", "-f", "-", stdin=WRITTEN) == 0
 
     printed = capsys.readouterr()
     assert printed.out.splitlines() == [WROTE]
@@ -929,36 +916,7 @@ def test_no_reload_stages_the_write_and_says_what_it_is_waiting_on(
     assert len(run.clients) == 1
 
 
-def test_a_write_whose_reload_is_held_claims_only_what_it_knows(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The first of the two failures behind a committed write.
-
-    A 409 says another reload is already running, and that one re-read
-    the store either side of this commit, so whether the document is
-    live is not knowable from here. What the command may say is what it
-    saw: the write was acknowledged, no reload answered, and here are
-    the two commands that settle it.
-    """
-    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
-    run.runtime["reload"] = _held()
-
-    assert run("apply", "-f", "-", stdin=WRITTEN) == 1
-
-    printed = capsys.readouterr()
-    # The write's own answer is printed first, because it happened.
-    assert printed.out.splitlines() == [WROTE]
-    # Then the server's refusal, and then what this client knows.
-    assert printed.err == f"{HELD}\n{cli.APPLY_UNANSWERED}\n"
-    assert "Traceback" not in printed.err
-    # And the write really did commit, which is the claim the sentence
-    # makes and the one thing here that is checkable.
-    capsys.readouterr()
-    assert run("provider", "show", "llm", "brain") == 0
-    assert "Hello." in capsys.readouterr().out
-
-
-APPLIED_NOTHING = [
+IMPORTED_NOTHING = [
     ("a document that names nothing", "{}\n", []),
     ("a document the store already says", WRITTEN, [WROTE.replace("wrote", "unchanged")]),
 ]
@@ -966,54 +924,47 @@ APPLIED_NOTHING = [
 
 @pytest.mark.parametrize(
     ("document", "printed_lines"),
-    [(document, lines) for _, document, lines in APPLIED_NOTHING],
-    ids=[what for what, _, _ in APPLIED_NOTHING],
+    [(document, lines) for _, document, lines in IMPORTED_NOTHING],
+    ids=[what for what, _, _ in IMPORTED_NOTHING],
 )
-def test_an_apply_that_wrote_nothing_says_nothing_about_a_write(
+def test_an_import_that_wrote_nothing_says_no_boundary_either(
     run,
     capsys: pytest.CaptureFixture[str],
     document: str,
     printed_lines: list[str],
 ) -> None:
-    """The sentence has to be true of every apply that was answered, and
-    two of the three wrote nothing at all.
+    """Two of the three imports that succeed write nothing at all.
 
     A document every entry of which the store already holds writes no
     row, and a document naming no section has nothing to write in the
-    first place. A sentence opening "The document was written" would be
-    false in both, which is the one thing a sentence added to a refusal
-    may never be: it is the half the operator has no other way to check.
+    first place. Neither is waiting on anything, so neither prints a
+    boundary sentence: the notice is a fact of a write rather than of a
+    command that ran.
     """
-    # The all-unchanged case needs the row there first, staged, so that
-    # what the second run meets is a store that already says it.
+    # The all-unchanged case needs the row there first, so that what the
+    # second run meets is a store that already says it.
     if printed_lines:
-        assert run("apply", "--no-reload", "-f", "-", stdin=document) == 0
+        assert run("import", "-f", "-", stdin=document) == 0
         capsys.readouterr()
-    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
-    run.runtime["reload"] = _held()
 
-    assert run("apply", "-f", "-", stdin=document) == 1
+    assert run("import", "-f", "-", stdin=document) == 0
 
     printed = capsys.readouterr()
     if printed_lines:
         assert printed.out.splitlines() == printed_lines
     else:
-        assert printed.out.startswith(cli.NOTHING_APPLIED)
-    assert printed.err == f"{HELD}\n{cli.APPLY_UNANSWERED}\n"
-    # The claim itself, held to what happened: nothing was written, and
-    # the sentence says nothing that says otherwise.
-    assert "was written" not in printed.err
+        assert printed.out.startswith(cli.NOTHING_IMPORTED)
+    assert printed.err == ""
 
 
-def test_an_empty_apply_is_read_before_the_failure_that_followed_it(run) -> None:
-    """The ordering rule, on the one arm that used to leave without it.
+def test_what_an_import_wrote_is_read_before_the_boundary_under_it(run) -> None:
+    """The ordering rule the rendering exists to keep.
 
-    Two streams reach one terminal, and only one of them is buffered, so
-    what an operator reads in is flush order rather than write order. A
-    document that named nothing prints one line and used to return
-    before the flush, so the refusal from the reload behind it, written
-    to an unbuffered stderr, arrived above the output it came after: the
-    apply would read as having failed rather than as having applied
+    Two streams reach one terminal and only one of them is buffered, so
+    what an operator reads in is flush order rather than write order.
+    The lines saying what was written go to stdout and the sentence
+    saying what they are waiting on goes to stderr, and a sentence that
+    arrived above the lines it is about would be a boundary attached to
     nothing.
 
     Asserted over one shared buffer with two wrappers on it, a buffered
@@ -1025,46 +976,41 @@ def test_an_empty_apply_is_read_before_the_failure_that_followed_it(run) -> None
     shared = io.BytesIO()
     buffered = io.TextIOWrapper(shared, encoding="utf-8", write_through=False)
     unbuffered = io.TextIOWrapper(shared, encoding="utf-8", write_through=True)
-    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
-    run.runtime["reload"] = _held()
 
     with contextlib.redirect_stdout(buffered), contextlib.redirect_stderr(unbuffered):
-        assert run("apply", "-f", "-", stdin="{}\n") == 1
+        assert run("import", "-f", "-", stdin=WRITTEN) == 0
         buffered.flush()
         written = shared.getvalue().decode("utf-8")
 
-    assert cli.NOTHING_APPLIED in written
-    assert written.index(cli.NOTHING_APPLIED) < written.index(HELD)
+    assert WROTE in written
+    assert written.index(WROTE) < written.index(entities.APPLY_NOTICE)
 
 
-def test_a_refused_document_never_reaches_the_reload(
+def test_a_refused_document_is_the_whole_answer(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The other order the two acts can end in. A document that will not
-    resolve changed nothing, so there is nothing to install and no
-    second request to make, and the refusal is the whole answer."""
-    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
-    run.runtime["reload"] = _held()
-
-    assert run("apply", "-f", "-", stdin="agents:\n  sam: {prompt: p, llm: ghost}\n") == 1
+    """A document that will not resolve changed nothing, so there is
+    nothing on either stream but the refusal, and one request was
+    made."""
+    assert run("import", "-f", "-", stdin="agents:\n  sam: {prompt: p, llm: ghost}\n") == 1
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert cli.APPLY_UNANSWERED not in printed.err
     assert len(run.clients) == 1
 
 
-def test_what_a_second_act_adds_is_raised_with_nothing_behind_it(
+def test_a_refused_act_is_raised_with_nothing_behind_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The half no assertion about a stream can make.
 
-    The sentence is composed while a refusal is being handled, and an
-    exception raised inside a handler carries the one it was handling on
-    `__context__`, where a chain walker finds whatever THAT one was
-    holding. Which is why the refusal below carries a cause of its own:
-    a transport failure behind a request is the shape that does it, and
-    an httpx exception holds the URL it was given.
+    A sequence stops at the first act that is refused, and the refusal
+    is re-raised outside the handler that caught it. An exception raised
+    INSIDE a handler carries the one it was handling on `__context__`,
+    where a chain walker finds whatever THAT one was holding, which is
+    why the refusal below carries a cause of its own: a transport
+    failure behind a request is the shape that does it, and an httpx
+    exception holds the URL it was given.
     """
     answered: list[object] = []
 
@@ -1086,21 +1032,17 @@ def test_what_a_second_act_adds_is_raised_with_nothing_behind_it(
     reached = cli.Reached(address=cli.Address(base="", query="", shown=""), token="")
 
     with pytest.raises(ConfigError) as caught:
-        cli._performed(
-            cli.Invocation(),
-            (first, replace(first, unanswered=cli.APPLY_UNANSWERED)),
-            reached,
-        )
+        cli._performed(cli.Invocation(), (first, replace(first)), reached)
 
-    assert str(caught.value).endswith(cli.APPLY_UNANSWERED)
+    assert str(caught.value) == "the request did not complete"
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert SECRET not in _chain(caught.value)
 
 
-# What an applied answer may put where text belongs
+# What an imported answer may put where text belongs
 #
-# The three strings an applied entry carries reach stdout and stderr as
+# The three strings an imported entry carries reach stdout and stderr as
 # themselves: the section and the identity are composed into a line, and
 # the notice is the sentence under it. A section is a closed token and
 # the outcome is one too, but an identity is a name as the store holds
@@ -1127,7 +1069,7 @@ SURROGATE = "\ud800"
 
 
 def _entry(**overrides: object) -> dict[str, object]:
-    """One applied entry as the API answers one, with whatever a case
+    """One imported entry as the API answers one, with whatever a case
     wants to see refused or neutralized in it."""
     return {
         "section": "agents",
@@ -1137,7 +1079,7 @@ def _entry(**overrides: object) -> dict[str, object]:
     } | overrides
 
 
-APPLIED_HOSTILE = [
+IMPORTED_HOSTILE = [
     ("an escape sequence in an identity", {"identity": f"sam{STEERING}"}),
     ("an escape sequence in a notice", {"notice": f"wait{STEERING}"}),
     ("a lone surrogate in an identity", {"identity": f"sam{SURROGATE}"}),
@@ -1147,25 +1089,20 @@ APPLIED_HOSTILE = [
 
 @pytest.mark.parametrize(
     "overrides",
-    [overrides for _, overrides in APPLIED_HOSTILE],
-    ids=[what for what, _ in APPLIED_HOSTILE],
+    [overrides for _, overrides in IMPORTED_HOSTILE],
+    ids=[what for what, _ in IMPORTED_HOSTILE],
 )
-@pytest.mark.parametrize(
-    "render",
-    [cli._applied, cli._applied_quietly],
-    ids=["staging", "quiet"],
-)
-def test_neither_apply_rendering_lets_an_answer_steer_a_terminal(
-    render, overrides: dict[str, object], capsys: pytest.CaptureFixture[str]
+def test_the_import_rendering_does_not_let_an_answer_steer_a_terminal(
+    overrides: dict[str, object], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Both renderings, because they print the same two strings and
-    differ only in whether the notice is one of them.
+    """Both strings the rendering prints, the identity on stdout and the
+    notice on stderr.
 
     Read through the act rather than handed a dictionary, so what is
     exercised is the shape this client insists on and then the renderer
     it feeds, which is the path an answer really takes.
     """
-    render(cli.APPLY.read({"entries": [_entry(**overrides)]}))
+    cli._imported(cli.IMPORT.read({"entries": [_entry(**overrides)]}))
 
     printed = capsys.readouterr()
     written = printed.out + printed.err
@@ -1178,15 +1115,15 @@ def test_neither_apply_rendering_lets_an_answer_steer_a_terminal(
     assert "agents.sam" in written
 
 
-def test_a_staged_notice_arrives_neutralized_rather_than_dropped(
+def test_an_imported_notice_arrives_neutralized_rather_than_dropped(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The other half of the rule above, on the one stream the staging
+    """The other half of the rule above, on the one stream this
     rendering writes a far side's sentence to: what a notice loses is
     the characters that steer a terminal, and it keeps the words. A
     sentence dropped whole would be a boundary an operator was never
     told about."""
-    cli._applied(cli.APPLY.read({"entries": [_entry(notice=f"wait{STEERING}")]}))
+    cli._imported(cli.IMPORT.read({"entries": [_entry(notice=f"wait{STEERING}")]}))
 
     written = capsys.readouterr().err
     assert written.startswith("wait?")
@@ -1205,7 +1142,7 @@ def test_an_unprintable_identity_never_leaves_as_an_exception() -> None:
     stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
 
     with contextlib.redirect_stdout(stream):
-        cli._applied_quietly(cli.APPLY.read({"entries": [_entry(identity=SURROGATE)]}))
+        cli._imported(cli.IMPORT.read({"entries": [_entry(identity=SURROGATE)]}))
 
     stream.flush()
     assert "agents" in stream.buffer.getvalue().decode("utf-8")
@@ -1232,7 +1169,7 @@ def test_an_entry_whose_outcome_and_notice_disagree_is_refused(
     body = {"entries": [_entry(outcome=outcome, notice=notice)]}
 
     with pytest.raises(ConfigError) as caught:
-        cli.APPLY.read(body)
+        cli.IMPORT.read(body)
 
     assert str(caught.value) == cli.UNREADABLE_WRITE
     assert caught.value.__cause__ is None
@@ -1251,19 +1188,19 @@ def test_a_section_this_api_does_not_emit_is_refused(section: str) -> None:
     words and nothing else, which is what keeps a body's own text out of
     the left-hand side of a line."""
     with pytest.raises(ConfigError) as caught:
-        cli.APPLY.read({"entries": [_entry(section=section)]})
+        cli.IMPORT.read({"entries": [_entry(section=section)]})
 
     assert str(caught.value) == cli.UNREADABLE_WRITE
     assert SECRET not in _chain(caught.value)
 
 
-def test_no_applied_refusal_is_retained_on_its_chain() -> None:
+def test_no_imported_refusal_is_retained_on_its_chain() -> None:
     """The half no assertion about a stream can make: a validation error
     retains the input it rejected, and the input here is a refused entry
     carrying a pasted credential in every field a body chooses."""
     body = {"entries": [_entry(outcome="unchanged", identity=SECRET, notice=SECRET)]}
 
     with pytest.raises(ConfigError) as caught:
-        cli.APPLY.read(body)
+        cli.IMPORT.read(body)
 
     assert SECRET not in _chain(caught.value)

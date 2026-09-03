@@ -362,14 +362,14 @@ def test_the_cli_entity_path_receives_the_section_alone(
         assert not [section for section in spy if sentinel in section]
 
 
-def test_the_cli_apply_path_receives_the_document_word(
+def test_the_cli_import_path_receives_the_document_word(
     run: Callable[..., int], spy: list[str], tmp_path: Path
 ) -> None:
     """And the other CLI caller, whose subject is the whole document."""
     document = tmp_path / "document.yaml"
     document.write_text(f"providers:\n  llm:\n    {NAME_SENTINEL}:\n      type: anthropic\n")
 
-    run("apply", "--no-reload", "-f", str(document))
+    run("import", "-f", str(document))
 
     assert spy[0] == transport.APPLY_LOCATION
     for section in spy:

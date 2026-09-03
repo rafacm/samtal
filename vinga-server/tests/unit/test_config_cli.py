@@ -739,7 +739,7 @@ UNREADABLE = [
 # The two commands that read a YAML source, and what each calls it.
 READERS = [
     ("a fragment", ("agent", "set", "sam", "-f", "-")),
-    ("a document", ("apply", "-f", "-")),
+    ("a document", ("import", "-f", "-")),
 ]
 
 
@@ -1274,20 +1274,17 @@ def test_a_malformed_pair_carries_no_parser_exception(
 
 # The whole configuration in one command
 #
-# `apply` is the only write that carries several entities, and the only
+# `import` is the only write that carries several entities, and the only
 # one whose answer is a list. What it prints is one line per entry in
 # the configuration's own section order, and then the boundaries the
 # entries that were written are waiting on, each distinct one once.
 #
-# Staged here, with `--no-reload`, wherever what is being asked about is
-# the store. Since #341 the verb installs what it wrote, and the second
-# act is a request to a running server: this suite's application is
-# built without one, so a default apply here would be a committed write
-# followed by the reload's honest 503. What each of these cases is about
-# is the transaction, the outcomes and the sentences, and the staging
-# spelling is how they go on being about that. The default is exercised
-# where a reload can answer: `test_config_cli_rendering.py` injects one,
-# and the live lane has a real one.
+# All of these are about the store, which is all `import` touches
+# (#371): the transaction, the outcomes and the sentences. Installing
+# what was written is `apply`, a command of its own, and it is exercised
+# where a running server can answer it:
+# `test_config_cli_rendering.py` injects one, and the live lane has a
+# real one.
 
 DOCUMENT = """\
 providers:
@@ -1301,7 +1298,7 @@ default_agent: sam
 """
 
 
-def test_apply_writes_a_whole_deployment_from_one_file(
+def test_import_writes_a_whole_deployment_from_one_file(
     run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The acceptance case for the verb: an empty database becomes a
@@ -1310,7 +1307,7 @@ def test_apply_writes_a_whole_deployment_from_one_file(
     document = tmp_path / "setup.yaml"
     document.write_text(DOCUMENT, encoding="utf-8")
 
-    assert run("apply", "--no-reload", "-f", str(document)) == 0
+    assert run("import", "-f", str(document)) == 0
 
     written = capsys.readouterr()
     assert written.out.splitlines() == [
@@ -1327,10 +1324,10 @@ def test_apply_writes_a_whole_deployment_from_one_file(
     assert shown["default_agent"] == "sam"
 
 
-def test_apply_reads_a_document_from_stdin(
+def test_import_reads_a_document_from_stdin(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("apply", "--no-reload", "-f", "-", stdin=DOCUMENT) == 0
+    assert run("import", "-f", "-", stdin=DOCUMENT) == 0
 
     assert "agents.sam: wrote" in capsys.readouterr().out
 
@@ -1338,13 +1335,14 @@ def test_apply_reads_a_document_from_stdin(
 def test_the_same_document_twice_changes_nothing_and_says_so(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Idempotence is what makes an applied document a thing to keep in
-    a repository and run, so it is what the second run has to say: every
-    row already what the document names, and no boundary to wait on."""
-    run("apply", "--no-reload", "-f", "-", stdin=DOCUMENT)
+    """Idempotence is what makes an imported document a thing to keep
+    in a repository and run, so it is what the second run has to say:
+    every row already what the document names, and no boundary to wait
+    on."""
+    run("import", "-f", "-", stdin=DOCUMENT)
     capsys.readouterr()
 
-    assert run("apply", "--no-reload", "-f", "-", stdin=DOCUMENT) == 0
+    assert run("import", "-f", "-", stdin=DOCUMENT) == 0
 
     again = capsys.readouterr()
     assert {line.split(": ")[-1] for line in again.out.splitlines()} == {"unchanged"}
@@ -1359,7 +1357,7 @@ def test_a_refused_document_prints_every_mistake_and_writes_nothing(
     land either."""
     refused = "providers:\n  llm:\n    claude: {type: anthropic}\nagents:\n  sam: {llm: ghost}\n"
 
-    assert run("apply", "-f", "-", stdin=refused) == 1
+    assert run("import", "-f", "-", stdin=refused) == 1
 
     captured = capsys.readouterr()
     assert "agents.sam.llm: names no llm provider that exists" in captured.err
@@ -1369,10 +1367,10 @@ def test_a_refused_document_prints_every_mistake_and_writes_nothing(
     assert capsys.readouterr().err.startswith("providers:")
 
 
-def test_an_empty_document_says_it_applied_nothing(
+def test_an_empty_document_says_it_imported_nothing(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("apply", "--no-reload", "-f", "-", stdin="{}\n") == 0
+    assert run("import", "-f", "-", stdin="{}\n") == 0
 
     assert capsys.readouterr().out.startswith("the document names no section")
 
@@ -1383,7 +1381,7 @@ def test_a_document_json_cannot_carry_is_refused_before_it_travels(
     """The same rule a fragment meets, under the location the repository
     names a refusal about the whole document with."""
     assert run(
-        "apply", "-f", "-", stdin="providers:\n  llm:\n    claude: {type: a, when: 2026-01-01}\n"
+        "import", "-f", "-", stdin="providers:\n  llm:\n    claude: {type: a, when: 2026-01-01}\n"
     ) == 1
 
     captured = capsys.readouterr()
@@ -1400,7 +1398,7 @@ def test_a_refused_document_never_echoes_what_was_written(
     written = f"providers:\n  llm:\n    claude: {{type: anthropic, api_key: {SECRET}}}\n"
 
     with caplog.at_level(logging.DEBUG):
-        assert run("apply", "-f", "-", stdin=written) == 1
+        assert run("import", "-f", "-", stdin=written) == 1
 
     captured = capsys.readouterr()
     assert "looks like an inline secret" in captured.err
@@ -1435,7 +1433,7 @@ REFERENCE_LEAKS = [
     [document for _, document in REFERENCE_LEAKS],
     ids=[what for what, _ in REFERENCE_LEAKS],
 )
-def test_an_applied_reference_is_refused_without_printing_the_name(
+def test_an_imported_reference_is_refused_without_printing_the_name(
     run,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -1445,7 +1443,7 @@ def test_an_applied_reference_is_refused_without_printing_the_name(
     capsys.readouterr()
 
     with caplog.at_level(logging.DEBUG):
-        assert run("apply", "-f", "-", stdin=document) == 1
+        assert run("import", "-f", "-", stdin=document) == 1
 
     captured = capsys.readouterr()
     assert captured.err.startswith("the change was refused")
@@ -1476,7 +1474,7 @@ VALIDATOR_LEAKS = [
     [(document, rule) for _, document, rule in VALIDATOR_LEAKS],
     ids=[what for what, _, _ in VALIDATOR_LEAKS],
 )
-def test_an_applied_validator_is_refused_without_printing_the_value(
+def test_an_imported_validator_is_refused_without_printing_the_value(
     run,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -1487,7 +1485,7 @@ def test_an_applied_validator_is_refused_without_printing_the_value(
     pass, as an operator meets them: the rule and the position, and not
     the word they pasted."""
     with caplog.at_level(logging.DEBUG):
-        assert run("apply", "-f", "-", stdin=document) == 1
+        assert run("import", "-f", "-", stdin=document) == 1
 
     captured = capsys.readouterr()
     assert rule in captured.err
@@ -1518,7 +1516,7 @@ class _Terminal(io.StringIO):
 @pytest.mark.parametrize(
     "argv",
     [
-        ("apply", "-f", "-"),
+        ("import", "-f", "-"),
         ("provider", "set", "llm", "claude", "-f", "-"),
     ],
     ids=["a document", "a fragment"],

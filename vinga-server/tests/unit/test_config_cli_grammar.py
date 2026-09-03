@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 from typer._click.core import Context
 
-from tests.support.config_cli import SECRET, chain, logged, runner
+from tests.support.config_cli import SECRET, chain, logged, registered, runner
 from tests.support.events import both_formats
 from vinga_server.config import cli, docgen, entities
 
@@ -1060,6 +1060,92 @@ def test_the_flat_status_word_is_gone_and_the_noun_spelling_answers(
 
     assert run("mcp-server", "status") == 0
     assert capsys.readouterr().out.startswith("this server has no MCP servers configured")
+
+
+# The two-clock verbs, swapped (#371)
+#
+# `apply` used to write a document and then install it, and `reload`
+# used to install what was stored. Now `import` writes and `apply`
+# installs, which is the harder shape to pin: `status` was retired and
+# names nothing, but `apply` still names a row and what moved is what
+# the row takes. So all four halves are held here. The retired word is
+# not a command. The kept word does not take the document options the
+# old one did, or the flag that used to turn its second act off. And the
+# word that replaced it is a registered write.
+#
+# No alias, deliberately, and for the reason stated above: nothing
+# third-party is installed against this grammar, and a deployment that
+# types the old words is told so in the same sentence every other typo
+# gets.
+
+
+def test_the_reload_word_is_gone(run, capsys: pytest.CaptureFixture[str]) -> None:
+    """The retired half of the swap, from both ends: the word is gone
+    from the table and from the page a reader lists commands off, and
+    the invocation answers the refusal any other invented word gets."""
+    assert ("reload",) not in {row.words for row in cli.COMMANDS}
+    assert "reload" not in cli.command().commands
+
+    assert run("reload") == 1
+
+    refused = capsys.readouterr()
+    assert refused.err.strip() == cli.usage_line("that is not a command")
+    assert refused.out == ""
+
+
+RETIRED_OPTIONS = [
+    ("the document the old apply took", ("apply", "-f", "x.yaml")),
+    ("the staging flag, on the verb that replaced it", ("import", "--no-reload", "-f", "-")),
+]
+
+
+@pytest.mark.parametrize(
+    "argv", [argv for _, argv in RETIRED_OPTIONS], ids=[what for what, _ in RETIRED_OPTIONS]
+)
+def test_an_option_the_new_grammar_dropped_is_refused(
+    run, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...]
+) -> None:
+    """The half a registered-command check cannot make.
+
+    `apply` names a row either way, so the only thing that says the verb
+    moved is what it refuses: the new one installs the stored
+    configuration and takes no document at all. And `--no-reload` was
+    deleted rather than transferred, so the write it used to qualify
+    does not answer to it either.
+    """
+    assert run(*argv) == 1, argv
+
+    refused = capsys.readouterr()
+    assert refused.err.strip() == cli.usage_line(
+        "that is not an option of this command"
+    ), argv
+    assert refused.out == "", argv
+
+
+def test_the_import_word_is_the_registered_write(run) -> None:
+    """And the spelling that replaced it, driven rather than looked up:
+    a document on stdin is written, which is the whole of what the verb
+    promises."""
+    assert registered(("import", "-f", "-")) is not None
+
+    assert run("import", "-f", "-", stdin="{}\n") == 0
+
+
+def test_the_applys_help_carries_the_three_clocks(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Where the three convergence clocks live now.
+
+    They used to be printed on every entry of every domain-half write,
+    which said them nine times for a document that wrote nine entities.
+    They are still true and still published, and this is one of the two
+    places they are published: the help page of the command that crosses
+    the boundary, read once by somebody asking what it does.
+    """
+    help_text = printed_help(run, capsys, "apply")
+
+    for clock in ("next utterance", "next activation", "next conversation"):
+        assert clock in help_text, clock
 
 
 def test_every_group_of_the_tree_carries_a_command() -> None:

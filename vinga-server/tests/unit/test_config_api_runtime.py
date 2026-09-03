@@ -686,7 +686,7 @@ def test_an_agent_this_server_is_not_serving_is_a_404_naming_the_reload(
 
     assert response.status_code == 404
     detail = response.json()["detail"]
-    assert "config reload" in detail
+    assert "config apply" in detail
     assert "restart" not in detail
     # The name arrived in the path and is not quoted back.
     assert "stranger" not in detail

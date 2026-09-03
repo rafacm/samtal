@@ -33,14 +33,18 @@ substitutions that licenses. It is applied to the TRANSCRIPT before the
 comparison, so a difference the table does not explain is a failure, and
 the table itself is short enough to read.
 
-One entry is not the rename's, and it is labelled: #341 made `apply`
-install what it wrote, which rewrote the header an export opens with
-into the three steps a rebuild now takes. A transcript captured before
-that cannot say it, and the differential is about behavior rather than
-about a paragraph, so the change is licensed here rather than left to
-falsify a record. An entry added for any later change belongs in the
-same place and with the same label: a substitution nobody can name a
-reason for is what this table must never grow.
+Four entries are not the rename's, and each is labelled. #341 made
+`apply` install what it wrote, which rewrote the header an export opens
+with into the three steps a rebuild then took. #371 swapped the two
+verbs (`apply` writes under the name `import`, `reload` installs under
+the name `apply`), shrank the per-write notice to the one line an
+operator acts on, and moved the export header's three steps onto the
+new verbs. A transcript captured before either cannot say any of it,
+and the differential is about behavior rather than about a paragraph,
+so those changes are licensed here rather than left to falsify a
+record. An entry added for any later change belongs in the same place
+and with the same label: a substitution nobody can name a reason for is
+what this table must never grow.
 """
 
 import os
@@ -109,6 +113,57 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
 # reload builds the engines the document names, and their credentials
 # are not in it yet. Applying is additive: a section this document does
 # not name is left alone, and nothing in it deletes.""",
+    ),
+    # Not the rename's either: #371's, and the three of them come last
+    # because each quotes text an entry above it produced. The verbs
+    # swapped (`apply` became `import`, `reload` became `apply`), the
+    # per-write notice shrank to the one line an operator acts on, and
+    # the export header's three steps moved with the verbs. A transcript
+    # captured before that cannot say any of it, and the differential is
+    # about behavior rather than about a sentence.
+    (
+        "This applies when the running server is asked to reload: run `vinga reload`, "
+        "which re-reads the stored configuration and applies it without a restart and "
+        "without dropping a conversation. A conversation already in progress meets the "
+        "tools an agent may reach at its next utterance and its prompt text at its next "
+        "activation, while the voice it speaks in and the filled pauses it masks with "
+        "reach the next conversation.",
+        "This is stored and not yet serving: `vinga apply` installs the stored "
+        "configuration on the running server, and `vinga diff` lists everything "
+        "pending.",
+    ),
+    (
+        "The binding applies at the device's next OTA check or connection, but this "
+        "server is not serving the agent it names yet: run `vinga reload`, which "
+        "installs the stored agents without a restart, and the device reaches it at "
+        "the check-in after that.",
+        "The binding applies at the device's next OTA check or connection, but this "
+        "server is not serving the agent it names yet: `vinga apply` installs the "
+        "stored agents, and the device reaches it at the check-in after that.",
+    ),
+    (
+        """`vinga apply` takes. Reproduce it in three steps, in this order:
+#
+#   1. vinga apply --no-reload -f <this file>
+#   2. the secret set commands at the foot of this file, if any
+#   3. vinga reload
+#
+# A stored credential never travels in a read, which is what the second
+# step is for, and why the first stages rather than installing: a
+# reload builds the engines the document names, and their credentials
+# are not in it yet. Applying is additive: a section this document does
+# not name is left alone, and nothing in it deletes.""",
+        """`vinga import` takes. Reproduce it in three steps, in this order:
+#
+#   1. vinga import -f <this file>
+#   2. the secret set commands at the foot of this file, if any
+#   3. vinga apply
+#
+# A stored credential never travels in a read, which is what the second
+# step is for, and why it comes before the third: an apply builds the
+# engines the document names, and their credentials are not in the
+# store until the second step has run. Importing is additive: a section
+# this document does not name is left alone, and nothing in it deletes.""",
     ),
 )
 

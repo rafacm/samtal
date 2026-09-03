@@ -482,6 +482,31 @@ def test_every_command_an_example_quotes_is_published_as_a_recipe() -> None:
     assert published == quoted
 
 
+def test_every_preset_import_is_followed_by_its_apply() -> None:
+    """The pair, held to arriving whole (#371).
+
+    A preset's recipe is two commands in a fixed order: the import that
+    writes the document, and the apply that installs what it wrote. Both
+    presets end on the same bare `vinga apply` line, so a renderer that
+    deduplicated command lines one at a time would keep the first and
+    drop the second, leaving one preset published as a document nothing
+    ever installs. That is a hole a byte-for-byte diff of the page
+    cannot see, because the page and the renderer would agree.
+    """
+    installs = f"{cli.PROGRAM} apply"
+    imports = f"{cli.PROGRAM} import "
+    (presets,) = [
+        recipe for recipe in docgen.recipes() if recipe.title == "A whole deployment"
+    ]
+
+    written = [line for line in presets.commands if line.startswith(imports)]
+    assert len(written) == len(sorted(PRESETS.glob("*.yaml"))), presets.commands
+    for position, line in enumerate(presets.commands):
+        if line.startswith(imports):
+            following = presets.commands[position + 1 : position + 2]
+            assert following == (installs,), line
+
+
 def test_the_cli_reference_is_deterministic() -> None:
     """The committed page is diffed byte for byte, so anything that
     varied between two runs would turn the lane red on an unrelated

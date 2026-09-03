@@ -337,7 +337,7 @@ def test_a_device_bound_to_an_agent_this_server_is_not_serving_names_the_reload(
     ):
         assert template in published
         assert "is not serving" in template
-        assert "vinga-server config reload" in template
+        assert "vinga-server config apply" in template
 
 
 # --- the generated reference, held to the catalog for completeness ----
