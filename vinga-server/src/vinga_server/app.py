@@ -1044,14 +1044,12 @@ def create_app(
     # its own defaults.
     api = build_api(token, config.server.database)
 
-    @app.get("/healthz")
     def healthz() -> dict[str, str]:
         # `version` is what this is, `revision` is which build of it.
         # A pod reporting only the former cannot be matched to the image
         # tag that produced it without going and asking the cluster.
         return {"status": "ok", "version": __version__, "revision": revision()}
 
-    @app.get("/readyz")
     def readyz() -> JSONResponse:
         """Whether this server may be handed a new device conversation.
 
@@ -1089,6 +1087,25 @@ def create_app(
         if admission != "admitting":
             return JSONResponse({"status": admission}, status_code=503)
         return JSONResponse({"status": "ok"})
+
+    # Every spelling of both probes answers, and neither redirects. The
+    # router's default answers `/readyz/` with a 307 whose Location is
+    # the request's own path, query string and Host, which is the leak
+    # the configuration API turned redirects off for (`config/api.py`):
+    # a probe URL is what goes into an orchestrator manifest, a compose
+    # healthcheck and a CI script, and a value in its query would come
+    # back in a response header, which is what proxies and browsers
+    # keep. The device-facing routes answer every spelling for a reason
+    # of their own, and this is the same mechanism through the same
+    # helper.
+    #
+    # Registered here rather than turned off for the whole application:
+    # `redirect_slashes` is the router's, and the websocket path is not
+    # this milestone's to change.
+    for spelling in ota.spellings("/healthz/"):
+        app.get(spelling)(healthz)
+    for spelling in ota.spellings("/readyz/"):
+        app.get(spelling)(readyz)
 
     # The OTA router is built here rather than imported ready-made: its
     # path is configuration, and a module-level router would have been
