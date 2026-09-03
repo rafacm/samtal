@@ -19,11 +19,13 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.support.configs import load_config_from_data
 from tests.support.events import both_formats
 from vinga_server import __version__
 from vinga_server.app import create_app
 from vinga_server.build_info import REVISION_ENV, revision
-from vinga_server.config import Config
+from vinga_server.config import Config, ConfigError
+from vinga_server.config.models import HEALTH_PATH, PROBE_PATHS, READY_PATH
 from vinga_server.events import attach_server_tap, detach_server_tap
 from vinga_server.events.live import LiveEvents
 from vinga_server.registry import SessionRegistry
@@ -130,6 +132,45 @@ def test_a_full_server_is_not_ready_and_is_ready_again_when_a_slot_frees() -> No
 
     registry.remove(session)
     assert client.get("/readyz").json() == {"status": "ok"}
+
+
+# The paths themselves
+
+
+@pytest.mark.parametrize("probe", [HEALTH_PATH, READY_PATH])
+def test_an_ota_path_spelled_like_a_probe_is_refused(probe: str) -> None:
+    """A configuration that would silently unmount the OTA endpoint.
+
+    The probes are registered before the OTA router and each answers both
+    spellings of its own path, so an endpoint configured at either would
+    never be reached: a board's check-in would be answered with a health
+    body, and nothing about the configuration would look wrong.
+    """
+    with pytest.raises(ConfigError) as caught:
+        load_config_from_data({"server": {"ota_path": f"{probe}/"}})
+
+    assert "health probes" in str(caught.value)
+
+
+def test_an_ota_path_that_merely_begins_like_a_probe_still_passes() -> None:
+    """The reservation is the two paths, not the two words: a deployment
+    that hides its endpoint under `/readyzone/` is serving something
+    else."""
+    assert (
+        load_config_from_data(
+            {"server": {"ota_path": f"{READY_PATH}one/"}}
+        ).server.ota_path
+        == f"{READY_PATH}one/"
+    )
+
+
+def test_the_reserved_paths_are_the_ones_the_probes_are_served_at() -> None:
+    """One pair of strings: a path reserved somewhere other than where a
+    probe answers would reserve nothing."""
+    client = TestClient(create_app(Config()))
+
+    for probe in PROBE_PATHS:
+        assert client.get(probe).status_code in (200, 503), probe
 
 
 # A credential-shaped value, in the one place a probe URL can carry one.

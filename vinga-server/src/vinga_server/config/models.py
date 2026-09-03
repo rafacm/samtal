@@ -109,6 +109,16 @@ API_MOUNT_PATH = "/api"
 # collide with the onboarding router.
 ONBOARDING_MOUNT_PATH = "/x"
 
+# The two health probes, and where they are served. Here for the reason
+# the two paths above are here: `ota_path`'s validator has to reserve
+# them. They are registered before the OTA router, and each answers both
+# spellings of its path, so an OTA endpoint configured at either would
+# never be reached at all. `app.py` registers them from these, so the
+# reservation and the routes are one fact.
+HEALTH_PATH = "/healthz"
+READY_PATH = "/readyz"
+PROBE_PATHS = (HEALTH_PATH, READY_PATH)
+
 # The alphabet a pinned onboarding key may be written in, and how long it
 # is. Base32 because A-Z2-7 has no 0/O and no 1/I/l, the pairs a person
 # misreads off a small display, and eight characters because that is what
@@ -696,6 +706,17 @@ class ServerConfig(BaseModel):
                 f"which serves the same endpoint at {ONBOARDING_MOUNT_PATH}/<key>/, so "
                 f"the OTA endpoint cannot also be served there or anywhere under it. "
                 f"Serve it somewhere else, for example /xiaozhi/ota/"
+            )
+        if path.rstrip("/") in PROBE_PATHS:
+            # Named rather than quoted, like the two above, even though
+            # what would be quoted here is one of these two fixed
+            # strings: what the refusal is about is the rule, and this
+            # key's value is never repeated back on principle.
+            raise ValueError(
+                f"{HEALTH_PATH} and {READY_PATH} are this server's health probes. They "
+                f"are registered before the OTA router and each answers both spellings "
+                f"of its own path, so an OTA endpoint served at either would never be "
+                f"reached. Serve it somewhere else, for example /xiaozhi/ota/"
             )
         return path
 

@@ -29,7 +29,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
-from vinga_server.config.models import ServerConfig
+from vinga_server.config.models import HEALTH_PATH, READY_PATH, ServerConfig
 from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import (
     ConfigDiff,
@@ -1147,9 +1147,12 @@ def create_app(
     # Registered here rather than turned off for the whole application:
     # `redirect_slashes` is the router's, and the websocket path is not
     # this milestone's to change.
-    for spelling in ota.spellings("/healthz/"):
+    # From the constants `ota_path`'s validator reserves, so that where
+    # the probes are served and what an OTA path may not be are one fact
+    # rather than two that must agree.
+    for spelling in ota.spellings(f"{HEALTH_PATH}/"):
         app.get(spelling)(healthz)
-    for spelling in ota.spellings("/readyz/"):
+    for spelling in ota.spellings(f"{READY_PATH}/"):
         app.get(spelling)(readyz)
 
     # The OTA router is built here rather than imported ready-made: its
