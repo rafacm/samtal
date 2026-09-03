@@ -749,6 +749,13 @@ docs/plans/2026-09-01-readme-getting-started-revamp.md:373  historical  vinga ex
 docs/plans/2026-09-01-readme-getting-started-revamp.md:434  historical  vinga reload
 docs/plans/2026-09-01-readme-getting-started-revamp.md:473  historical  vinga apply
 docs/plans/2026-09-01-readme-getting-started-revamp.md:515  historical  vinga export
+docs/plans/2026-09-03-two-clock-verb-rename-implementation.md:16  historical  vinga apply
+docs/plans/2026-09-03-two-clock-verb-rename-implementation.md:16  historical  vinga diff
+docs/plans/2026-09-03-two-clock-verb-rename-implementation.md:20  historical  vinga apply
+docs/plans/2026-09-03-two-clock-verb-rename-implementation.md:42  historical  vinga apply
+docs/plans/2026-09-03-two-clock-verb-rename-implementation.md:46  historical  vinga-server config apply
+docs/plans/2026-09-03-two-clock-verb-rename-implementation.md:126  historical  vinga reload
+docs/plans/2026-09-03-two-clock-verb-rename-implementation.md:162  historical  config reload
 docs/plans/2026-09-03-two-clock-verb-rename.md:12  historical  vinga apply
 docs/plans/2026-09-03-two-clock-verb-rename.md:12  historical  vinga import
 docs/plans/2026-09-03-two-clock-verb-rename.md:13  historical  vinga reload
