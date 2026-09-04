@@ -15,6 +15,7 @@ filler is the soft early threshold, the watchdog the hard late one.
 """
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any, cast
@@ -56,6 +57,66 @@ def mask(session: Any) -> Any:
     or in the field, rather than here where it was made.
     """
     return session.runtime._filler
+
+
+class OrderedSocket:
+    """Enough websocket to see what went out and in which order: every
+    text message as it was sent, every frame as the marker `frame`.
+
+    `RecordingSocket` counts frames rather than placing them, and
+    `spoken` reads the text messages with the frames already discarded,
+    so neither can say that a sentence was announced before or after a
+    clip. Whether an announcement happened at all is the question below,
+    and where it happened is what makes the answer legible.
+    """
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def send_text(self, text: str) -> None:
+        self.sent.append(text)
+
+    async def send_bytes(self, data: bytes) -> None:
+        self.sent.append("frame")
+
+    def announced(self) -> list[str]:
+        """The sentences this device was told it is about to hear."""
+        return [
+            message["text"]
+            for message in (json.loads(one) for one in self.sent if one != "frame")
+            if message.get("type") == "tts" and message.get("state") == "sentence_start"
+        ]
+
+
+async def test_a_filler_announces_no_sentence(caplog: pytest.LogCaptureFixture) -> None:
+    """The filler is a noise that buys time, not a sentence of the
+    reply, so it sends no `tts sentence_start` and stays out of the
+    transcript everywhere.
+
+    Nothing else states this. The suites around it assert what the reply
+    announced, which is the same list whether the clip announced itself
+    or not, and the transcript pins read the history rather than the
+    wire. Pinned here as its own fact, because the reply's own failure
+    fallback deliberately differs from it (#384): a difference against a
+    pin is a diff, and a difference against nothing is a claim.
+    """
+    session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
+    socket = OrderedSocket()
+    session.websocket = cast(Any, socket)
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    only(caplog, "filler_played")
+    # One announcement for the one sentence the model spoke, and the
+    # phrases the clip could have carried are in none of them.
+    assert socket.announced() == ["Recovered now."]
+    for phrase in masked_config().filler_for_agent("poet").phrases:
+        assert phrase not in socket.announced()
+    # And it went out unannounced rather than announced late: the clip's
+    # frames precede the reply's one announcement.
+    assert socket.sent.index("frame") < socket.sent.index(
+        next(one for one in socket.sent if one != "frame" and "sentence_start" in one)
+    )
 
 
 async def test_a_slow_reply_is_masked_at_the_threshold(
