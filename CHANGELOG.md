@@ -29,6 +29,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   reads no other top-level key, while it writes every member of
   `websocket` into NVS, where a key added would have left a stray entry
   on every board. Nothing reads the field yet.
+- **A tool call whose argument the model only quoted now works**
+  (#383). Small local models routinely send `{"volume": "100"}` where
+  the schema declares an integer, and the far side is entitled to
+  refuse it: the device firmware validates its own tools, so the tools
+  of the board were decorative on exactly the stack the README
+  recommends. An argument whose string form converts to the declared
+  type exactly is now converted once, at the dispatch, for every tool
+  source alike: `integer`, `number` and `boolean`, held to an ASCII
+  grammar and, for a number, to an exactness check, so `"100"` becomes
+  `100` while `"one hundred"`, `"100.5"` against an integer, `"True"`
+  and `"1"` against a boolean, and any spelling whose value a `float`
+  cannot hold exactly are left as the model sent them and fail the way
+  they did before. What the record, the API and the history keep is
+  unchanged: they show what the model passed, which is what diagnosing
+  a marginal model needs. A call that was corrected says so on the
+  structured surface as `tool_arguments_coerced`, carrying how many
+  arguments were converted and never which or to what.
+  - One upgrade-visible consequence, and it crosses an irreversible
+    operation: `forget` erases a fact permanently only when
+    `permanently` is exactly `true`, so a model that sent the string
+    `"true"` used to get the recoverable removal and now erases the
+    fact for good. Every other value, `"false"`, `"True"` and `"1"`
+    among them, still takes the recoverable path.
 - **The two long waits say so at a terminal** (#297). `vinga import`
   waits on a transaction nothing bounds and `vinga apply` waits up to a
   minute for a server to build a new world, and both used to leave an
