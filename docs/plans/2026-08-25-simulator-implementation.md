@@ -127,6 +127,17 @@ verified against the tree:
   agent covering it), because a 200 with an empty token is the trap
   state and a sentence that just said "not admitted" would send a
   reader to the network.
+  *Amended 2026-09-04 by
+  [`2026-09-04-simulator-tokenless-admission.md`](2026-09-04-simulator-tokenless-admission.md)
+  (#369).* The list was incomplete in both directions. It missed two
+  configurations that reach the state (a deployment that could not read
+  its own record of what is bound, and an unloaded agent named by
+  `default_agent` rather than by a binding), and it named one reading
+  that is not the state at all: a deployment with device authentication
+  off admits the board and hands it the same empty token, which the
+  reply now says outright and this half reads. The sentence is a named
+  constant with the readings enumerated from the decision sites, and
+  an interpretation that used to be `Unwelcome` is `Admitted`.
 - **`ACTIVATION_SEGMENT` is spelled client-side with an equality test
   against `ota.router.ACTIVATE_SEGMENT`**
   (`test_device_endpoint.py:40`) rather than imported, because the

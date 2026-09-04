@@ -645,11 +645,26 @@ costs people an evening:
 | `Unwelcome` | a valid reply whose `activation` is None and whose token is empty | it checked in and it may not speak: onboarding is off, or nothing resolves this MAC and no default agent covers it | 0 |
 | `Refused` | the endpoint answered and this client will not read the answer as a reply | the fixed sentence for the category, and nothing quoted | 1 |
 
+**Amended 2026-09-04 by
+[`2026-09-04-simulator-tokenless-admission.md`](2026-09-04-simulator-tokenless-admission.md)
+(#369).** `auth.enabled` appears nowhere in this plan, and a deployment
+that has turned device authentication off answers a board it admits with
+the same empty token a board it will not admit gets. The `Admitted` and
+`Unwelcome` rows above are therefore reached differently now: the reply
+carries a top-level `access` word (`token`, `open`, `denied`), and where
+it carries one this client knows, the word decides. `open` reaches
+`Admitted` with an empty token, which is a state that state absorbs
+rather than a fifth one beside it. A reply with no word, or one this
+client does not know, is read exactly as the table says, which is what
+an older server image gets.
+
 `Unwelcome` names the trap rather than reporting a success, and its
 sentence says the two configurations that produce it, which is the
 diagnosis the notes say nothing in the reply gives. A closed set at the
 decision site is the standing lens; a boolean "did I get a token" would
-have folded the fourth state into the first.
+have folded the fourth state into the first. (The sentence's causes were
+re-enumerated from the decision sites by the 2026-09-04 plan; the
+diagnosis is the same shape and the list is longer.)
 
 **The states are the outcomes; how a reply reaches one is a schema and a
 precedence, and both are written down.** The first draft defined the
@@ -686,6 +701,17 @@ disagree about a contradictory reply:
 5. **then the token**, a non-empty string, decides `Admitted` against
    `Unwelcome`. A token that is not a string at all is a schema failure
    at step 2 rather than an empty one here.
+
+**Step 5 amended 2026-09-04 by
+[`2026-09-04-simulator-tokenless-admission.md`](2026-09-04-simulator-tokenless-admission.md)
+(#369).** The reply's own `access` word decides where it carries one this
+client knows, and the token decides where it does not, so a server too
+old to say why a token is empty is read exactly as this step says. Step 3
+grows with it: the word contradicts what stands beside it in three
+combinations no server decision site can emit (a credential named beside
+an empty token, none named beside a real one, and admission claimed
+beside an activation object), and all three are `Refused` before step 4
+asks about activation.
 
 Every outcome has one exit code, pinned in the table above and in a
 case: the three valid states are all exit 0, because a simulated board
