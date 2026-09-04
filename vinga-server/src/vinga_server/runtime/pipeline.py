@@ -1254,128 +1254,148 @@ class PipelineRuntime:
         self._output.reply_started()
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
         self._turn = self._fresh_turn()
+        # Whether this turn owes the user a spoken failure notice.
+        # Recorded in the arm below and said outside it, which is the
+        # whole of why the body is nested: inside the arm the
+        # provider's exception is the active one, so a cancellation
+        # arriving while the notice is going out would leave carrying
+        # that exception as its `__context__`, message and causes and
+        # all, straight past the line that took care to write down a
+        # class name and nothing else (#384).
+        unanswered = False
         try:
-            if result is None:
-                # On the session's clock, which is the loop's: the
-                # record's one duration measured outside an event is
-                # read through the same thing that stamps the offsets it
-                # sits beside.
-                started = self._events.now()
-                async with self._watching("asr", providers.asr):
-                    result = await providers.asr.transcribe(
-                        pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+            try:
+                if result is None:
+                    # On the session's clock, which is the loop's: the
+                    # record's one duration measured outside an event is
+                    # read through the same thing that stamps the offsets it
+                    # sits beside.
+                    started = self._events.now()
+                    async with self._watching("asr", providers.asr):
+                        result = await providers.asr.transcribe(
+                            pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+                        )
+                    # Only where this turn ran one. A reply handed a
+                    # transcription reuses a confirmed barge-in's, measured
+                    # at a different call site as part of a different
+                    # decision, and a null here says "not measured this
+                    # turn" rather than reporting somebody else's wait.
+                    self._turn.asr_ms = round((self._events.now() - started) * 1000)
+                # ASR is done, so the mid-ASR marker comes down: from here a
+                # barge-in has nothing of the user's left to destroy.
+                self._turntaking.clear_pending()
+                if result.lock_language is not None:
+                    self._asr_language = result.lock_language
+                transcript = result.text.strip()
+                if transcript:
+                    await self._output.show_transcript(transcript)
+                    # Only engines that detected carry these; a mock or a
+                    # pinned language adds no noise to the record. Absent
+                    # rather than null, which are different answers: an
+                    # engine that detected nothing leaves no key rather than
+                    # a key holding nothing.
+                    confidence = result.language_confidence
+                    # What was heard, never the words: the utterance is
+                    # content and the conversation store is where content
+                    # lives (#120, the content-and-telemetry ADR). What the
+                    # event keeps is what an operator measures with, which
+                    # is how long the user spoke and what language the
+                    # engine heard it in; the sentence renders exactly that,
+                    # so the two halves of this record say the same thing.
+                    heard_at = self._events.emit(
+                        lambda: Heard(
+                            agent=Identifier(self._agent),
+                            conversation=ConversationId(self._conversation),
+                            duration_s=Real(heard_s),
+                            language=(
+                                ABSENT
+                                if result.language is None
+                                else LanguageTag(result.language)
+                            ),
+                            language_confidence=(
+                                ABSENT if confidence is None else Real(round(confidence, 2))
+                            ),
+                        )
                     )
-                # Only where this turn ran one. A reply handed a
-                # transcription reuses a confirmed barge-in's, measured
-                # at a different call site as part of a different
-                # decision, and a null here says "not measured this
-                # turn" rather than reporting somebody else's wait.
-                self._turn.asr_ms = round((self._events.now() - started) * 1000)
-            # ASR is done, so the mid-ASR marker comes down: from here a
-            # barge-in has nothing of the user's left to destroy.
-            self._turntaking.clear_pending()
-            if result.lock_language is not None:
-                self._asr_language = result.lock_language
-            transcript = result.text.strip()
-            if transcript:
-                await self._output.show_transcript(transcript)
-                # Only engines that detected carry these; a mock or a
-                # pinned language adds no noise to the record. Absent
-                # rather than null, which are different answers: an
-                # engine that detected nothing leaves no key rather than
-                # a key holding nothing.
-                confidence = result.language_confidence
-                # What was heard, never the words: the utterance is
-                # content and the conversation store is where content
-                # lives (#120, the content-and-telemetry ADR). What the
-                # event keeps is what an operator measures with, which
-                # is how long the user spoke and what language the
-                # engine heard it in; the sentence renders exactly that,
-                # so the two halves of this record say the same thing.
-                heard_at = self._events.emit(
-                    lambda: Heard(
-                        agent=Identifier(self._agent),
-                        conversation=ConversationId(self._conversation),
-                        duration_s=Real(heard_s),
-                        language=(
-                            ABSENT
-                            if result.language is None
-                            else LanguageTag(result.language)
-                        ),
-                        language_confidence=(
-                            ABSENT if confidence is None else Real(round(confidence, 2))
-                        ),
+                    # The emission's own reading rather than a second one
+                    # taken beside it: the store measures both offsets from
+                    # the same origin, so two readings a microsecond apart
+                    # put the turn and its `heard` in different milliseconds
+                    # whenever they straddle a boundary.
+                    self._turn.heard_utterance(
+                        heard_at,
+                        transcript,
+                        heard_s,
+                        result.language,
+                        None if confidence is None else round(confidence, 2),
                     )
+                else:
+                    logger.info("session %s: nothing transcribed", self.session_id)
+                if transcript:
+                    self._turns.append(Turn("user", transcript))
+                    self._filler.arm()
+                    await self._speak_reply(transcript, spoken)
+            except DeviceGone:
+                # The device went away mid-reply. Only this type: the edge
+                # translates both of the transport's disconnect shapes into
+                # it, so a bare `RuntimeError` arriving here is a bug in
+                # this process (#137) and belongs on the record below rather
+                # than being read as a disconnect and returned on in
+                # silence.
+                return
+            except asyncio.CancelledError:
+                # A barge-in or an abort is cancelling this reply, and the
+                # filler is reply audio: it dies with the reply rather than
+                # being waited out. The settle below still awaits the
+                # cancellation through.
+                self._filler.abandon()
+                raise
+            except Exception as exc:
+                # The class name, and nothing else. No `exc_info`, and no
+                # `str(exc)`: since the catch above narrowed, this arm
+                # catches every provider failure too, and what a failure
+                # from the wire carries is untrusted. `providers/kit.py`
+                # sanitizes the taxonomy's own message, but a traceback
+                # rendered here would print the whole chain behind it, and
+                # an exception raised anywhere near a response body can
+                # embed one in its message. The logs the observability ADR
+                # makes the retained surface are not the place to find that
+                # out. What stays diagnosable: `provider_failed` names the
+                # stage, the provider and the host for anything that failed
+                # on the wire, and this line names the class for the rest.
+                logger.error(
+                    "session %s: reply failed: %s", self.session_id, type(exc).__name__
                 )
-                # The emission's own reading rather than a second one
-                # taken beside it: the store measures both offsets from
-                # the same origin, so two readings a microsecond apart
-                # put the turn and its `heard` in different milliseconds
-                # whenever they straddle a boundary.
-                self._turn.heard_utterance(
-                    heard_at,
-                    transcript,
-                    heard_s,
-                    result.language,
-                    None if confidence is None else round(confidence, 2),
-                )
-            else:
-                logger.info("session %s: nothing transcribed", self.session_id)
-            if transcript:
-                self._turns.append(Turn("user", transcript))
-                self._filler.arm()
-                await self._speak_reply(transcript, spoken)
-        except DeviceGone:
-            # The device went away mid-reply. Only this type: the edge
-            # translates both of the transport's disconnect shapes into
-            # it, so a bare `RuntimeError` arriving here is a bug in
-            # this process (#137) and belongs on the record below rather
-            # than being read as a disconnect and returned on in
-            # silence.
-            return
-        except asyncio.CancelledError:
-            # A barge-in or an abort is cancelling this reply, and the
-            # filler is reply audio: it dies with the reply rather than
-            # being waited out. The settle below still awaits the
-            # cancellation through.
-            self._filler.abandon()
-            raise
-        except Exception as exc:
-            # The class name, and nothing else. No `exc_info`, and no
-            # `str(exc)`: since the catch above narrowed, this arm
-            # catches every provider failure too, and what a failure
-            # from the wire carries is untrusted. `providers/kit.py`
-            # sanitizes the taxonomy's own message, but a traceback
-            # rendered here would print the whole chain behind it, and
-            # an exception raised anywhere near a response body can
-            # embed one in its message. The logs the observability ADR
-            # makes the retained surface are not the place to find that
-            # out. What stays diagnosable: `provider_failed` names the
-            # stage, the provider and the host for anything that failed
-            # on the wire, and this line names the class for the rest.
-            logger.error(
-                "session %s: reply failed: %s", self.session_id, type(exc).__name__
-            )
-            # And the user is told, which they were not before (#384): a
-            # terminally failed reply used to be silence, and from the
-            # couch a broken pipeline was indistinguishable from a slow
-            # one. Only this arm says anything. `DeviceGone` above has
-            # nobody to tell, and a cancellation means the user is
-            # talking, so speaking into either would be worse than the
-            # silence.
+                # And the user is owed a notice, which they were not
+                # before (#384): a terminally failed reply used to be
+                # silence, and from the couch a broken pipeline was
+                # indistinguishable from a slow one. Recorded after the
+                # log, so the reason an operator reads is written down
+                # first, and said below rather than here.
+                unanswered = True
+            # Said here rather than in the arm, for the reason above,
+            # and with nothing active: the arm has finished, so a
+            # cancellation landing in the notice leaves with an empty
+            # chain behind it.
             #
-            # After the log, so the reason an operator reads is written
-            # down before anything can go wrong with saying it; after
-            # the filler settles, so a clip still sounding is not talked
-            # over and the shared encoder is not interleaved. The
-            # `finally`'s own settle stays and is idempotent.
+            # Only the general arm gets here. `DeviceGone` above has
+            # nobody to tell and returns, and a cancellation means the
+            # user is talking, so speaking into either would be worse
+            # than the silence it replaces.
+            #
+            # After the filler settles, so a clip still sounding is
+            # not talked over and the shared encoder is not
+            # interleaved. That wait re-raises a cancellation of this
+            # reply rather than swallowing it, so a barge-in confirmed
+            # while it runs takes the turn instead of the notice.
             #
             # `speak_fallback` raises nothing but `CancelledError` by
-            # contract, so the `finally` below still runs and the
-            # closing `tts stop` still goes out, which in auto mode is
-            # what re-arms the device's listening.
-            await self._filler.settle()
-            await self._filler.speak_fallback()
+            # contract, and the `finally` below is outside this block,
+            # so the closing `tts stop` goes out either way, which in
+            # auto mode is what re-arms the device's listening.
+            if unanswered:
+                await self._filler.settle()
+                await self._filler.speak_fallback()
         finally:
             # Before the closing tts stop: an unfired timer is stood
             # down, and a clip already sounding finishes rather than
