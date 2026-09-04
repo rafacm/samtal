@@ -502,10 +502,13 @@ class PipelineRuntime:
     end, and two arms ask it to say the agent's fixed phrase, the one
     that catches a terminal failure and the check at the end of a reply
     that spoke nothing because every sentence of it was withheld.
-    Neither adds state here. What the phrase needs is a read of the
+    Saying the phrase adds nothing here: what it needs is a read of the
     world's cache and the output handle, both of which are the runner's
     already, so a failed turn speaks without this class learning
-    anything new to remember (#384).
+    anything new to remember (#384). Deciding whether the second arm
+    fires does, and it is the pair of reply-wide facts below, because
+    the question is about the whole reply and nothing the runner holds
+    can see one (#385).
 
     The mutable state that crosses those responsibilities, listed
     because it is what a reader has to hold in mind at once (#141):
