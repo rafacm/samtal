@@ -106,3 +106,49 @@ From `vinga-server/` on the milestone head:
 The manifest was regenerated once for the CHANGELOG entry and the dated
 pointer, and once more for this document and the ticked checkbox, so no
 commit in the milestone leaves the drift check red.
+
+### PR review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, 2026-09-04,
+against commit `db370f6f` on PR
+[#392](https://github.com/rafacm/vinga/pull/392); the reviewer ran 3
+minutes 17 seconds. Two findings, one P2 and one P3, both valid and
+both accepted. As received, condensed but faithful, each with its
+resolution and the commit that carries it:
+
+1. **P2: the invalid-kind bite does not prove every row is validated.**
+   The case says it misspells one message row's kind, and replaces the
+   kind of EVERY message row. An invariant that checked a single row,
+   the last one say, would pass the canonical case and this bite alike,
+   so the bite holds the assertion to less than it claims. The
+   implementation doc's "misspells one row's kind" describes a case
+   that does not exist.
+
+   *Resolution*: accepted in full, `90e429c9`. The bite doctors exactly
+   one row, `sending abort`, found by its declared kind and named
+   through `named_message`; every other row is left intact, and the
+   case asserts the needle is in the haystack once before handing the
+   table over. The row is index 33 of 41, behind the 20 prose rows and
+   in front of the read side, so an invariant reading either end alone
+   fails it. The doc sentence now describes the case and says why the
+   row is one in the middle.
+
+2. **P3: the M1 section still says "PR TBD".** The plan's checkbox
+   already links PR #392, so the two halves of the same record
+   disagreed about whether the milestone had a PR; the coordinator's
+   substitution matched only the parenthesized spelling.
+
+   *Resolution*: accepted in full, `6466559a`. The section header line
+   names #392 as a link, in the plan tick's own spelling.
+
+After the round, from `vinga-server/`: `uv run ruff check .` clean;
+`uv run pytest tests/unit/test_simulator_capabilities.py
+tests/unit/test_command_spellings.py -q` 69 passed; `uv run pytest
+tests/unit -q -n auto --dist loadfile` 10 failed, 5404 passed, 19
+skipped. The ten are `test_app_lifespan.py` and
+`test_conversations_boot.py` refusing to open the development
+database, and they are not this branch's: the same ten ids fail on
+plain `main` in the same environment (10 failed, 5400 passed, 19
+skipped, the difference being this milestone's four new cases), which
+is the lane default `fix/unit-lane-database-default` is about. Nothing
+in this branch's diff is imported by either file.
