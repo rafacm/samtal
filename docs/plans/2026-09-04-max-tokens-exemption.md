@@ -109,10 +109,24 @@ in every display and export, which is correct because it is a
 reply-length cap, not a credential. Not a slot:
 `provider secret set <stage> <entry> max_tokens` now refuses with
 the existing not-a-slot sentence, where before it accepted a slot
-no read or build would ever consult; there is no migration
-concern in any direction, because the write refusal predates every
-store, so no deployment can hold a stored `max_tokens` value or a
-`max_tokens` secret row.
+no read or build would ever consult. The first cut of this plan
+claimed no migration concern; that was wrong in one direction and
+the review round caught it. No deployment can hold a stored
+`max_tokens` option value (the write refusal predates every
+store), but the slot check accepted `max_tokens` as a secret slot
+all along, so a deployment can hold a stored, never-consumed
+`secrets.max_tokens` row, which boots, lists as stored-secret
+metadata, and renders into the export's foot as a
+`provider secret set ... max_tokens` command the post-change
+import path would refuse, breaking the documented
+export-and-reapply recovery. So the change ships with a forward
+data migration on the domain chain that deletes exactly the
+provider `secrets.max_tokens` rows and nothing else (deleting
+loses nothing, since no reader ever consumed the row), exercised
+by the CI wheel-migration step like every schema change, with
+boot, single reads, listings and a full export verified over a
+database seeded with such a row beside a sibling secret that must
+survive, and the withdrawal named in the CHANGELOG.
 
 **The fragments document the field again.** The
 `openai_compatible` example fragment regains the commented
@@ -130,15 +144,21 @@ nothing else learns anything.
 
 ## Tests
 
-- **The regression suite, extending the existing
-  `SECRET_LIKE_OPTIONS` table in `tests/unit/test_config.py`**:
-  `max_tokens: 1024` installs and survives into `.options` on
-  every surface the suite drives; the near-miss names stay
-  refused with their matched fragment (`max_token`, `tokens`,
-  `token`, `session_token`, `auth_token`, `client_secret`,
-  `api_key`, `password`), proving the loosening admits exactly the
-  exempted name; `max_tokens_env` keeps its env-reference
-  validation.
+- **The regression suite, built to prove exact containment rather
+  than sampled**: `max_tokens: 1024` installs and survives into
+  `.options` on the file, API and CLI surfaces. The refusal matrix
+  enumerates every fragment of the narrow tuple (`secret`,
+  `token`, `password`, `api_key`, `apikey`, `credential`, each
+  with a representative planted name), the exact-name neighbors
+  and probes (`max_token`, `tokens`, `token`, `max_tokens_backup`,
+  `tokens_max`, `session_token`, `auth_token`, `client_secret`),
+  the case variants (`MAX_TOKENS`, `Max_Tokens`), and nested
+  provider keys; `max_tokens_env` keeps its env-reference
+  validation (noted as not a probe, since `_env` names are handled
+  before fragment matching). The planted values are sentinels in
+  the `PLANTED_KEYS` style of `test_config_api_problems.py`,
+  asserted absent from exception chains, structured API bodies,
+  logs in both formats, stdout and stderr.
 - **Display and round trip**: `max_tokens` renders unmasked in
   `entity_body` and the record path (`provider_record`), exports
   as its value, and re-imports; the mask-under-a-non-secret-key
@@ -149,9 +169,13 @@ nothing else learns anything.
   acceptance was never pinned), and `api_key` keeps working as the
   slot example.
 - **The wider rule**: the committed-fixture sweep and the #279
-  URL cases stay green untouched; one case plants `MAX_TOKENS` as
-  an MCP `env` key and asserts it is still refused there, pinning
-  that the exemption did not leak into the wider tuple.
+  URL cases stay green untouched; containment cases plant
+  `max_tokens` and `MAX_TOKENS` as an MCP `env` key, as an MCP
+  header, and as a URL query parameter, asserting each is still
+  refused or stripped by its own reader
+  (`mcp_secret_fragment`, `is_url_credential_parameter`), pinning
+  that the exemption did not leak into the wider tuple or the URL
+  rule.
 - **The problem taxonomy**: the API answers a written
   `max_tokens` as a declared typed option (the `/beam_size`-style
   pointer shape in `test_config_api_problems.py`), not as an
@@ -221,6 +245,12 @@ amendments.
    removing only provider `secrets.max_tokens` rows, exercised by
    the wheel-migration lane, with boot, reads, listings and
    exports verified after, and the withdrawal documented.
+
+   *Resolution*: accepted in full; the false claim is corrected in
+   place with the review round credited, and the plan now ships
+   the forward migration deleting exactly the provider
+   `secrets.max_tokens` rows, wheel-exercised, with the
+   seeded-row verification and the CHANGELOG withdrawal note.
 
 3. **P1: the regression census does not prove containment or
    no-leak behavior.** The narrow tuple has six fragments and the
