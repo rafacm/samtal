@@ -647,8 +647,8 @@ docs/plans/2026-08-24-typed-provider-options.md:328  historical  config set prov
 docs/plans/2026-08-24-typed-provider-options.md:416  historical  config schema provider
 docs/plans/2026-08-24-typed-provider-options.md:421  historical  config schema provider
 docs/plans/2026-08-25-simulator-implementation.md:21  historical  vinga simulator
-docs/plans/2026-08-25-simulator-implementation.md:311  historical  vinga simulator
-docs/plans/2026-08-25-simulator-implementation.md:445  historical  vinga simulator run
+docs/plans/2026-08-25-simulator-implementation.md:322  historical  vinga simulator
+docs/plans/2026-08-25-simulator-implementation.md:456  historical  vinga simulator run
 docs/plans/2026-08-25-simulator.md:17  historical  vinga simulator
 docs/plans/2026-08-25-simulator.md:20  historical  vinga simulator check-in
 docs/plans/2026-08-25-simulator.md:21  historical  vinga simulator run
