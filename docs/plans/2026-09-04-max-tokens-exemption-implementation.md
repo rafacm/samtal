@@ -172,3 +172,68 @@ what is admitted one key deep is exactly what is admitted at the top.
       and installs a wheel on a runner and cannot be run from here; the
       assertion it makes is the one `tests/unit/test_db_open.py` makes
       from the checkout, which passes.
+
+### PR review round
+
+External review of the branch as pushed to PR #394, at `d9f59530`
+against `origin/main`: backend codex (codex-cli 0.153.0), model
+gpt-5.6-sol, 2026-09-04, runtime 7m04s. Two findings, a P1 and a P2.
+Both confirmed against the sources before being fixed.
+
+1. **P1: the wider-rule containment cases do not keep the no-leak
+   discipline the plan asks for.** The MCP env and headers cases and the
+   URL-parameter case in `tests/unit/test_config_secret_exemption.py`
+   drove only a direct repository call and asserted only against
+   `str(caught.value)`, so a sentinel reaching the exception's repr, its
+   cause or context, its structured problems, an HTTP header, either log
+   format or either process stream would have left them green. That is
+   weaker than the narrow half of the same suite and weaker than the
+   rule deserves. Fix: drive every wider-rule case through the API and
+   the CLI as well as the repository, capture both log formats and both
+   streams, and inspect the whole direct exception chain and the
+   structured problems.
+
+   *Resolution* (`3efba60c`): accepted in full. The six cases are a
+   `Wider` table now, each carrying the route, the repository call and
+   the command words, driven on all three surfaces with exactly the
+   assertions the planted-key suite makes. Two things turned up while
+   fixing it. The headers case had been written on a `stdio` transport,
+   which is wrong twice, so its refusal carried a second problem about
+   where headers may be written and the credential case was riding on
+   it; it moves to `streamable_http`. And the terminal case needed a
+   vacuity guard that is not a wording pin, so it asserts the refusal
+   names the entity it is about, which is the one semantic token all six
+   refusals share.
+
+2. **P2: the wrong-type `max_tokens` case checks an unrelated value for
+   leakage.** That row of `REFUSALS` in
+   `tests/unit/test_config_api_problems.py` rejects the string `"1024"`,
+   while the table's no-leak assertion looks for the module's key
+   sentinel, which the request never carried; an answer echoing what was
+   written would have passed. The differential wording comparison beside
+   it checks neither the rejected value nor the exception chain. Fix:
+   give the case a credential-shaped non-integer sentinel of its own,
+   carry the expected sentinel per refusal, and assert its absence from
+   the direct exception, its chain, its problems, the response body and
+   headers, the logs and both streams.
+
+   *Resolution* (`4cfd1db1`): accepted in full. `Refusal` gains a
+   `sentinel` field defaulting to the module's, the way `PlantedKey`
+   beside it already carries one, and the `max_tokens` row plants a
+   credential-shaped non-integer, which is also the ordinary way a value
+   lands in a typed field that will not take it. A new sweep over the
+   whole table asserts that value's absence on both paths and every
+   surface. A table guard came with it, because the finding is really
+   about a case looking for a value it never sent: every row carrying
+   one of this module's sentinels has to declare that one, and a row
+   carrying none is a case about shape and says so by leaving the field
+   at its default.
+
+#### Verification after the review round
+
+Run from `vinga-server/`, against the development Postgres on 5432.
+
+- `uv run ruff check .`: `All checks passed!`
+- The two touched suites serially: `180 passed in 11.13s`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, which is how CI
+  runs the lane: `5523 passed, 19 skipped in 83.26s (0:01:23)`
