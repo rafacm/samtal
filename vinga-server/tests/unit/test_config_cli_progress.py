@@ -1,0 +1,344 @@
+"""The progress line the two long waits draw, and everything it may not
+do.
+
+`import` waits for a transaction nothing bounds and `apply` waits up to
+a minute, so both narrate the wait on stderr while it runs. That is the
+interactive affordance the determinism practice licenses
+(`docs/architecture/cli-guide.md`), and a licence is a set of
+conditions rather than a permission: the non-terminal path stays
+complete and byte-identical, the line re-presents only what that path
+delivers anyway, and it carries no value the caller typed.
+
+Each condition is a test here rather than a sentence anywhere. The
+determinism proof is the load-bearing one and it is made twice over. Its
+narrow half is below: one command run at a terminal and through a pipe,
+and the piped bytes compared against a run with the affordance
+monkeypatched away entirely. Its broad half is the rest of this suite,
+which runs with stderr redirected into a capture and would show these
+carriage returns in the middle of a few hundred assertions about output
+if the terminal check were ever to stop being made.
+"""
+
+import contextlib
+import io
+import threading
+import time
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from tests.support.config_cli import runner
+from vinga_server.config import Config, cli
+from vinga_server.config.responses import (
+    AgentsReload,
+    ConfigReloadResult,
+    FillersReload,
+    McpReloadResult,
+    PromptsReload,
+    ProvidersReload,
+)
+from vinga_server.tools.mcp import McpServers
+
+# Two values the caller supplies and no line may repeat: the name of an
+# entry inside the document, and the path of the document itself. Shaped
+# so a substring check for either cannot match by accident.
+SENTINEL_ENTRY = "sentinel-agent-4c1f"
+
+SENTINEL_FILE = "sentinel-document-9b2e.yaml"
+
+DOCUMENT = f"""\
+providers:
+  llm:
+    claude: {{type: anthropic, model: m}}
+agents:
+  {SENTINEL_ENTRY}: {{prompt: You are Sam., llm: claude}}
+"""
+
+
+@pytest.fixture
+def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """One command run the way the entry point runs it, against a server
+    of this test's own, with a running server behind it for the apply to
+    reach: the route refuses outright without one, and what these tests
+    are about is a wait that ends in an answer."""
+    started = runner(monkeypatch)
+    started.runtime["mcp_servers"] = _running()
+    started.runtime["reload"] = _reload
+    return started
+
+
+@pytest.fixture
+def document(tmp_path: Path) -> Path:
+    """The document an import is given, at a path carrying a sentinel of
+    its own: a path is as much the caller's word as an entry name is."""
+    written = tmp_path / SENTINEL_FILE
+    written.write_text(DOCUMENT, encoding="utf-8")
+    return written
+
+
+def _running() -> McpServers:
+    """A registry built the way a server builds one and never started.
+    Nothing is configured in it, because what these tests read is the
+    wait rather than what an apply applied."""
+    return McpServers.build(
+        Config(
+            server={},
+            providers={
+                stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
+            },
+            mcp_servers={},
+            agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+            agents={"sam": {"prompt": "A"}},
+            default_agent="sam",
+        )
+    )
+
+
+async def _reload() -> ConfigReloadResult:
+    """What a running server answers the apply with. Every list empty
+    and the same lists every time, because what these tests compare is
+    two runs of one command: an answer that varied would be the reason
+    they differed."""
+    return ConfigReloadResult(
+        mcp=McpReloadResult(started=[], restarted=[], stopped=[], unchanged=[], servers={}),
+        prompts=PromptsReload(changed=[]),
+        fillers=FillersReload(resynthesized=[], reused=[], disabled=[]),
+        providers=ProvidersReload(built=[], reused=[], retired=[]),
+        agents=AgentsReload(added=[], removed=[], defaults_changed=False),
+    )
+
+
+# The licence's own proof
+
+
+@pytest.mark.parametrize("verb", ["import", "apply"])
+def test_the_bytes_off_a_terminal_are_the_same_with_the_line_and_without(
+    run, document: Path, monkeypatch: pytest.MonkeyPatch, verb: str
+) -> None:
+    """The condition the affordance is licensed under, held the only way
+    it can be held: the same command run twice off a terminal, once with
+    the feature and once with it monkeypatched inert, and the two
+    compared byte for byte on both streams.
+
+    The document is imported once before either run, because an import
+    says of each entry whether it moved: two runs are comparable only
+    when they find the same store.
+    """
+    argv = _argv(verb, document)
+    _captured(run, argv, terminal=False)
+
+    with_the_line = _captured(run, argv, terminal=False)
+    monkeypatch.setattr(cli, "narrated", _inert)
+    without_it = _captured(run, argv, terminal=False)
+
+    assert with_the_line == without_it
+
+
+@pytest.mark.parametrize("verb", ["import", "apply"])
+def test_the_line_is_drawn_at_a_terminal_and_leaves_stdout_alone(
+    run, document: Path, verb: str
+) -> None:
+    """The affordance itself, and the two halves of the licence it is
+    bounded by. It is drawn when stderr is a terminal; the data a caller
+    came for is the same bytes either way, because nothing about the
+    answer is what varies.
+    """
+    argv = _argv(verb, document)
+    _captured(run, argv, terminal=False)
+
+    piped = _captured(run, argv, terminal=False)
+    at_a_terminal = _captured(run, argv, terminal=True)
+
+    assert f"{cli.PROGRESS_PHASE}: 0s" in at_a_terminal[1]
+    assert cli.PROGRESS_PHASE not in piped[1]
+    assert at_a_terminal[0] == piped[0]
+
+
+@pytest.mark.parametrize("verb", ["import", "apply"])
+def test_the_line_takes_itself_back_off_the_screen(run, document: Path, verb: str) -> None:
+    """What the erase is for: whatever prints next prints into an empty
+    line rather than over half a sentence about waiting. So the last
+    carriage return is the erase's own, and nothing of the line survives
+    behind it."""
+    _, err = _captured(run, _argv(verb, document), terminal=True)
+
+    drawn = f"{cli.PROGRESS_PHASE}: 0s"
+    assert f"\r{' ' * len(drawn)}\r" in err
+    assert cli.PROGRESS_PHASE not in _after_the_line(err)
+
+
+def test_the_line_repeats_nothing_the_caller_typed(run, document: Path) -> None:
+    """The no-leak posture applies to progress exactly as it applies to
+    a refusal. An import is the case with something to leak: the
+    document names an entry and the command line names a file, and
+    neither may reach a line whose whole content is a fixed word and a
+    number."""
+    printed, err = _captured(run, _argv("import", document), terminal=True)
+
+    # The run really did carry both values, so their absence below is
+    # the line's discipline rather than a command that did nothing.
+    assert SENTINEL_ENTRY in printed
+    assert SENTINEL_ENTRY not in err
+    assert SENTINEL_FILE not in err
+    assert str(document) not in err
+
+
+def test_a_refusal_arrives_whole_after_the_line_has_gone(run) -> None:
+    """The wait ends in a refusal as readily as in an answer, and the
+    refusal is the one thing the command still has to say. So the erase
+    is on the way out of the narration rather than on the answering path
+    through it, and the sentence lands in an empty line with the exit
+    code it always had."""
+    # No running server for the apply to reach, which is the refusal
+    # this route answers with and the one an operator meets most.
+    run.runtime["reload"] = None
+
+    printed, err = _captured(run, ("apply",), terminal=True, code=1)
+
+    assert printed == ""
+    assert "no running server" in _after_the_line(err)
+
+
+# What does not narrate
+
+
+def test_only_the_two_long_waits_narrate() -> None:
+    """Read off the registration table rather than listed here, so a
+    third command that quietly asked for a progress line fails this
+    instead of shipping. `events tail` is the deliberate absence: there
+    the stream is the answer rather than the wait."""
+    narrating = {row.words for row in cli.COMMANDS if any(act.narrates for act in row.acts())}
+
+    assert narrating == {("import",), ("apply",)}
+
+
+def test_a_read_at_a_terminal_says_nothing_about_waiting(run) -> None:
+    """The same claim from the other end, through the entry point: a
+    command whose wait is the ordinary one draws nothing, terminal or
+    not."""
+    _, err = _captured(run, ("list",), terminal=True)
+
+    assert cli.PROGRESS_PHASE not in err
+
+
+# The mechanism, driven directly
+
+
+def test_the_line_is_redrawn_on_its_cadence() -> None:
+    """The number moves, which is the whole of what the line is for.
+
+    The cadence is a parameter with a default rather than a constant a
+    test reaches in and rewrites, so what is driven here is the seam a
+    caller has. The wait is bounded and the loop leaves the moment the
+    redraws have happened, so a slow machine costs nothing and a stalled
+    writer fails rather than hangs.
+    """
+    errors = _Stream(terminal=True)
+    with contextlib.redirect_stderr(errors):
+        with cli.narrated(True, cadence_s=0.01):
+            _until(lambda: errors.getvalue().count(f"{cli.PROGRESS_PHASE}:") >= 3)
+
+    assert errors.getvalue().count(f"{cli.PROGRESS_PHASE}:") >= 3
+
+
+def test_a_stream_that_will_not_be_written_to_takes_nothing_down() -> None:
+    """An affordance may not fail a command. A stream closed under a
+    running command answers a `ValueError` from the object and an
+    `OSError` from the descriptor under it, and neither is a reason for
+    an import that is talking to a server to stop.
+
+    Counted rather than merely survived: three refusals means the first
+    draw was refused, the writer went on redrawing afterwards rather
+    than dying inside a thread nobody is waiting on, and the erase on
+    the way out was refused too without raising through the caller.
+    """
+    refusing = _Refusing()
+
+    with contextlib.redirect_stderr(refusing):
+        with cli.narrated(True, cadence_s=0.01):
+            _until(lambda: refusing.attempts >= 3)
+
+    assert refusing.attempts >= 3
+
+
+# The scaffolding
+
+
+class _Stream(io.StringIO):
+    """An output stream whose `isatty` this test decides.
+
+    Locked, unlike the copies of this class in the neighbouring suites,
+    because this is the one place a second thread writes to the stream
+    while the test reads it.
+    """
+
+    def __init__(self, terminal: bool) -> None:
+        super().__init__()
+        self.terminal = terminal
+        self.lock = threading.Lock()
+
+    def isatty(self) -> bool:
+        return self.terminal
+
+    def write(self, text: str) -> int:
+        with self.lock:
+            return super().write(text)
+
+    def getvalue(self) -> str:
+        with self.lock:
+            return super().getvalue()
+
+
+class _Refusing(io.StringIO):
+    """A terminal that refuses every write, which is what a stream
+    closed under a running command is, and counts what it refused."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+        self.lock = threading.Lock()
+
+    def isatty(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        with self.lock:
+            self.attempts += 1
+        raise ValueError("I/O operation on closed file")
+
+
+@contextlib.contextmanager
+def _inert(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
+    """The narration, not there at all: what the control run of the
+    determinism proof is compared against."""
+    yield
+
+
+def _argv(verb: str, document: Path) -> tuple[str, ...]:
+    return ("import", "-f", str(document)) if verb == "import" else (verb,)
+
+
+def _captured(
+    run, argv: tuple[str, ...], terminal: bool, code: int = 0
+) -> tuple[str, str]:
+    """What one command wrote to each stream, with both of them saying
+    whether they are a terminal."""
+    printed, errors = _Stream(terminal), _Stream(terminal)
+    with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(errors):
+        assert run(*argv) == code
+    return printed.getvalue(), errors.getvalue()
+
+
+def _after_the_line(err: str) -> str:
+    """What is left on the screen once the line has erased itself, which
+    is everything after the last carriage return anything wrote."""
+    return err.rsplit("\r", 1)[-1]
+
+
+def _until(answered, seconds: float = 5.0) -> None:
+    """Wait for something a thread is doing, or give up and let the
+    assertion after this say what did not happen."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and not answered():
+        time.sleep(0.005)
