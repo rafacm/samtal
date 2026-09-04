@@ -3015,33 +3015,50 @@ def _nesting(kind: entities.EntityDescriptor) -> object:
     return ENTRIES if kind.addressing else BODY
 
 
-def _sections(document: Mapping[str, object]) -> dict[str, Any]:
+def _halves(document: object) -> tuple[dict[str, Any], list[Any]]:
+    """The masked document's two halves, each read as its shape.
+
+    Where every renderer of the whole configuration starts, and it takes
+    `object` rather than a mapping deliberately: the answer is read as a
+    mapping BEFORE anything is looked up in it. A `.get` is a method
+    call, so a document that answered a string or a list would leave
+    this as an `AttributeError` from outside the boundary, which is the
+    same traceback the sections used to produce one level down.
+
+    Read here, and not because `ConfigDocument` leaves either half in
+    doubt: a renderer whose safety depends on which act called it is
+    safe by arrangement, and the arrangement is not in the function.
+
+    The secrets are read even by a rendering that prints none of them.
+    The refusal is about the document, not about the line: a body this
+    client cannot read is one that did not come from this API, and which
+    half of it a particular command would have walked into is not what
+    makes that true.
+    """
+    read = _understood(BODY, document, UNREADABLE_READ)
+    return (
+        _understood(BODY, read.get("config"), UNREADABLE_READ),
+        _understood(STORED, read.get("secrets"), UNREADABLE_READ),
+    )
+
+
+def _sections(config: Mapping[str, object]) -> dict[str, Any]:
     """Every section of the masked document, read as the shape the
     registry says it has.
 
-    The one place either renderer learns what a section is. The kinds
-    and their nesting come from the registry, so a kind added there is
-    read here by existing; the devices and the default agent are written
-    out because neither is an entity, and forcing them into a kind's
-    shape would be inventing a generalization rather than finding one.
-
-    The document itself is read too, and not because `ConfigDocument`
-    leaves it in doubt: a renderer that reached into `document["config"]`
-    before knowing it was a mapping would be trusting its caller to have
-    validated, and this is the function that makes the reading true of
-    the document rather than of the path it arrived by.
+    The one place any renderer learns what a section is. The kinds and
+    their nesting come from the registry, so a kind added there is read
+    here by existing; the devices and the default agent are written out
+    because neither is an entity, and forcing them into a kind's shape
+    would be inventing a generalization rather than finding one.
 
     `.get` rather than a subscript throughout, so a section the answer
     left out arrives as None and meets the same refusal a malformed one
     does, instead of a `KeyError` from outside the boundary.
 
-    Every section rather than only the ones a given rendering prints.
-    The refusal is about the document, not about the line: a body
-    holding a section this client cannot read is one that did not come
-    from this API, and which half of it a particular command would have
-    walked into is not what makes that true.
+    Every section rather than only the ones a given rendering prints,
+    for the reason `_halves` reads both halves.
     """
-    config = _understood(BODY, document.get("config"), UNREADABLE_READ)
     read = {
         kind.moved_key: _understood(_nesting(kind), config.get(kind.moved_key), UNREADABLE_READ)
         for kind in entities.ENTITIES
@@ -3083,10 +3100,11 @@ def _configured_counts(document: Mapping[str, object]) -> str:
     generalization rather than finding one.
 
     The document is read as its shapes before any of it is counted, by
-    the same step the tree reads it with: see the note above
-    `_sections`.
+    the same two steps the tree reads it with: see the notes above
+    `_halves` and `_sections`.
     """
-    read = _sections(document)
+    config, _ = _halves(document)
+    read = _sections(config)
     lines = ["", CONFIGURED]
     for kind in entities.ENTITIES:
         if not kind.addressing:
@@ -3115,8 +3133,9 @@ def _summary(document: Mapping[str, object]) -> str:
     is the one the store wrote, so a lookup through the bounded spelling
     would name the slots of a different entity or of none.
     """
-    read = _sections(document)
-    stored = _stored_slots(_understood(STORED, document.get("secrets"), UNREADABLE_READ))
+    config, secrets = _halves(document)
+    read = _sections(config)
+    stored = _stored_slots(secrets)
     lines = ["providers:"]
     for stage in PROVIDER_STAGES:
         lines.append(f"  {stage}:")

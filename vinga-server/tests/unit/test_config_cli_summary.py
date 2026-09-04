@@ -450,23 +450,35 @@ def test_no_refusal_of_a_document_is_retained_on_its_chain(body: object) -> None
     assert ANSWERED not in chain(caught.value)
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        pytest.param({"secrets": []}, id="the-configuration-is-absent"),
-        pytest.param({"config": ANSWERED, "secrets": []}, id="the-configuration-is-a-scalar"),
-        pytest.param({"config": [ANSWERED], "secrets": []}, id="the-configuration-is-a-list"),
-        pytest.param({"config": document()["config"]}, id="the-secrets-are-absent"),
-    ],
-)
-def test_the_tree_refuses_a_document_that_is_not_one(body: object) -> None:
-    """The renderer handed the document directly, which is what says its
-    two halves are read here rather than trusted from the act that
-    called it. `ConfigDocument` vouches for both of them on the way in,
-    and a renderer whose safety depended on being called by that act
-    would be safe by arrangement rather than by construction."""
+NOT_A_DOCUMENT = [
+    # The outer object itself, which is looked up in before anything
+    # else and so has to be read before anything else: `.get` on a
+    # string is an `AttributeError`, and one raised a level above the
+    # sections is the same traceback the sections' own gate exists to
+    # prevent.
+    pytest.param(ANSWERED, id="the-answer-is-a-scalar"),
+    pytest.param([ANSWERED], id="the-answer-is-a-list"),
+    pytest.param(7, id="the-answer-is-a-number"),
+    pytest.param(None, id="the-answer-is-null"),
+    # And its two halves.
+    pytest.param({"secrets": []}, id="the-configuration-is-absent"),
+    pytest.param({"config": ANSWERED, "secrets": []}, id="the-configuration-is-a-scalar"),
+    pytest.param({"config": [ANSWERED], "secrets": []}, id="the-configuration-is-a-list"),
+    pytest.param({"config": document()["config"]}, id="the-secrets-are-absent"),
+]
+
+
+@pytest.mark.parametrize("body", NOT_A_DOCUMENT)
+@pytest.mark.parametrize("act", ["LIST", "COUNTS"])
+def test_a_whole_document_renderer_refuses_what_is_not_one(act: str, body: object) -> None:
+    """Every renderer of the whole configuration, handed the answer
+    directly, which is what says each reads it rather than trusting the
+    act that called it. `ConfigDocument` vouches for the outer object
+    and both halves on the way in, and a renderer whose safety depended
+    on being called by that act would be safe by arrangement rather than
+    by construction."""
     with pytest.raises(ConfigError) as caught:
-        cli.LIST.render(body)
+        getattr(cli, act).render(body)
 
     assert str(caught.value) == cli.UNREADABLE_READ
     assert caught.value.__cause__ is None
