@@ -396,11 +396,14 @@ def test_yaml_syntax_error_reports_line(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as caught:
         load_file_config(path)
 
-    refusal = str(caught.value)
-    assert "invalid YAML" in refusal
-    assert "line 3" in refusal
-    # The locator is the only thing the refusal takes from the file.
-    assert str(path) not in refusal
+    # The whole sentence, because what a partial match cannot see is
+    # something reintroduced between the parts it pins: the parser's own
+    # `problem` reads as a locator's neighbour and would sit here
+    # unnoticed.
+    assert str(caught.value) == (
+        f"invalid YAML in {CONFIG_FROM_FLAG} at line 3, column 2. {YAML_NOT_QUOTED}"
+    )
+    assert str(path) not in str(caught.value)
 
 
 def test_a_yaml_parse_failure_carries_no_parser_exception(tmp_path: Path) -> None:
@@ -569,8 +572,9 @@ def test_a_file_that_will_not_parse_says_only_where_the_parser_stopped(
         load_file_config(path)
 
     refusal = str(caught.value)
-    assert refusal.startswith(f"invalid YAML in {CONFIG_FROM_FLAG} at line 4, column ")
-    assert refusal.endswith(f". {YAML_NOT_QUOTED}")
+    assert refusal == (
+        f"invalid YAML in {CONFIG_FROM_FLAG} at line 4, column 1. {YAML_NOT_QUOTED}"
+    )
     assert str(path) not in refusal
     assert PARSER_SENTINEL not in refusal
     assert caught.value.__cause__ is None
