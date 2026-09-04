@@ -27,6 +27,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from typing import Any, cast
 
@@ -34,19 +35,44 @@ import pytest
 
 from tests.support.configs import POET_MAC, base_config
 from tests.support.events import events, only
-from tests.support.providers import BrokenTts, StallingLlm, Unreachable, built_world
+from tests.support.providers import (
+    BrokenTts,
+    ConfirmingAsr,
+    StallingLlm,
+    Unreachable,
+    built_world,
+)
 from tests.support.sessions import (
     drive_reply,
+    end_utterance,
+    realtime_session,
     reply_with,
     session_for,
     start_reply,
+    turn_taking,
 )
-from tests.support.sockets import FRAME, CancellingSocket, OrderedSocket, QuietSocket
+from tests.support.sockets import (
+    FRAME,
+    CancellingSocket,
+    OrderedSocket,
+    QuietSocket,
+    spoken,
+)
 from vinga_server.config import Config
 from vinga_server.device.boundary import DeviceGone
 from vinga_server.filler import FallbackClip, build_agent_fillers
 from vinga_server.logs import TEXT_FORMAT, JsonFormatter
-from vinga_server.providers import ProviderCallError, ProviderCallTimeout
+from vinga_server.providers import (
+    AsrResult,
+    LlmEvent,
+    LlmProvider,
+    ProviderCallError,
+    ProviderCallTimeout,
+    ToolChoice,
+    ToolDef,
+    Turn,
+    VadProvider,
+)
 from vinga_server.providers.base import TtsProvider
 from vinga_server.providers.mock import MockTts
 
@@ -510,3 +536,160 @@ async def test_a_cancellation_mid_phrase_still_attempts_the_closing_stop_once(
                                  "log has the details."]
     assert "fallback playback failed" not in caplog.text
     assert socket.stops == 1
+
+
+# --- and the interruption that arrives while it is being said ---------
+
+
+class FailingWhenTold(LlmProvider):
+    """A model that answers nothing until the test says so and then
+    fails, which is what puts a terminal failure at an instant the test
+    chose rather than at one the scheduler did."""
+
+    def __init__(self) -> None:
+        self.go = asyncio.Event()
+
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        await self.go.wait()
+        raise RuntimeError("the model gave up")
+        yield  # pragma: no cover - never reached, makes this a generator
+
+
+class TellableEndpointer:
+    """An endpointer holding however much speech the test has told it
+    to, which is what lets one scenario span two answers: none while the
+    latency mask decides whether to play, and an interruption's worth
+    once the user has cut in."""
+
+    def __init__(self) -> None:
+        self.speech_ms_held = 0.0
+
+    def feed(self, pcm: bytes) -> bool:
+        return False
+
+    def reset(self) -> None:
+        return None
+
+    def speech_start(self) -> int | None:
+        return None
+
+    def speech_ms(self) -> float:
+        return self.speech_ms_held
+
+
+class TellableVad(VadProvider):
+    """The agent's VAD, answering the one endpointer the test holds: the
+    runtime asks for a fresh one at every activation, and handing back
+    the same object is what keeps it reachable."""
+
+    egress = False
+
+    def __init__(self) -> None:
+        self.endpointer = TellableEndpointer()
+
+    def new_endpointer(self) -> TellableEndpointer:
+        return self.endpointer
+
+
+def masked_and_failing() -> Config:
+    """One agent that masks its latency and says a phrase when a reply
+    fails, on a voice whose clips are long enough to still be pacing
+    while something else happens."""
+    return Config(
+        server={"barge_in_refractory_ms": 0},
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock", "text": "hello"}},
+            "tts": {"mock": {"type": "mock", "ms_per_char": 1, "min_ms": 600}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agents={
+            "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+            | {
+                "filler": {"enabled": True, "delay_ms": 40.0, "phrases": ["Hmm..."]},
+                "fallback": {"enabled": True, "phrase": "I could not answer that one."},
+            }
+        },
+        default_agent="assistant",
+    )
+
+
+async def until(ready: Any, complaint: str) -> None:
+    """Wait for something the test is about, on a bound short enough
+    that a wedge fails here rather than in whatever runs next."""
+    for _ in range(500):
+        if ready():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(complaint)
+
+
+async def test_a_barge_in_while_the_mask_settles_cancels_rather_than_wedging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The three-way case, and the one that can hang a session.
+
+    The failure arm waits for a sounding clip before it says anything,
+    so a barge-in confirmed during that wait arrives while the reply is
+    inside the mask's own settle. The confirmation ladder pauses the
+    outgoing frames before it cancels and resumes them only once the
+    cancel has been awaited, so a cancellation swallowed there would let
+    the arm walk on into a paced send that cannot complete until the
+    cancel it is blocking returns: a session wedged on itself, with the
+    user talking.
+
+    Driven through the real ladder rather than by hand, because what
+    makes the window is the ladder's own order. The scripted ASR holds
+    the confirmation until the reply has failed, which is what puts the
+    cancel inside the wait rather than before it.
+    """
+    config = masked_and_failing()
+    built = await build_agent_fillers(config, built_world(config).agents)
+    llm = FailingWhenTold()
+    asr = ConfirmingAsr(AsrResult(text="stop and listen"))
+    vad = TellableVad()
+    session, socket = realtime_session(
+        config,
+        asr,
+        vad,
+        {"assistant": cast(Any, llm)},
+        fillers=built.clips,
+        fallbacks=built.fallbacks,
+    )
+
+    with caplog.at_level("INFO"):
+        start_reply(session, b"\x00\x00" * 320)
+        # The clip is sounding: the reply has said nothing, the timer
+        # has fired, and its frames are pacing out.
+        await until(
+            lambda: bool(events(caplog, "filler_played")), "the filler never played"
+        )
+        # The user cuts in, which is what the gates are about to read.
+        vad.endpointer.speech_ms_held = 700.0
+        await session.runtime.audio(b"\x00\x00" * 320)
+        # The ladder, in flight: it has paused the outgoing frames and
+        # is waiting on the confirmation this test still holds.
+        barge = asyncio.create_task(end_utterance(session))
+        await until(lambda: turn_taking(session).output_paused, "the ladder never paused")
+        # Now the reply fails, and its arm goes into the wait.
+        llm.go.set()
+        await until(lambda: ": reply failed: " in caplog.text, "the reply never failed")
+        asr.release.set()
+        async with asyncio.timeout(5):
+            await barge
+
+    # The cancellation went through, and the notice never did: nothing
+    # displayed, nothing played, nothing on the record.
+    assert events(caplog, "reply_fallback") == []
+    assert "I could not answer that one." not in spoken(socket)
+    assert "fallback playback failed" not in caplog.text
+    # And the ladder got all the way through: the interruption is a
+    # barge-in on the record and a turn of its own, rather than a cancel
+    # still waiting on the reply it was cancelling.
+    only(caplog, "barge_in")
