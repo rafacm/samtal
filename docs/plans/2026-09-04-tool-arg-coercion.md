@@ -223,8 +223,9 @@ prove it with a planted sentinel.
   arrive at the far side unchanged.
 - `tests/unit/test_session_tools.py` gains the through-the-loop
   case: a device tool declared with an `integer` property (the
-  fixture in `tests/support/device_tools.py` grows a typed tool
-  beside `STATUS`, which has no schema), called by the scripted
+  existing `VOLUME` fixture in `test_tools_device.py` moves to
+  `tests/support/device_tools.py` beside `STATUS` and is imported
+  back, so the schema exists once rather than twice), called by the scripted
   model with a string value; the assertions pin every surface of
   the split where it is actually read, never the in-flight
   accumulator: the wire payload the fake device received (`40`, an
@@ -386,6 +387,10 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    fixture.** The exact integer-typed volume tool already exists
    as `VOLUME` in `test_tools_device.py`; move it into
    `tests/support/device_tools.py` and reuse it in both places.
+
+   *Resolution*: accepted in full; the session case reuses the
+   moved `VOLUME` fixture and `test_tools_device.py` imports it
+   back.
 
 8. **P2: boolean coercion crosses an irreversible-operation guard
    without a safety test.** `forget` permanently erases only when
