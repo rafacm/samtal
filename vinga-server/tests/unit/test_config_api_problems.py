@@ -975,6 +975,43 @@ def test_the_cli_prints_an_mcp_url_credential_refusal_without_the_value(
     assert "headers.Authorization" in printed
 
 
+def test_the_cli_prints_the_same_refusal_for_an_imported_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    store: ConfigStore,
+) -> None:
+    """The third way an operator writes an MCP server, and the one the
+    two above do not cover: a whole document through `import` (#279).
+
+    A document is where such a URL most plausibly arrives, since it is a
+    file somebody wrote or exported, and a rule refused on the single
+    write and not here would be a rule with a way round it. The sentence
+    is the repository's again, under the header an apply adds, and the
+    value is in neither.
+    """
+    url = f"https://host/mcp?auth={URL_KEY_SENTINEL}"
+    with pytest.raises(ConfigError) as caught:
+        store.apply({"mcp_servers": {"weather": {"transport": "streamable_http", "url": url}}})
+
+    run = runner(monkeypatch)
+
+    document = (
+        "mcp_servers:\n"
+        "  weather:\n"
+        "    transport: streamable_http\n"
+        f"    url: {url}\n"
+    )
+    assert run("import", "-f", "-", stdin=document) == 1
+    printed = capsys.readouterr().err.rstrip("\n")
+
+    assert printed == str(caught.value)
+    assert URL_KEY_SENTINEL not in printed
+    assert "nothing was changed" in printed
+    assert "mcp_servers.weather.url" in printed
+    assert "credential as a query parameter" in printed
+
+
 # The status vocabulary
 
 
