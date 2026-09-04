@@ -252,3 +252,76 @@ simulator's `read()` applies it, and no third place re-derives it.
   README's simulator bullet confirmed still true (it promises
   check-in, claim and conversation, all of which this widens rather
   than narrows), and `CHANGELOG.md`.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
+6m32s. Verdict: ready after the P1/P2 amendments.
+
+1. **P2: the firmware compatibility argument uses the wrong
+   unknown-key boundary.** The comment at `ota/reply.py` supports
+   unknown top-level fields, not arbitrary members inside
+   `websocket`; the 2026-08-02 implementation doc records that
+   firmware writes every `websocket` member into NVS. Adding
+   `access` inside `websocket` is therefore not operationally
+   invisible, and M1 has no device checkpoint establishing
+   harmlessness under the compatibility promise. The plan should
+   put the discriminator in a top-level field the firmware truly
+   ignores, or acknowledge the new NVS entry and require a device
+   checkpoint before calling M1 releasable.
+
+2. **P2: the contradiction matrix omits activation plus
+   `access="open"`.** The existing precedence processes
+   contradictions before activation; a reply carrying both an
+   activation object and `access="open"` would classify
+   `Activating` despite simultaneously claiming admission, and no
+   server decision site can emit that combination. Activation is
+   compatible only with an absent field (old server) or
+   `"denied"`; `activation + "open"` and `activation + "token"`
+   must be `Refused`, with hostile-reply tests including the
+   empty-token `"open"` case.
+
+3. **P2: the claimed complete `Unwelcome` diagnosis still omits
+   reachable causes.** `onboarding/unbound.py` can suppress
+   activation when the binding view is not authoritative,
+   producing no agents, no token and no activation (documented in
+   `docs/xiaozhi-notes.md`), and the bound-agent-not-loaded
+   wording is too narrow because `default_agent` can also name an
+   unloaded agent. Enumerate binding-view failure as its own
+   cause, broaden the unloaded cause, and assert both messages in
+   tests.
+
+4. **P2: omitting the empty Authorization header contradicts the
+   simulator's settled fidelity contract and is unnecessary.** The
+   2026-08-25 plan promises the four firmware handshake headers;
+   the server treats empty and absent credentials identically
+   under auth-on and ignores the header under auth-off, and the
+   proposed integration test would pass either way. Leave
+   `_opened` unchanged and record that the empty bearer header is
+   harmless under both modes.
+
+5. **P2: token-specific help and capability text will remain false
+   after tokenless admission works.** `CLAIM_HELP` promises the
+   follow-up check-in issues a token, the capability table repeats
+   it, and `_claimed` explains its fourth step in token-minting
+   terms. Replace these with the final websocket admission
+   vocabulary, update both affected capability rows, and
+   regenerate the CLI reference.
+
+6. **P2: unknown `access` handling is underspecified and lacks the
+   required no-leak pin.** A `Literal`-typed consumer field would
+   make an unknown value a malformed reply rather than an absent
+   field; model the consumer as a strict optional string
+   recognized at `read()`, keep the producer typed to the closed
+   three-value set, add a credential-shaped unknown value to the
+   four-surface no-leak inventory, and describe the fallback as
+   conservative compatibility rather than support for future
+   empty-token admission modes.
+
+7. **P3: the fixture-preservation instructions contradict each
+   other.** The plan says field-less fixture bodies stay unchanged
+   and also permits making `unwelcome()` an explicit `"denied"`.
+   Keep `activating()`, `admitted()` and `unwelcome()`
+   byte-unchanged as old-server fixtures; add separate `open` and
+   explicit `denied` helpers for the new protocol cases.
