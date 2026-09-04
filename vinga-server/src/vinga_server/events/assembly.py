@@ -22,8 +22,10 @@ printed at all. `tool_fragment` renders whichever name it is handed and
 refuses nothing, because deciding is reading the classifier's own
 source constants, which stay beside the classifier (#240, the plan's
 decision 4). The three `tool_call` variants make the decision
-structural for themselves by declaring the fragment type each carries;
-the one sentence that is not an event has `pipeline.py`'s
+structural for themselves by declaring the fragment type each carries,
+and the three `sentence_withheld` variants beside them do it the same
+way, since a withheld sentence is about a tool and is named by the same
+policy; the one sentence that is not an event has `pipeline.py`'s
 `_tool_fragment` for its single named home. What lives here is the
 rendering, and the grammar bounding each shape of it.
 
@@ -42,12 +44,15 @@ from dataclasses import dataclass
 from typing import cast
 
 from vinga_server.events.catalog import (
+    BuiltinSentenceWithheld,
     BuiltinToolCall,
     LlmRetry,
     LlmRound,
+    McpSentenceWithheld,
     McpToolCall,
     ProviderFailed,
     ToolArgumentsCoerced,
+    UnnamedSentenceWithheld,
     UnnamedToolCall,
     Variant,
 )
@@ -74,13 +79,16 @@ from vinga_server.events.values import (
 )
 
 __all__ = [
+    "builtin_sentence_withheld",
     "builtin_tool_called",
     "llm_retried",
     "llm_rounded",
+    "mcp_sentence_withheld",
     "mcp_tool_called",
     "provider_failure",
     "tool_arguments_coerced",
     "tool_fragment",
+    "unnamed_sentence_withheld",
     "unnamed_tool_called",
 ]
 
@@ -249,6 +257,52 @@ def unnamed_tool_called(
         named=Nothing(""),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),
+    )
+
+
+def builtin_sentence_withheld(
+    agent: str, conversation: str, tool: str, characters: int
+) -> Variant:
+    """The `sentence_withheld` shape for a builtin: the one branch that
+    names its tool, because a builtin's name is this server's own
+    word."""
+    return BuiltinSentenceWithheld(
+        agent=Identifier(agent),
+        conversation=ConversationId(conversation),
+        tool=Identifier(tool),
+        named=QuotedToolName.of(tool),
+        characters=Count(characters),
+    )
+
+
+def mcp_sentence_withheld(
+    agent: str, conversation: str, entry: str, characters: int
+) -> Variant:
+    """The `sentence_withheld` shape for a server tool, which names the
+    entry an operator wrote in their YAML and never the far side's own
+    tool name."""
+    return McpSentenceWithheld(
+        agent=Identifier(agent),
+        conversation=ConversationId(conversation),
+        entry=Identifier(entry),
+        named=FromEntry.of(entry),
+        characters=Count(characters),
+    )
+
+
+def unnamed_sentence_withheld(
+    agent: str, conversation: str, source: str, characters: int
+) -> Variant:
+    """The `sentence_withheld` shape that names nothing: a board's own
+    vocabulary, and the sentence whose arguments fit more than one
+    offered tool, which is `unknown` because which tool it was is what
+    could not be decided."""
+    return UnnamedSentenceWithheld(
+        agent=Identifier(agent),
+        conversation=ConversationId(conversation),
+        source=_namespace(source),
+        named=Nothing(""),
+        characters=Count(characters),
     )
 
 

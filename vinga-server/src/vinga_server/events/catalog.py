@@ -1678,6 +1678,118 @@ class ToolArgumentsCoerced(Variant):
     )
 
 
+# The three shapes of the withholding record, which are `tool_call`'s
+# three and for the same reason: the sentence names the tool it is
+# about, and which names this surface may print is decided by the
+# namespace a name came from. A variant per shape makes that structural
+# rather than a runtime choice, since a field admits one concrete type.
+
+
+@dataclass(frozen=True)
+class BuiltinSentenceWithheld(Variant):
+    """A sentence shaped like a call to a builtin was dropped instead of
+    spoken. The one branch that names its tool, because a builtin's name
+    is this server's own word."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: a sentence shaped like a call to a %s tool%s was not "
+        "spoken (%d characters)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "source", "named", "characters")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    source: ToolSource = value(fixed=ToolSource.BUILTIN)
+    tool: Identifier = value(note="The only tool names this server authors.")
+    named: QuotedToolName = value(carried=False)
+    characters: Count = value(
+        note=(
+            "How long the sentence was and never a byte of it. What was "
+            "withheld is the model's own text about a tool it was "
+            "offered, which is exactly the content this surface may not "
+            "carry; the length is what tells a leaked call from a "
+            "paragraph that happened to hold one."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class McpSentenceWithheld(Variant):
+    """A sentence shaped like a call to a server tool, named by the
+    entry an operator configured and never by the far side's name."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: a sentence shaped like a call to a %s tool%s was not "
+        "spoken (%d characters)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "source", "named", "characters")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    source: ToolSource = value(fixed=ToolSource.MCP)
+    entry: Identifier = value(
+        note="The configured entry, never the far side's tool name."
+    )
+    named: FromEntry = value(carried=False)
+    characters: Count = value(
+        note="How long the sentence was and never a byte of it."
+    )
+
+
+@dataclass(frozen=True)
+class UnnamedSentenceWithheld(Variant):
+    """A withholding this surface may not name a tool for."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: a sentence shaped like a call to a %s tool%s was not "
+        "spoken (%d characters)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "source", "named", "characters")
+    NOTE: ClassVar[str] = (
+        "A device tool's name is the board's vocabulary, so it is not "
+        "named. `unknown` is also what a sentence carrying only "
+        "arguments reports when they fit more than one offered tool: it "
+        "is withheld because every reading of it is tool-shaped, and it "
+        "names none of them because which one it was is exactly what "
+        "could not be decided."
+    )
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    source: UnnamedToolSource = value()
+    named: Nothing = value(carried=False)
+    characters: Count = value(
+        note="How long the sentence was and never a byte of it."
+    )
+
+
 # --- runtime/turntaking.py: who is talking ---------------------------
 
 
@@ -1862,6 +1974,45 @@ class ReplyFailedFallback(Variant):
     )
 
 
+@dataclass(frozen=True)
+class NothingSayableFallback(Variant):
+    """A reply that did not fail and said nothing anyway: every sentence
+    of it was withheld as a leaked tool call, so the same phrase covers
+    the same silence.
+
+    Its own sentence rather than the failed reply's, because what an
+    operator does about it is different: nothing here is broken, and the
+    remedy is the model this deployment is running. The
+    `sentence_withheld` records beside it on the same session say how
+    many sentences went and which tools they were shaped like.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: the reply had nothing sayable left in it, so this "
+        "agent's fallback phrase went out"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    reason: FallbackReason = value(fixed=FallbackReason.NOTHING_SAYABLE)
+    audio: Flag = value(
+        note=(
+            "Whether the phrase was heard as well as shown, exactly as "
+            "its sibling reports it."
+        )
+    )
+
+
 SESSION_REJECTED = declare(
     "session_rejected",
     note=(
@@ -1984,6 +2135,18 @@ TOOL_ARGUMENTS_COERCED = declare(
     variants=(ToolArgumentsCoerced,),
 )
 
+SENTENCE_WITHHELD = declare(
+    "sentence_withheld",
+    note=(
+        "A sentence of a reply was shaped like a call to a tool this "
+        "session offered, so it was dropped instead of spoken. How long "
+        "it was and which tool it was shaped like, under the naming "
+        "policy `tool_call` follows; never a byte of the sentence "
+        "itself."
+    ),
+    variants=(BuiltinSentenceWithheld, McpSentenceWithheld, UnnamedSentenceWithheld),
+)
+
 BARGE_IN = declare("barge_in", note="Speech cuts a reply short.", variants=(BargeIn,))
 
 BARGE_IN_SUPPRESSED = declare(
@@ -2021,7 +2184,7 @@ REPLY_FALLBACK = declare(
         "the record; what is, is which of the reasons happened and "
         "whether the phrase was heard as well as shown."
     ),
-    variants=(ReplyFailedFallback,),
+    variants=(ReplyFailedFallback, NothingSayableFallback),
 )
 
 
@@ -3441,6 +3604,7 @@ __all__ = [
     "BargeInUnderFloor",
     "BargeInWithoutTranscript",
     "BindingsUnreadable",
+    "BuiltinSentenceWithheld",
     "BuiltinToolCall",
     "CAPTURE_CHANNEL",
     "CAPTURE_DECLINED",
@@ -3522,6 +3686,7 @@ __all__ = [
     "McpDropped",
     "McpReloadApplied",
     "McpReloadRefused",
+    "McpSentenceWithheld",
     "McpStopped",
     "McpToolCall",
     "McpToolShadowed",
@@ -3529,6 +3694,7 @@ __all__ = [
     "MemoryUnreadable",
     "MemoryUnwritable",
     "MilestoneRecorded",
+    "NothingSayableFallback",
     "ONBOARDING_BANNER",
     "ONBOARDING_CHANNEL",
     "ONBOARDING_KEY_MISMATCH",
@@ -3555,12 +3721,15 @@ __all__ = [
     "PruneFailed",
     "REGISTRY_CHANNEL",
     "REPLIED",
+    "REPLY_FALLBACK",
     "RejectedAgentNotLoaded",
     "RejectedAtCapacity",
     "RejectedBadDeviceId",
     "RejectedNoAgent",
     "RejectedWhileDraining",
     "Replied",
+    "ReplyFailedFallback",
+    "SENTENCE_WITHHELD",
     "SERVER_CHANNELS",
     "SESSION_CHANNEL",
     "SESSION_CLOSED",
@@ -3577,6 +3746,7 @@ __all__ = [
     "TOOL_ARGUMENTS_COERCED",
     "TOOL_CALL",
     "ToolArgumentsCoerced",
+    "UnnamedSentenceWithheld",
     "UnnamedToolCall",
     "Variant",
     "WS_CHANNEL",
