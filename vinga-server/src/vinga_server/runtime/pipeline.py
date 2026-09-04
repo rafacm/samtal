@@ -40,7 +40,7 @@ import contextlib
 import functools
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from vinga_server.audio.resample import Resampler
@@ -107,6 +107,7 @@ from vinga_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
 from vinga_server.runtime.turntaking import TurnTaking
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
+from vinga_server.tools.arguments import with_lossless_coercions
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.source import (
     BuiltinTools,
@@ -270,6 +271,23 @@ def _reported(usage: Usage | None) -> tuple[int | None, int | None]:
     return (
         usage.prompt_tokens if usage is not None else None,
         usage.completion_tokens if usage is not None else None,
+    )
+
+
+def _coercions(sent: Mapping[str, Any], executing: Mapping[str, Any]) -> int:
+    """How many of a call's arguments the coercion changed.
+
+    By type as well as by value, and that is the whole reason this is a
+    function rather than a `!=` on the two dicts: `100 == 100.0` and
+    `True == 1` in Python, so a comparison of values alone would report
+    a float rewritten as the integer the schema declared as no change at
+    all, and both the copy and the event beside it exist to say the
+    change happened.
+    """
+    return sum(
+        1
+        for name, held in executing.items()
+        if type(held) is not type(sent[name]) or held != sent[name]
     )
 
 
@@ -1534,6 +1552,11 @@ class PipelineRuntime:
         providers = self._providers
         self._remembering = self._resolved_memory()
         tools = self._tool_snapshot()
+        # The declared shapes, taken off the same snapshot the model is
+        # offered, because this is the only place they exist at reply
+        # time and the dispatch below cannot see them. Read by published
+        # name, which is the name a call carries.
+        schemas = {tool.name: tool.input_schema for tool in tools}
         working = list(self._turns)
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
         self._output.restart_pacing()
@@ -1621,7 +1644,15 @@ class PipelineRuntime:
             # Whatever preamble was spoken before the calls is part of
             # the assistant turn that asked for them.
             working.append(Turn("assistant", " ".join(leg), tool_calls=tuple(calls)))
-            results, switch_to = await self._run_tools(calls, slots, switches_left)
+            # Here and nowhere else: the reservation has filed the
+            # originals and the line above has put them in the history
+            # this reply is written against, and `_run_tools` has not yet
+            # branched into the move tools, which never reach a dispatch.
+            # So this is the one point every execution path shares, and
+            # the one point where the record's values and the far side's
+            # can part company.
+            executing = [self._for_execution(call, schemas) for call in calls]
+            results, switch_to = await self._run_tools(executing, slots, switches_left)
             if switch_to is not None:
                 break
             working.append(Turn("tool", "", tool_results=tuple(results)))
@@ -1650,6 +1681,31 @@ class PipelineRuntime:
         for source in self._sources:
             tools.extend(source.snapshot(self._agent))
         return tools
+
+    def _for_execution(
+        self, call: ToolCall, schemas: Mapping[str, dict[str, Any]]
+    ) -> ToolCall:
+        """One call as the far side receives it: the model's own, with
+        every argument whose string form converts losslessly to the type
+        the tool declared converted (`tools/arguments.py`).
+
+        A copy, and an execution-only one. The reservation, the
+        conversation record, the API's body and the working history keep
+        the values the model sent, because "what the model passed" is
+        what those surfaces promise and a string where the schema says
+        integer is the fact an operator diagnosing a marginal model
+        needs to see. What the device, the MCP server or the builtin is
+        handed is what its own schema declared, since the far side is
+        entitled to refuse anything else.
+
+        The original object where nothing converted, so a reply that
+        needed none of this allocates none of it, and `is` still holds
+        across the boundary for everything the model got right.
+        """
+        arguments = with_lossless_coercions(call.arguments, schemas.get(call.name, {}))
+        if not _coercions(call.arguments, arguments):
+            return call
+        return replace(call, arguments=arguments)
 
     async def _run_tools(
         self, calls: Sequence[ToolCall], slots: Sequence[int], switches_left: int
@@ -2131,18 +2187,30 @@ class PipelineRuntime:
         `slot` is where this call was reserved on the turn's record, and
         it is filled in below only once there is something to say about
         it. A cancellation on the way through leaves it as reserved,
-        which is what a call the user talked over looks like."""
+        which is what a call the user talked over looks like.
+
+        `call` is the execution copy `_tool_loop` derived, so its
+        arguments are the ones the far side is owed and the reserved
+        claim's are the ones the model sent. The dispatch is routed by
+        the claim and given the copy's arguments, which is the whole of
+        the split: the record and the events keep the originals, and
+        nothing but the source that runs the call sees the conversions.
+        A malformed call carries none either way."""
         # The classification the reservation already holds, read back
         # rather than taken again: the `tool_call` event below says
         # where the name came from, the row at this slot says the same,
         # and asking twice could answer twice (an MCP reload between the
         # reservation and now is enough to move a name's owner).
         classified = self._turn.reserved(slot)
+        dispatched = replace(
+            classified,
+            arguments=None if classified.malformed else dict(call.arguments),
+        )
         loop = asyncio.get_running_loop()
         started = loop.time()
         try:
             async with asyncio.timeout(self._timeout_for(classified)):
-                content, is_error = await self._dispatch(call, classified)
+                content, is_error = await self._dispatch(call, dispatched)
         except TimeoutError:
             content, is_error = f'the tool "{call.name}" did not answer in time', True
         except asyncio.CancelledError:

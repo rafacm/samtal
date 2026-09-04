@@ -28,11 +28,14 @@ from tests.support.configs import (
     base_config,
     registry_config,
 )
+from tests.support.device_tools import VOLUME, FakeDevice
 from tests.support.events import events
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
+from tests.support.records import only_record, recording_session
 from tests.support.sessions import (
     call,
+    drive_reply,
     events_of,
     history,
     run_reply,
@@ -1119,3 +1122,154 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
     # test that proves the bound fired, not which entry it came from.
     reserved = session.runtime._classified(call("home__inside__secret_word"), 0)
     assert session.runtime._timeout_for(reserved) == 7.5
+
+
+# The arguments the far side is handed
+#
+# A small local model routinely sends an argument under the wrong JSON
+# type, and the far side is entitled to refuse it (#383). One conversion
+# happens on the way out, at the dispatch, for every source alike; the
+# record, the API and the history keep what the model sent. What follows
+# pins both halves of that split where each is actually read, and pins
+# the line the conversion stops at.
+
+
+# One frame of silence, which the mock ASR answers with the configured
+# transcript. The two cases below drive a whole reply, because what a
+# turn recorded is decided when the reply ends.
+UTTERANCE = b"\x00\x00" * 320
+
+
+def a_board_with_volume() -> FakeDevice:
+    """A device listing the one tool whose schema declares an integer."""
+    return FakeDevice([{"tools": [VOLUME]}])
+
+
+async def test_a_quoted_integer_reaches_the_board_as_an_integer() -> None:
+    """The split, at all three of the surfaces that read it.
+
+    The wire is the point of the exercise: the firmware validates its
+    own tools, so `"40"` is a call that fails and `40` is a call that
+    works. The record and the next round are the other half, and they
+    are the half a coercion applied one step earlier would have taken
+    with it: what the model passed is what an operator diagnosing a
+    marginal model reads, and it is what #383 itself was diagnosed
+    from.
+    """
+    device = a_board_with_volume()
+    await device.client.discover()
+    script = ScriptedLlm(
+        [[call("self_audio_speaker_set_volume", volume="40")], "Turned it up."]
+    )
+    session, spy, _ = recording_session(scripts={"poet": script})
+    # White-box: a board's tools arrive from a discovery run the edge
+    # starts over the wire after the hello, and this session has no
+    # socket to run one on. The published tool and its schema are what
+    # the case is about, so they have to be there at all.
+    session._device_tools = device.client
+
+    await drive_reply(session, UTTERANCE)
+
+    # The wire, which is the device's own JSON-RPC frame.
+    (sent,) = [one for one in device.sent if one.get("method") == "tools/call"]
+    assert sent["params"]["arguments"] == {"volume": 40}
+    assert isinstance(sent["params"]["arguments"]["volume"], int)
+    # The durable record, read off the completed turn rather than off
+    # the accumulator that was still being filled while the reply ran.
+    (invocation,) = only_record(spy).tools
+    assert invocation.arguments == {"volume": "40"}
+    assert isinstance(invocation.arguments["volume"], str)
+    # And the history the next round was written against, which is the
+    # surface the model itself reads back.
+    asked = [
+        one
+        for turns, _, _ in script.seen
+        for turn in turns
+        for one in turn.tool_calls
+    ]
+    assert [one.arguments for one in asked] == [{"volume": "40"}]
+
+
+async def test_a_value_no_conversion_can_help_reaches_the_board_unchanged() -> None:
+    """The other side of the line, with a far side that refuses.
+
+    The fake device answers success for anything it was not scripted
+    for, so a permissive board would let a guessed conversion pass
+    unnoticed. This one answers the way the firmware answers a value it
+    cannot use, which is what makes "left exactly as it arrived"
+    different from "converted into something that worked".
+    """
+    device = a_board_with_volume()
+    device.call_results["self.audio_speaker.set_volume"] = {
+        "content": [{"type": "text", "text": "volume must be an integer"}],
+        "isError": True,
+    }
+    await device.client.discover()
+    script = ScriptedLlm(
+        [
+            [call("self_audio_speaker_set_volume", volume="a lot")],
+            "I could not set the volume.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    # White-box, for the reason the case above gives.
+    session._device_tools = device.client
+
+    assert await run_reply(session, "turn it up") == ["I could not set the volume."]
+
+    (sent,) = [one for one in device.sent if one.get("method") == "tools/call"]
+    assert sent["params"]["arguments"] == {"volume": "a lot"}
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert result.content == "volume must be an integer"
+
+
+@pytest.mark.parametrize(
+    ("sent", "erased"),
+    [
+        ("true", True),
+        ("false", False),
+        ("True", False),
+        ("1", False),
+    ],
+)
+async def test_only_the_quoted_json_true_forgets_a_fact_for_good(
+    sent: str, erased: bool
+) -> None:
+    """The one upgrade-visible consequence of the boolean coercion, and
+    the reason it is pinned through the whole pipeline rather than at
+    the store.
+
+    `forget` erases permanently only when `permanently is True`, so
+    before this change the string `"true"` chose the recoverable
+    removal. It now erases, because `forget` declares the argument
+    `boolean` and the model said true, quoted. Everything else still
+    takes the recoverable path, which is the direction a misread
+    argument must fail in: a held fact costs a row and an erased one
+    costs the fact.
+    """
+    store = lane_memory()
+    fact_id = await store.add(
+        MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+    )
+    script = ScriptedLlm(
+        [
+            [call("forget", id=fact_id, permanently=sent)],
+            "Forgotten.",
+            [call("restore_memory")],
+            "There you go.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    await run_reply(session, "forget that I am vegetarian")
+    assert facts(store) == ""
+    await run_reply(session, "no, put that back")
+
+    _, restored = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert restored.is_error is erased
+    assert facts(store) == ("" if erased else "- the user is vegetarian")
