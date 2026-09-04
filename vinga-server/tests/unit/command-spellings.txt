@@ -1260,10 +1260,10 @@ vinga-server/src/vinga_server/config/models.py:1872  respell  vinga mcp-server s
 vinga-server/src/vinga_server/config/models.py:2495  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
-vinga-server/src/vinga_server/config/responses.py:945  respell  vinga ota-url
-vinga-server/src/vinga_server/config/responses.py:1325  respell  vinga session list
-vinga-server/src/vinga_server/config/responses.py:1326  respell  vinga session show
-vinga-server/src/vinga_server/config/responses.py:1555  respell  vinga conversation show
+vinga-server/src/vinga_server/config/responses.py:949  respell  vinga ota-url
+vinga-server/src/vinga_server/config/responses.py:1329  respell  vinga session list
+vinga-server/src/vinga_server/config/responses.py:1330  respell  vinga session show
+vinga-server/src/vinga_server/config/responses.py:1559  respell  vinga conversation show
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
 vinga-server/src/vinga_server/config/store.py:218  respell  vinga simulator check-in
 vinga-server/src/vinga_server/config/store.py:230  respell  vinga-server config device show
