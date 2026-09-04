@@ -73,6 +73,8 @@ from .poll import ACTIVATION_VERSION_HEADER, _version_two, activate  # noqa: E40
 from .reply import (  # noqa: E402
     DEVICE_ID_PROBLEM,
     UNKNOWN_VERSION,
+    Access,
+    Admission,
     _activation,
     _bad_request,
     _json_object,
@@ -101,6 +103,8 @@ __all__ = [
     "DEVICE_ID_PROBLEM",
     "OTA_PATH",
     "UNKNOWN_VERSION",
+    "Access",
+    "Admission",
     "_activation",
     "_bad_request",
     "_json_object",
