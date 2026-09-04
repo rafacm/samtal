@@ -385,3 +385,31 @@ From `vinga-server/`:
 `docs/reference/events.md` was regenerated through
 `uv run vinga-server events reference`, and the command-spellings
 manifest through `uv run python -m tests.unit.test_command_spellings`.
+
+### Addendum, 2026-09-04: rebased onto the merged M1
+
+M1 merged after a review round that moved three things M2 sits on, so
+this branch was rebased onto it and reconciled in the round's favour.
+Three notes, none of which changes the section's story above.
+
+- `speak_fallback` now tracks what actually went out and writes its
+  record in a `finally` from that, emitting nothing where nothing was
+  delivered. The reason argument rides that shape unchanged: the
+  variant is selected from it and `audio` is the delivered-audio
+  boolean, so a `nothing_sayable` record says whether the user heard
+  the phrase or only saw it, exactly as its sibling does.
+- The settle before the notice, which the failure arm has and the
+  empty-reply check did not, was added here. It was already owed for
+  the arm's own two reasons and this site has a third: a reply that
+  spoke nothing never sent a batch, so the tail wait inside
+  `_send_reply_audio` was never reached and this is the first thing in
+  the turn that waits for the mask at all. It also puts this site under
+  the round's finding 1, since the wait now re-raises a cancellation of
+  the reply rather than swallowing it.
+  `test_the_mask_is_waited_out_before_the_phrase` pins the order.
+- The notice is said with nothing active here without arranging
+  anything, which is the round's finding 2 seen from a quiet site: this
+  is a statement in the ordinary flow of a reply rather than a
+  statement inside an `except`, so a cancellation landing in it leaves
+  with an empty chain behind it. The docstring says so where a reader
+  of the failure arm's nested block would look for it.
