@@ -1022,6 +1022,62 @@ async def failed_reply_saying(fallbacks: dict[str, Any]) -> None:
     await drive_reply(session, UTTERANCE)
 
 
+# The three shapes of a leaked call, one per `sentence_withheld`
+# variant. The first ends in a newline so it leaves the splitter through
+# `push`; the second and third are unterminated tails and leave it
+# through `flush`, which is the pair of sentence sites the guard is
+# reached from.
+LEAKED_BUILTIN_CALL = '{"name": "remember", "arguments": {"text": "I like tea"}}\n'
+LEAKED_MCP_CALL = '{"name": "tools__secret_word", "arguments": {}}'
+# No name at all, and a key that fits both `remember` and
+# `update_memory`, so it is withheld naming neither.
+LEAKED_ARGUMENTS = '{"text": "I like tea"}'
+
+
+async def drive_sentence_withheld(_: Path) -> None:
+    """Three replies, each one sentence the guard refuses to speak, one
+    per shape the record takes.
+
+    A builtin names itself, an MCP call names the entry an operator
+    configured, and the third names nothing: its object carries
+    arguments and no name, and its one key fits two of the offered
+    memory tools, so which tool it was is exactly what could not be
+    decided.
+    """
+    builtin_call = ScriptedLlm([LEAKED_BUILTIN_CALL])
+    await run_reply(
+        session_for(base_config(), POET_MAC, {"poet": builtin_call}), "remember that"
+    )
+    arguments_only = ScriptedLlm([LEAKED_ARGUMENTS])
+    await run_reply(
+        session_for(base_config(), POET_MAC, {"poet": arguments_only}), "remember that"
+    )
+
+    config = base_config(
+        mcp_servers={
+            "tools": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(STDIO_SERVER)],
+            }
+        },
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": ["tools"]},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        leaking = ScriptedLlm([LEAKED_MCP_CALL])
+        await run_reply(
+            session_for(base_config(), POET_MAC, {"poet": leaking}, mcp_servers=servers),
+            "ask the server",
+        )
+    finally:
+        await servers.stop_all()
+
+
 async def drive_reply_fallback(_: Path) -> None:
     """The phrase said and heard: a cached clip that resamples, encodes
     and sends, which is what makes the record's `audio` true."""
@@ -1051,6 +1107,28 @@ async def drive_reply_fallback_shown_only(_: Path) -> None:
             )
         }
     )
+
+
+async def drive_nothing_sayable(_: Path) -> None:
+    """The other reason the same phrase goes out, on the same emit site.
+
+    Nothing fails here. The whole reply is one leaked call to a tool the
+    session offered, the guard withholds it, and the end of the reply
+    finds a turn that spoke nothing and withheld something, which is the
+    silence the phrase exists to end. The world's own phrases are
+    cached, so the notice is heard as well as shown and the record says
+    so.
+    """
+    config = masked_config()
+    built = await build_agent_fillers(config, built_world(config).agents)
+    session = session_for(
+        config,
+        POET_MAC,
+        {"poet": ScriptedLlm([LEAKED_BUILTIN_CALL])},
+        fallbacks=dict(built.fallbacks),
+    )
+    session.websocket = cast(Any, RecordingSocket())
+    await drive_reply(session, UTTERANCE)
 
 
 EDGE = "vinga_server.device.session"
@@ -1125,6 +1203,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
     ),
     Driver((FILLER, "FillerRunner._fire", 3), drive_filler_played, "filler_played"),
     Driver(
+        (PIPELINE, "PipelineRuntime._report_withheld", 1),
+        drive_sentence_withheld,
+        "sentence_withheld",
+    ),
+    Driver(
         (FILLER, "FillerRunner.speak_fallback", 1),
         drive_reply_fallback,
         "reply_fallback",
@@ -1132,6 +1215,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
     Driver(
         (FILLER, "FillerRunner.speak_fallback", 2),
         drive_reply_fallback_shown_only,
+        "reply_fallback",
+    ),
+    Driver(
+        (FILLER, "FillerRunner.speak_fallback", 3),
+        drive_nothing_sayable,
         "reply_fallback",
     ),
 )
