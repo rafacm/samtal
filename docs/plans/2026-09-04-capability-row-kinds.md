@@ -160,7 +160,7 @@ form and says so.
 
 ## Milestones
 
-- [x] **[M1: the kind, declared and pinned](2026-09-04-capability-row-kinds-implementation.md#m1-the-kind-declared-and-pinned)** (PR TBD). `RowKind`, `MESSAGE`
+- [x] **[M1: the kind, declared and pinned](2026-09-04-capability-row-kinds-implementation.md#m1-the-kind-declared-and-pinned)** (PR [#392](https://github.com/rafacm/vinga/pull/392)). `RowKind`, `MESSAGE`
   and `PROSE` on `capabilities.py` with the field required on
   every row and the trap comment deleted; the two wording parses
   and two bite cases moved to the kind field; the freedom pin; the
