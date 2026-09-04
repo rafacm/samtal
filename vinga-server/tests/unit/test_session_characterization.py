@@ -35,9 +35,14 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.support.configs import BOTH_MAC, POET_MAC, POET_TONE, base_config, config_with_agent
 from tests.support.events import events, only
-from tests.support.providers import ScriptedLlm, StallingLlm, built_world
+from tests.support.providers import (
+    ScriptedLlm,
+    StallingLlm,
+    Unreachable,
+    built_world,
+)
 from tests.support.sessions import call, drive_reply, session_for, start_reply
-from tests.support.sockets import spoken
+from tests.support.sockets import OrderedSocket, spoken
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -117,6 +122,26 @@ def stuttering_config(delay_ms: float = FILLER_DELAY_MS) -> Config:
         devices={POET_MAC: ["poet"]},
         default_agent="poet",
     )
+
+
+class FailingAfterAPause(LlmProvider):
+    """A model that goes quiet for longer than the filler's delay and
+    then fails, which is what puts a failed reply in front of a clip
+    that is still sounding."""
+
+    def __init__(self, gap_s: float) -> None:
+        self._gap_s = gap_s
+
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        await asyncio.sleep(self._gap_s)
+        raise RuntimeError("the model gave up")
+        yield  # pragma: no cover - never reached, makes this a generator
 
 
 class PausingLlm(LlmProvider):
@@ -214,11 +239,13 @@ async def masked_session(
     probe: Any = None,
     log: list[Any] | None = None,
 ) -> Any:
-    """A session with its filler clips built the way boot builds them,
-    speaking to a socket that records what it hears."""
-    fillers = (await build_agent_fillers(config, built_world(config).agents)).clips
-    assert fillers, "the config under test is supposed to have filler clips"
-    session = session_for(config, mac, scripts, fillers=fillers)
+    """A session with its cached speech built the way boot builds it,
+    both kinds, speaking to a socket that records what it hears."""
+    built = await build_agent_fillers(config, built_world(config).agents)
+    assert built.clips, "the config under test is supposed to have filler clips"
+    session = session_for(
+        config, mac, scripts, fillers=built.clips, fallbacks=built.fallbacks
+    )
     session.websocket = cast(Any, ProbingSocket(probe, log))
     return session
 
@@ -528,3 +555,135 @@ async def test_a_filler_ends_quietly_when_the_send_path_raises(
     only(caplog, "filler_played")
     assert "filler playback failed" not in caplog.text
     assert "reply failed" not in caplog.text
+
+
+@pytest.mark.parametrize("speaking", [True, False])
+async def test_a_general_failure_speaks_or_stays_silent_as_configured(
+    caplog: pytest.LogCaptureFixture, speaking: bool
+) -> None:
+    """The two pins above are `DeviceGone` and must stay silent whatever
+    the configuration says, because a device that went away has nobody
+    left to tell. This is the other reading of the same moment: a bug in
+    this process, which is what the general arm is for, and which now
+    speaks unless the deployment asked it not to (#384).
+
+    Beside them rather than folded into them, so neither claim can be
+    read off the other's evidence.
+    """
+    config = base_config(
+        agents={
+            "poet": {
+                "prompt": "POET",
+                "tts": "tenor",
+                "fallback": {"enabled": speaking, "phrase": "Something went wrong."},
+            }
+        },
+        devices={POET_MAC: ["poet"]},
+        default_agent="poet",
+    )
+    fallbacks = (await build_agent_fillers(config, built_world(config).agents)).fallbacks
+    session = session_for(config, POET_MAC, fallbacks=fallbacks)
+    socket = OrderedSocket()
+    session.websocket = cast(Any, socket)
+
+    async def speak(synthesis: Any, resampler: Any, into: list[str]) -> None:
+        synthesis.cancel()
+        await synthesis.wait_cancelled()
+        raise RuntimeError("the encoder is wedged")
+
+    session.runtime._speak = speak  # type: ignore[method-assign]
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    assert socket.announced() == (["Something went wrong."] if speaking else [])
+    assert (socket.frames > 0) is speaking
+    # Either way the turn ends the way the firmware needs it to.
+    assert socket.closing_stop()
+
+
+async def test_a_failed_turn_has_the_control_message_order_the_firmware_expects(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The sibling of the successful turn's order pin above, for the
+    turn that used to send no sentence at all.
+
+    Same contract, one more message in it: the transcript, the speaking
+    state, the sentence the device is about to hear, its audio, and the
+    end. The frames are asserted in position rather than filtered away,
+    because "the phrase was announced and then played" is the whole
+    claim and a filtered list cannot tell it from the reverse.
+    """
+    config = base_config(
+        agents={
+            "poet": {
+                "prompt": "POET",
+                "tts": "tenor",
+                "fallback": {"enabled": True, "phrase": "Something went wrong."},
+            }
+        },
+        devices={POET_MAC: ["poet"]},
+        default_agent="poet",
+    )
+    fallbacks = (await build_agent_fillers(config, built_world(config).agents)).fallbacks
+    session = session_for(
+        config,
+        POET_MAC,
+        stages={"llm": cast(Any, Unreachable("llm", ConnectionRefusedError("no route")))},
+        fallbacks=fallbacks,
+    )
+    socket = OrderedSocket()
+    session.websocket = cast(Any, socket)
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    shape = socket.shape()
+    assert shape[0] == "stt"
+    assert shape[1] == "tts start"
+    assert shape[2] == "tts sentence_start"
+    assert shape[-1] == "tts stop"
+    assert set(shape[3:-1]) == {"frame"}
+
+
+async def test_a_filler_sounding_never_sends_the_fallbacks_packets(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The shared-encoder invariant, for the reply's other clip.
+
+    The failure phrase copies the fire path's batching recipe verbatim,
+    and the reason is the same one: the reply task feeds the same Opus
+    encoder between its own awaits. This drives the harder ordering,
+    where a clip is still sounding when the reply fails: the arm settles
+    the mask first, so the two clips never interleave in the encoder,
+    and each batch is complete before it is sent.
+    """
+    log: list[Any] = []
+    session = await masked_session(
+        stuttering_config(),
+        POET_MAC,
+        {"poet": FailingAfterAPause(FILLER_DELAY_MS / 1000 * 3)},
+        log=log,
+    )
+    # White-box for the reason the sibling above gives: the feed order
+    # into the one Opus encoder a session shares leaves no trace in the
+    # frames that come out of it.
+    session._pacer._encoder = cast(Any, RecordingEncoder(session._pacer._encoder, log))
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    only(caplog, "filler_played")
+    only(caplog, "reply_fallback")
+    kinds = [kind for kind, _ in log]
+    # Two batches, each of them clip, resampler tail and encoder flush
+    # with nothing sent in between, and the mask's is finished before the
+    # phrase's begins.
+    flushes = [index for index, kind in enumerate(kinds) if kind == "flush"]
+    assert len(flushes) == 2
+    for flush in flushes:
+        assert [kind for kind, _ in log[flush - 2 : flush + 1]] == [
+            "encode",
+            "encode",
+            "flush",
+        ]
+    assert "send" in kinds[flushes[0] : flushes[1]]

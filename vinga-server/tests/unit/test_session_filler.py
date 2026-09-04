@@ -15,7 +15,6 @@ filler is the soft early threshold, the watchdog the hard late one.
 """
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any, cast
@@ -34,7 +33,7 @@ from tests.support.sessions import (
     turn_taking,
     wait_for_reply,
 )
-from tests.support.sockets import RecordingSocket, spoken
+from tests.support.sockets import OrderedSocket, RecordingSocket, spoken
 from vinga_server.config import Config
 from vinga_server.filler import build_agent_fillers
 from vinga_server.providers.base import TtsProvider
@@ -57,35 +56,6 @@ def mask(session: Any) -> Any:
     or in the field, rather than here where it was made.
     """
     return session.runtime._filler
-
-
-class OrderedSocket:
-    """Enough websocket to see what went out and in which order: every
-    text message as it was sent, every frame as the marker `frame`.
-
-    `RecordingSocket` counts frames rather than placing them, and
-    `spoken` reads the text messages with the frames already discarded,
-    so neither can say that a sentence was announced before or after a
-    clip. Whether an announcement happened at all is the question below,
-    and where it happened is what makes the answer legible.
-    """
-
-    def __init__(self) -> None:
-        self.sent: list[str] = []
-
-    async def send_text(self, text: str) -> None:
-        self.sent.append(text)
-
-    async def send_bytes(self, data: bytes) -> None:
-        self.sent.append("frame")
-
-    def announced(self) -> list[str]:
-        """The sentences this device was told it is about to hear."""
-        return [
-            message["text"]
-            for message in (json.loads(one) for one in self.sent if one != "frame")
-            if message.get("type") == "tts" and message.get("state") == "sentence_start"
-        ]
 
 
 async def test_a_filler_announces_no_sentence(caplog: pytest.LogCaptureFixture) -> None:
@@ -114,9 +84,7 @@ async def test_a_filler_announces_no_sentence(caplog: pytest.LogCaptureFixture) 
         assert phrase not in socket.announced()
     # And it went out unannounced rather than announced late: the clip's
     # frames precede the reply's one announcement.
-    assert socket.sent.index("frame") < socket.sent.index(
-        next(one for one in socket.sent if one != "frame" and "sentence_start" in one)
-    )
+    assert socket.shape().index("frame") < socket.shape().index("tts sentence_start")
 
 
 async def test_a_slow_reply_is_masked_at_the_threshold(

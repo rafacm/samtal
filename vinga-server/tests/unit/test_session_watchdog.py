@@ -6,8 +6,13 @@ between sending the request and the first byte of the answer, so a 17 s
 stall held the session in replying, deaf to a user who politely waits,
 until a barge-in rescued it (#68). The watchdog bounds only that gap:
 one timeout cancels the request and retries the round once, a second
-gives the round up as a silent turn, and a generation that is already
-streaming is never touched, however long it runs.
+gives the round up, and a generation that is already streaming is never
+touched, however long it runs.
+
+What a given-up round costs the user is the last case in the file. It
+was a silent turn, which is what the middle cases still drive, on a
+world with no failure phrase cached; a served world has one, and the
+turn says so out loud instead (#384).
 
 These tests drive the reply directly against an LLM whose first-token
 delay is written down per call, with the timeout shrunk to test scale.
@@ -22,7 +27,7 @@ import pytest
 
 from tests.support.configs import POET_MAC, TIMEOUT_S, watchdog_config
 from tests.support.events import events, only
-from tests.support.providers import STALL_S, StallingLlm
+from tests.support.providers import STALL_S, StallingLlm, built_world
 from tests.support.sessions import (
     listening_in_realtime,
     run_reply,
@@ -30,7 +35,9 @@ from tests.support.sessions import (
     start_reply,
     wait_for_reply,
 )
-from tests.support.sockets import RecordingSocket
+from tests.support.sockets import OrderedSocket, RecordingSocket
+from vinga_server.config.models import FallbackConfig
+from vinga_server.filler import build_agent_fillers
 from vinga_server.providers import (
     LlmEvent,
     LlmProvider,
@@ -98,7 +105,9 @@ async def test_a_second_stall_gives_the_round_up_and_the_session_keeps_listening
     """Both attempts stall: the round is given up as the provider's
     failure, the reply still closes with its tts stop (which is what
     re-arms an auto-mode device), and a realtime session is still
-    listening. A silent turn, not a wedged session."""
+    listening. Not a wedged session, which is the claim here; whether
+    the turn is silent is the world's own, and the last case in this
+    file drives the world that speaks."""
     llm = StallingLlm(delays=[STALL_S])
     session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
     socket = RecordingSocket()
@@ -206,3 +215,40 @@ async def test_a_cancel_during_the_watchdog_window_still_lands(
     assert not session.runtime.replying()
     assert events(caplog, "llm_retry") == []
     assert events(caplog, "provider_failed") == []
+
+
+async def test_a_given_up_round_is_heard_rather_than_only_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The issue's own trigger, end to end (#384).
+
+    A cold local model that never answers is exactly the shape above:
+    both attempts stall, the round is given up as `FirstTokenTimeout`,
+    and until now the user's whole experience of it was a turn where
+    nothing happened. Diagnosing one took an hour and a container log.
+    The same turn now says so, from a phrase cached in the agent's own
+    voice, and the closing `tts stop` still goes out behind it.
+    """
+    config = watchdog_config()
+    fallbacks = (await build_agent_fillers(config, built_world(config).agents)).fallbacks
+    session = session_for(
+        config, POET_MAC, {"poet": cast(Any, StallingLlm([STALL_S]))}, fallbacks=fallbacks
+    )
+    socket = OrderedSocket()
+    session.websocket = cast(Any, socket)
+    listening_in_realtime(session)
+
+    with caplog.at_level("INFO"):
+        start_reply(session, b"\x00\x00" * 320)
+        await wait_for_reply(session)
+
+    assert only(caplog, "provider_failed").error == "FirstTokenTimeout"
+    said = only(caplog, "reply_fallback")
+    assert (said.reason, said.audio) == ("reply_failed", True)
+    assert socket.announced() == [FallbackConfig().phrase]
+    assert socket.frames > 0
+    # And the turn still ends the way the device needs it to, which is
+    # what makes this a spoken failure rather than a broken one.
+    assert socket.closing_stop()
+    assert not session.runtime.replying()
+    assert session.listening is True
