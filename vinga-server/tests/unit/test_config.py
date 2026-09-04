@@ -5,6 +5,7 @@ import pytest
 from tests.support.configs import load_config_from_data
 from vinga_server.config import Config, ConfigError, load_file_config
 from vinga_server.config.entities import PROGRAM, SERVER_PROGRAM
+from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND
 from vinga_server.config.models import DOMAIN_KEYS, NOT_A_MAC, normalize_mac
 from vinga_server.conversations.store import RETENTION_DAYS_DEFAULT
 
@@ -360,15 +361,29 @@ def test_non_numeric_port_override_reports_location(
         load_file_config()
 
 
-def test_missing_file_names_the_path(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="config file not found"):
-        load_file_config(tmp_path / "absent.yaml")
+def test_a_missing_file_names_the_flag_that_named_it(tmp_path: Path) -> None:
+    """The refusal names the door the path came through rather than the
+    path, because the door is what its reader goes and changes and the
+    path is a typed string."""
+    absent = tmp_path / "absent.yaml"
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(absent)
+
+    assert str(caught.value) == CONFIG_NOT_FOUND.format(source=CONFIG_FROM_FLAG)
 
 
 def test_yaml_syntax_error_reports_line(tmp_path: Path) -> None:
     path = write_config(tmp_path, "server:\n  port: 9000\n bad-indent: 1\n")
-    with pytest.raises(ConfigError, match=r"invalid YAML .* line 3"):
+
+    with pytest.raises(ConfigError) as caught:
         load_file_config(path)
+
+    refusal = str(caught.value)
+    assert "invalid YAML" in refusal
+    assert "line 3" in refusal
+    # The locator is the only thing the refusal takes from the file.
+    assert str(path) not in refusal
 
 
 def test_a_yaml_parse_failure_carries_no_parser_exception(tmp_path: Path) -> None:

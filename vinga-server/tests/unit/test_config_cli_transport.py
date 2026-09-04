@@ -38,7 +38,7 @@ from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
 from vinga_server.config.cli import outcomes
-from vinga_server.config.loader import ConfigError
+from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND, ConfigError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.responses import McpReloadResult
 from vinga_server.db import LOCK_TIMEOUT_MS
@@ -57,8 +57,14 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_a_config_file_that_is_not_there_is_an_error_not_a_default(
     run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("--config", str(tmp_path / "nowhere.yaml"), "list") == 1
-    assert "config file not found" in capsys.readouterr().err
+    missing = tmp_path / "nowhere.yaml"
+
+    assert run("--config", str(missing), "list") == 1
+
+    printed = capsys.readouterr().err
+    assert CONFIG_NOT_FOUND.format(source=CONFIG_FROM_FLAG) in printed
+    # The refusal names the flag, and never the path it was given.
+    assert str(missing) not in printed
 
 
 # Where the CLI sends a command, and what it will not send it over
