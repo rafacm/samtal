@@ -292,6 +292,12 @@ both-ways pin, which tells the two halves of the wire apart by those
 prefixes. The firmware row is worded around it with the reason beside
 it.
 
+2026-09-04: removed by
+[`2026-09-04-capability-row-kinds.md`](2026-09-04-capability-row-kinds.md)
+(#303). Every row now declares its own kind and the pins filter on it,
+so a prose row may open with either word; the firmware row keeps its
+wording and lost the comment.
+
 ### Verification
 
 From `vinga-server/` on the milestone head `c984a122`: `uv run ruff

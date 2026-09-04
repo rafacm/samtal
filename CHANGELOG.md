@@ -343,6 +343,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A capability row says which kind of row it is** (#303). The
+  simulator's capability table told a wire message row from a written
+  one by reading the row's first word, so a prose row that happened to
+  begin "reading " or "sending " was held to the protocol's message
+  inventory it has nothing to do with. One row was deliberately worded
+  around the trap with a comment saying so, which made the English of a
+  help line load bearing. Every row now declares its own kind, the
+  assertions filter on that field, and the wording constraint is gone,
+  with a case pinning that a prose row opening with a direction word
+  passes. Test harness and the table module only: no rendered byte
+  moves and `docs/reference/cli.md` is unchanged.
+
 - **The image door of the CLI documentation speaks compose, and the
   front page offers it.** The CLI reference's install-nothing door used
   a plain `docker exec` against a container named `vinga`, which is not
