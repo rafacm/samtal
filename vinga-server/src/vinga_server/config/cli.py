@@ -321,11 +321,6 @@ PROGRESS_PHASE = "waiting for the server"
 # milliseconds.
 PROGRESS_CADENCE_S = 1.0
 
-# How long the writer is waited for on the way out. It stops on an event
-# rather than on a clock, so this bounds a thread that somehow did not:
-# the erase must not be held up by the affordance it is erasing.
-PROGRESS_JOIN_S = 1.0
-
 # Said when the API answered something this client cannot read as an
 # answer. The body is deliberately not quoted: what a proxy, a gateway
 # or a captive portal returns is not this API's sanitized output, and
@@ -1487,6 +1482,65 @@ def _reached(args: Invocation) -> Reached:
     return Reached(address=_address(args, file_config), token=_token(file_config))
 
 
+class _ProgressLine:
+    """The one line a long wait draws, and the rule that keeps a redraw
+    from landing on top of the answer.
+
+    Two threads write it: the command's own, which draws it once and
+    erases it at the end, and the writer, which redraws it while the
+    request is in flight. Ordering them is not decoration, it is the
+    whole claim the affordance makes. A redraw that landed after the
+    erase would sit on top of whatever printed next, which for a failed
+    import is the one sentence the command has to say.
+
+    The lock is held across the write itself rather than around the
+    bookkeeping, which is what makes the ordering a guarantee: a redraw
+    already inside `write` finishes before the erase can start, so the
+    erase is always the last thing written. `finished` is the other
+    half: it is set under that same lock, and every redraw reads it
+    under the lock, so nothing lands afterwards however long the writer
+    was held up.
+
+    A timed wait was what this replaced and it cannot come back. A bound
+    on waiting for the writer is a window, and a window here is a redraw
+    printed over a refusal. There is no bounded wait anywhere below.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        # How wide the line last drawn was, so the erase covers what was
+        # written rather than a guessed width. Too narrow leaves digits
+        # on the screen; too wide writes spaces past the end of the
+        # line, which on a narrow terminal is a second line of them.
+        self.width = 0
+        self.finished = False
+
+    def draw(self, seconds: int) -> None:
+        """Draw the line where it already is, unless the wait is over.
+
+        A carriage return and no newline, so the terminal rewrites the
+        one line rather than scrolling: what an operator watches is a
+        number changing in place. No colour, no spinner and no emoji,
+        which the determinism practice rejects outright.
+        """
+        with self.lock:
+            if self.finished:
+                return
+            line = f"{PROGRESS_PHASE}: {seconds}s"
+            self.width = len(line)
+            _to_stderr(f"\r{line}")
+
+    def erase(self) -> None:
+        """Take the line back off the screen for good, leaving the
+        cursor where it started, so whatever prints next prints into an
+        empty line and no redraw can follow it."""
+        with self.lock:
+            if self.finished:
+                return
+            self.finished = True
+            _to_stderr(f"\r{' ' * self.width}\r")
+
+
 @contextlib.contextmanager
 def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
     """One line on stderr for as long as a long wait lasts, at a
@@ -1539,27 +1593,24 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
         return
     cadence = PROGRESS_CADENCE_S if cadence_s is None else cadence_s
     started = time.monotonic()
+    line = _ProgressLine()
+    line.draw(0)
     stop = threading.Event()
-    # How wide the line last drawn was, so the erase covers what was
-    # written rather than a guessed width. Too narrow leaves digits on
-    # the screen; too wide writes spaces past the end of the line, which
-    # on a narrow terminal is a second line of them.
-    drawn = [_narrate(0)]
 
-    def narrate_until_stopped() -> None:
+    def redraw_until_stopped() -> None:
         # `wait` returns True the moment the event is set, so the thread
         # leaves on the answer rather than on the next tick.
         while not stop.wait(cadence):
-            drawn[0] = _narrate(int(time.monotonic() - started))
+            line.draw(int(time.monotonic() - started))
 
     try:
-        writer = threading.Thread(target=narrate_until_stopped, daemon=True)
+        writer = threading.Thread(target=redraw_until_stopped, daemon=True)
         writer.start()
     except RuntimeError:
         # An interpreter that will not give out another thread, which is
         # the one thing here that can fail loudly. Everything else on
         # this path is a write, and a write that fails says nothing.
-        _erase(drawn[0])
+        line.erase()
         yield
         return
     try:
@@ -1569,9 +1620,14 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
         # screen behind: a sentence printed over half a progress line is
         # a sentence nobody can read, and the refusal is the one thing
         # this command still has to say.
+        #
+        # The writer is not waited for and does not need to be. `erase`
+        # takes the lock every redraw takes and holds it across its own
+        # write, so a redraw in flight lands before it and a redraw
+        # after it lands not at all. A join would add a bound, and a
+        # bound is the window this design exists to close.
         stop.set()
-        writer.join(PROGRESS_JOIN_S)
-        _erase(drawn[0])
+        line.erase()
 
 
 def _stderr_at_a_terminal() -> bool:
@@ -1590,25 +1646,6 @@ def _stderr_at_a_terminal() -> bool:
         return bool(stream.isatty())
     except (OSError, ValueError):
         return False
-
-
-def _narrate(seconds: int) -> int:
-    """Draw the line where it already is, and answer how wide it is.
-
-    A carriage return and no newline, so the terminal rewrites the one
-    line rather than scrolling: what an operator watches is a number
-    changing in place. No colour, no spinner and no emoji, which the
-    determinism practice rejects outright.
-    """
-    line = f"{PROGRESS_PHASE}: {seconds}s"
-    _to_stderr(f"\r{line}")
-    return len(line)
-
-
-def _erase(width: int) -> None:
-    """Take the line back off the screen, leaving the cursor where it
-    started, so whatever prints next prints into an empty line."""
-    _to_stderr(f"\r{' ' * width}\r")
 
 
 def _to_stderr(text: str) -> None:
