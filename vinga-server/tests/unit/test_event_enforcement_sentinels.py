@@ -195,10 +195,15 @@ def reported(
     caplog: pytest.LogCaptureFixture,
     channel: str,
     code: str = CONSTRUCTION_FAILED,
+    count: int = 1,
 ) -> None:
-    """The whole of what a refusal leaves behind: one record on the
-    emitter's own channel, at ERROR, carrying the fixed label and the
-    fixed code and nothing else at all.
+    """The whole of what a refusal leaves behind: one report per refused
+    emission on the emitter's own channel, at ERROR, each carrying the
+    fixed label and the fixed code and nothing else at all.
+
+    `count` is how many the driven path refuses, one everywhere but on
+    the path that synthesizes two kinds of speech through one voice: a
+    voice that refuses refuses both, and each refusal is reported.
 
     The channel is asserted rather than described. `logger` is a field
     of every retained record and the thing a collector routes on, so a
@@ -212,11 +217,11 @@ def reported(
     either would be a value on the retained surface.
     """
     said = [one for one in caplog.records if one.msg == REFUSAL_MESSAGE]
-    assert len(said) == 1, f"expected one report, got {len(said)}"
-    (report,) = said
-    assert report.name == channel
-    assert report.levelno == logging.ERROR
-    assert report.args == (UNBUILT_LABEL, code)
+    assert len(said) == count, f"expected {count} report(s), got {len(said)}"
+    for report in said:
+        assert report.name == channel
+        assert report.levelno == logging.ERROR
+        assert report.args == (UNBUILT_LABEL, code)
 
 
 def dispatched(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -773,7 +778,7 @@ def hostile() -> BaseException:
 
 
 def carries_nothing(
-    caplog: pytest.LogCaptureFixture, consumer: Tap, channel: str
+    caplog: pytest.LogCaptureFixture, consumer: Tap, channel: str, count: int = 1
 ) -> None:
     """One refused emission on a production path, held to the whole
     claim: the fixed report on the refusing subsystem's own channel, and
@@ -784,7 +789,7 @@ def carries_nothing(
     above: these paths emit lawful events of their own around the
     refused one, and what is under test is that the refused one added
     nothing to them."""
-    reported(caplog, channel)
+    reported(caplog, channel, count=count)
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in consumer.rendered()
 
@@ -795,7 +800,13 @@ async def test_a_filler_that_will_not_synthesize_refuses_carrying_nothing(
     """The first shape: an emit lexically inside the `except` arm, in a
     library the boot calls. `build_agent_fillers` catches around a whole
     synthesis, so what it holds is whatever a voice provider or its
-    transport raised."""
+    transport raised.
+
+    Twice over, which is the shape rather than an accident: one voice
+    speaks both kinds this build caches, so a voice that refuses is
+    caught in two arms and each reports. Both refusals have to carry
+    nothing, and a helper that looked at one of them would be reading
+    half the evidence."""
     from dataclasses import replace as replace_field
 
     from tests.support.configs import masked_config
@@ -815,7 +826,7 @@ async def test_a_filler_that_will_not_synthesize_refuses_carrying_nothing(
     with caplog.at_level("DEBUG"):
         await build_agent_fillers(config, providers)
 
-    carries_nothing(caplog, tap, FILLER_CHANNEL)
+    carries_nothing(caplog, tap, FILLER_CHANNEL, count=2)
 
 
 def test_a_failing_api_request_refuses_carrying_nothing(

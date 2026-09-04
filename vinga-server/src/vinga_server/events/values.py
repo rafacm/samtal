@@ -1033,6 +1033,18 @@ class FillerSkip(StrEnum):
     BARGE_IN_PENDING = "barge_in_pending"
 
 
+class FallbackReason(StrEnum):
+    """Why a turn said its agent's fixed phrase instead of an answer.
+
+    One member for now and a closed set on purpose: the phrase covers a
+    second case as well as this one (a reply with nothing sayable left
+    in it), and reading which of them happened is the whole reason the
+    record exists.
+    """
+
+    REPLY_FAILED = "reply_failed"
+
+
 class ToolSource(StrEnum):
     """Which namespace a tool call reached into."""
 

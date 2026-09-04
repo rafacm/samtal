@@ -26,7 +26,7 @@ import yaml
 from vinga_server.config import Config, compose_config, load_file_config
 from vinga_server.config.models import DOMAIN_KEYS
 from vinga_server.config.secrets import SecretStore
-from vinga_server.filler import FillerClips
+from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.generation import Generation, Generations
 from vinga_server.providers import ProviderWorld
 
@@ -345,6 +345,7 @@ def world(
     secrets: SecretStore | None = None,
     fillers: Mapping[str, FillerClips] | None = None,
     providers: ProviderWorld | None = None,
+    fallbacks: Mapping[str, FallbackClip] | None = None,
 ) -> Generations:
     """One server's generation holder, holding `config` as the world it
     serves.
@@ -356,11 +357,14 @@ def world(
     suite about anything other than reloading wants and what it used to
     have.
 
-    `secrets`, `fillers` and `providers` default to empty rather than
-    None for the reason the composition root's do: a deployment whose
-    credentials are all environment references has no stored secret, one
-    where no agent masks its latency has no clip, and one shape of
-    generation is easier to reason about than two. An empty set of
+    `secrets`, `fillers`, `providers` and `fallbacks` default to empty
+    rather than None for the reason the composition root's do: a
+    deployment whose credentials are all environment references has no
+    stored secret, one where no agent masks its latency has no clip, and
+    one shape of generation is easier to reason about than two. Empty
+    `fallbacks` is a world nothing was synthesized for, which is what a
+    suite that is not about failed replies wants and what every one of
+    them had before the phrase existed. An empty set of
     engines is the honest default here rather than a built one: a
     holder is what most suites want a configuration read out of, and
     building four providers per test to be read by nothing would be a
@@ -374,5 +378,6 @@ def world(
             secrets if secrets is not None else SecretStore(),
             fillers if fillers is not None else {},
             providers if providers is not None else ProviderWorld(),
+            fallbacks if fallbacks is not None else {},
         )
     )

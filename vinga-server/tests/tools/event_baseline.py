@@ -179,7 +179,7 @@ from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.bindings import BoundNames, DeviceBindings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events.catalog import CHANNELS
-from vinga_server.filler import build_agent_fillers
+from vinga_server.filler import FallbackClip, build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 from vinga_server.memory.store import NOTHING_PURGED, MemoryScope
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
@@ -1008,6 +1008,34 @@ async def drive_filler_played(_: Path) -> None:
     await drive_reply(session, UTTERANCE)
 
 
+async def drive_reply_fallback(_: Path) -> None:
+    """A reply that fails terminally on a world that cached a phrase for
+    it, so the failure arm says it.
+
+    One driver for two records. The phrase is cached at a sample rate
+    nothing can resample from, which is the bug class the runner's own
+    arm exists for: the typed record below is emitted before any of the
+    audio work, and the resample that follows it raises, which is the
+    untyped playback line the closed set in `test_event_baseline.py`
+    names. A device that had gone away would produce neither, since that
+    is swallowed by contract.
+    """
+    config = masked_config()
+    session = session_for(
+        config,
+        POET_MAC,
+        {"poet": ScriptedLlm(["One sentence."])},
+        fallbacks={
+            "poet": FallbackClip(
+                phrase="Something broke.", clip=b"\x00\x00" * 160, sample_rate=0
+            )
+        },
+        stages={"tts": cast(Any, Unreachable("tts", ConnectionRefusedError("no route")))},
+    )
+    session.websocket = cast(Any, RecordingSocket())
+    await drive_reply(session, UTTERANCE)
+
+
 EDGE = "vinga_server.device.session"
 PIPELINE = "vinga_server.runtime.pipeline"
 TURNTAKING = "vinga_server.runtime.turntaking"
@@ -1079,6 +1107,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
         "filler_skipped",
     ),
     Driver((FILLER, "FillerRunner._fire", 3), drive_filler_played, "filler_played"),
+    Driver(
+        (FILLER, "FillerRunner.speak_fallback", 1),
+        drive_reply_fallback,
+        "reply_fallback",
+    ),
 )
 
 
