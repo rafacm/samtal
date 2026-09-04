@@ -161,9 +161,13 @@ nothing else learns anything.
   logs in both formats, stdout and stderr.
 - **Display and round trip**: `max_tokens` renders unmasked in
   `entity_body` and the record path (`provider_record`), exports
-  as its value, and re-imports; the mask-under-a-non-secret-key
-  control in `test_config_round_trip.py` already covers the
-  literal-asterisks case and stays untouched.
+  as its value, and re-imports. The reshaped keep-marker behavior
+  gets its own direct pin: store a numeric `max_tokens`, resubmit
+  `max_tokens: "********"`, and assert the typed `/max_tokens`
+  refusal with the stored integer unchanged, a case that under the
+  old predicate would have read the mask as a keep marker and
+  succeeded; the generic mask-under-a-non-secret-key control stays
+  untouched beside it.
 - **The slot check**: `provider secret set` on `max_tokens`
   refuses with the not-a-slot sentence (a new pin, since the old
   acceptance was never pinned), and `api_key` keeps working as the
@@ -265,6 +269,11 @@ amendments.
    query parameters; plant sentinels and assert absence from
    exception chains, API bodies, logs, stdout and stderr in the
    `PLANTED_KEYS` style.
+
+   *Resolution*: accepted in full; the suite section is rebuilt to
+   enumerate every fragment, the probes and case variants, nested
+   keys, the three wider-rule containment surfaces including the
+   URL reader, and the sentinel-across-surfaces discipline.
 
 4. **P2: the unchanged-value marker behavior is not pinned.** The
    generic `note: MASK` control stays green even if `max_tokens`
