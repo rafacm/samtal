@@ -181,6 +181,18 @@ non-mapping `properties` and non-mapping property entries
 (`publish()` validates only the outer dict). The tests below
 prove it with a planted sentinel.
 
+**One upgrade-visible consequence, named: `forget` and the string
+`"true"`.** `forget` permanently erases only when `permanently is
+True`, and every other value chooses the recoverable removal;
+today the string `"true"` therefore removes recoverably, and after
+this change it erases permanently, because its schema declares
+`boolean` and the coercion is the issue's settled behavior (the
+model said true, quoted). That is a deliberate crossing of an
+irreversible-operation guard, so it is stated here, named in the
+CHANGELOG entry, and pinned by a through-pipeline test proving
+only exact `"true"` erases permanently while `"false"`, `"True"`
+and `"1"` behave exactly as before.
+
 ## Module layout
 
 - `tools/arguments.py` (new): `conformed(arguments, schema)`, pure,
@@ -215,6 +227,11 @@ prove it with a planted sentinel.
   digit-conversion limit, a non-mapping `properties`, and a
   non-mapping property entry, each answered with the value
   unchanged and no exception.
+- The permanence boundary, through the pipeline: `forget` with
+  `permanently` as the string `"true"` erases permanently, and
+  with `"false"`, `"True"` and `"1"` behaves exactly as today,
+  beside the existing safety pin's shape in
+  `test_memory_store.py`.
 - The no-leak sentinel, through the loop: a secret-shaped invalid
   numeric value against a `number` property runs a whole scripted
   reply, and the sentinel is asserted absent from the tool result
@@ -400,6 +417,11 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    through-pipeline test proving only exact `"true"` erases
    permanently while `"false"`, `"True"` and `"1"` stay
    recoverable.
+
+   *Resolution*: accepted in full. The consequence has its own
+   named section, the CHANGELOG entry carries it, and the
+   through-pipeline permanence test is in the milestone's test
+   list.
 
 9. **P3: `conformed` promises more than the function returns.**
    Its result is not necessarily schema-conformant; name it for
