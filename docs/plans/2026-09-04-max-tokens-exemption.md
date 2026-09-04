@@ -215,18 +215,23 @@ nothing else learns anything.
 
 ## Milestones
 
-- [ ] **M1: the exemption, its suite, and the fragment line.**
-  `_SECRET_KEY_EXEMPT_NAMES` inside `secret_option_fragment` with
-  the earning-a-place comment; the regression suite, display,
-  round-trip, slot, MCP-containment and taxonomy pins above; the
-  `openai_compatible` fragment's `# max_tokens: 1024` line (and
-  the `anthropic` decision recorded); a CHANGELOG entry naming
-  the field writable and the slot acceptance withdrawn; the
-  implementation-doc section. Design footprint: deepens the
-  heuristic at its one home; no new module, no second copy of the
-  rule anywhere. Documentation footprint: the example fragment(s)
-  and `CHANGELOG.md`; generated references expected byte-stable
-  and asserted so by their freshness pins.
+- [ ] **M1: the exemption, the migration, the suite, and the
+  fragment lines.** `_SECRET_KEY_EXEMPT_NAMES` inside
+  `secret_option_fragment`, exact and case-sensitive, with the
+  earning-a-place comment; the forward domain-chain migration
+  deleting exactly the provider `secrets.max_tokens` rows, with
+  the seeded-row verification (boot, reads, listings, export, a
+  sibling secret surviving) and the wheel lane exercising it; the
+  containment suite, keep-marker, builder-reach, display,
+  round-trip, slot and taxonomy pins above; both LLM fragments'
+  `# max_tokens: 1024` lines with the targeted anthropic
+  uncommenting-install case; a CHANGELOG entry naming the field
+  writable, the slot acceptance withdrawn and the legacy-row
+  removal; the implementation-doc section. Design footprint:
+  deepens the heuristic at its one home; no new module, no second
+  copy of the rule anywhere. Documentation footprint: the two
+  example fragments and `CHANGELOG.md`; generated references
+  expected byte-stable and asserted so by their freshness pins.
 
 ## Plan review round
 
