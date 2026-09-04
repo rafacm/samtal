@@ -383,10 +383,26 @@ Existing assets carry the shapes; nothing they pin is restated.
   reply-failures suite drives a fallback whose own send explodes
   and asserts the closing `tts stop` still goes out and exactly
   one reply-failed line is logged.
-- **Default-on changes shipped behavior.** Deployments upgrade
-  into a speaking failure arm. The CHANGELOG entry says so
-  plainly, the README documents the off switch, and the phrase is
-  fixed configuration, so nothing untrusted can reach it.
+- **Default-on changes shipped behavior, and it changes the boot.**
+  Deployments upgrade into a speaking failure arm; the CHANGELOG
+  entry says so plainly, the README documents the off switch, and
+  the phrase is fixed configuration, so nothing untrusted can
+  reach it. Default-on also means the first boot after the upgrade
+  synthesizes one clip per agent through the configured TTS
+  provider before the server begins serving, an operation that was
+  previously opt-in and that a pre-upgrade configuration cannot
+  stage an opt-out for (the old models forbid the unknown
+  section). Two mitigations, both in the plan rather than
+  discovered later: the fallback synthesis runs under its own
+  per-clip deadline (a module constant in `filler.py`), and a
+  synthesis that exceeds it degrades that agent to display-only
+  exactly like a failed one, so a hung provider delays the boot by
+  a bounded amount and stops nothing. The README and the CHANGELOG
+  state the one-time cost in provider calls, boot latency and, for
+  metered TTS, billing; a test drives a TTS stream that never
+  completes and asserts the boot finishes with the agent degraded.
+  The filler's own build keeps its current unbounded behavior
+  (opt-in, pre-existing), noted where the deadline is defined.
 - **Doc and census staleness.** events.md, domain-config.md,
   api-openapi.json and the example files all regenerate through
   generators; the root README edit can stale the command-spellings
@@ -400,14 +416,17 @@ Existing assets carry the shapes; nothing they pin is restated.
 ## Milestones
 
 - [ ] **M1: the failure arm gets a voice.** `FallbackConfig` and
-  `fallback_for_agent`; the build pass extended to cache the
-  fallback clip per agent with its own staleness key and the
-  never-fails-the-boot reporting; `FillerRunner.speak_fallback`;
-  the failure arm wired after `settle()`; the `reply_fallback`
-  event (`reply_failed` variant reachable, `nothing_sayable`
-  declared with it only if the catalog forbids a later variant
-  addition, otherwise deferred to M2); the tests above minus the
-  guard's; the README (filler section sibling prose, the
+  `fallback_for_agent`; the build pass extended per finding 8's
+  settled shape (`FallbackClip`, the `fallbacks` mapping, per-kind
+  outcomes, generation, reload response, OpenAPI, diff pair,
+  entities `NestedShape`), with the per-clip synthesis deadline
+  and display-only degradation; `FillerRunner.speak_fallback`
+  under finding 7's contract; the failure arm wired after
+  `settle()`; the `reply_fallback` and `fallback_degraded`
+  declarations and the named UNTYPED playback line
+  (`nothing_sayable` declared with `reply_fallback` only if the
+  catalog forbids a later variant addition, otherwise deferred to
+  M2); the tests above minus the guard's; the README (filler section sibling prose, the
   first-token-timeout sentence, the silent-turn sentence at
   2221-2232 amended, the event index), `examples/agent-defaults.yaml`
   and `examples/agent.yaml`, `docs/conversational-quality-regression-suite.md`'s
@@ -604,3 +623,10 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
     that never completes, and document the unavoidable
     first-upgrade synthesis with its latency and billing
     consequence.
+
+    *Resolution*: accepted in full. The risk section now defines
+    the bounded policy (a per-clip deadline for the fallback
+    synthesis, timeout degrading to display-only), the
+    never-completing-stream test, and the documented one-time
+    upgrade cost, and states plainly that a pre-upgrade opt-out
+    cannot exist because the old models forbid the section.
