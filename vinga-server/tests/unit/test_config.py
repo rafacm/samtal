@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -5,7 +6,15 @@ import pytest
 from tests.support.configs import load_config_from_data
 from vinga_server.config import Config, ConfigError, load_file_config
 from vinga_server.config.entities import PROGRAM, SERVER_PROGRAM
-from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND
+from vinga_server.config.loader import (
+    CONFIG_ENV_VAR,
+    CONFIG_FROM_ENV,
+    CONFIG_FROM_FLAG,
+    CONFIG_NOT_FOUND,
+    CONFIG_NOT_READABLE,
+    CONFIG_NOT_TEXT,
+    YAML_NOT_QUOTED,
+)
 from vinga_server.config.models import DOMAIN_KEYS, NOT_A_MAC, normalize_mac
 from vinga_server.conversations.store import RETENTION_DAYS_DEFAULT
 
@@ -401,6 +410,184 @@ def test_a_yaml_parse_failure_carries_no_parser_exception(tmp_path: Path) -> Non
     assert PARSER_SENTINEL not in str(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+# What a config file that will not read is refused with, one case per
+# arm of the loader's table.
+#
+# The path each case hands the loader is credential-shaped, because a
+# path is typed and a typed path is a place a credential lands: a
+# deployment that keeps its configuration beside its keys is one tab
+# completion away from naming one here. Planting it in the filename is
+# what makes "the refusal does not name the path" a leak check rather
+# than a wording check.
+
+
+def planted_path(tmp_path: Path) -> Path:
+    """A config path whose own filename is the sentinel."""
+    return tmp_path / f"{PARSER_SENTINEL}.yaml"
+
+
+def absent(tmp_path: Path) -> Path:
+    return planted_path(tmp_path)
+
+
+def a_directory(tmp_path: Path) -> Path:
+    path = planted_path(tmp_path)
+    path.mkdir()
+    return path
+
+
+def unreadable(tmp_path: Path) -> Path:
+    path = planted_path(tmp_path)
+    path.write_text("server:\n  port: 9000\n", encoding="utf-8")
+    path.chmod(0o000)
+    return path
+
+
+def not_text(tmp_path: Path) -> Path:
+    path = planted_path(tmp_path)
+    # Not UTF-8 in any position, so the read succeeds and the decoding
+    # is what fails: the exception that leaves holds the bytes, which is
+    # why this arm is caught at all.
+    path.write_bytes(b"\x80\x81")
+    return path
+
+
+UNREADABLE_FILES = [
+    pytest.param(absent, CONFIG_NOT_FOUND, id="missing"),
+    pytest.param(a_directory, CONFIG_NOT_READABLE, id="a-directory"),
+    pytest.param(
+        unreadable,
+        CONFIG_NOT_READABLE,
+        id="unreadable",
+        marks=pytest.mark.skipif(
+            hasattr(os, "geteuid") and os.geteuid() == 0,
+            reason="root reads a file whatever its mode says",
+        ),
+    ),
+    pytest.param(not_text, CONFIG_NOT_TEXT, id="not-text"),
+]
+
+# The operating system's own words for these three, which the library
+# hands over as `strerror` and which a refusal here does not pass on: a
+# message this code did not write is a message it cannot promise carries
+# no value, and each of these is written from the path it was given.
+OS_WORDINGS = ("No such file", "Permission denied", "Is a directory", "Not a directory")
+
+
+@pytest.mark.parametrize(("make", "sentence"), UNREADABLE_FILES)
+def test_a_file_that_will_not_read_is_refused_in_one_fixed_sentence(
+    tmp_path: Path, make, sentence: str
+) -> None:
+    """The whole refusal, and nothing of the file or the path behind it.
+
+    The chain is checked as well as the sentence: the exception the read
+    fails with holds `filename`, and the decoding failure holds the
+    bytes it could not decode, so a refusal raised inside the handler
+    would carry both for anything walking `__context__` to find.
+    """
+    path = make(tmp_path)
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(path)
+
+    refusal = str(caught.value)
+    assert refusal == sentence.format(source=CONFIG_FROM_FLAG)
+    assert str(path) not in refusal
+    assert PARSER_SENTINEL not in refusal
+    assert [wording for wording in OS_WORDINGS if wording in refusal] == []
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_a_file_that_will_not_parse_says_only_where_the_parser_stopped(
+    tmp_path: Path,
+) -> None:
+    """The locator is the one thing a refusal takes from the parser.
+
+    Its `problem` names the tag or the key it stopped on, which for a
+    file holding credentials is exactly what may not be repeated, so the
+    whole sentence is pinned rather than a fragment of it: what is left
+    is two integers and this project's own words.
+    """
+    path = planted_path(tmp_path)
+    path.write_text(
+        f'server:\n  log_level: "INFO\n  note: {PARSER_SENTINEL}\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(path)
+
+    refusal = str(caught.value)
+    assert refusal.startswith(f"invalid YAML in {CONFIG_FROM_FLAG} at line 4, column ")
+    assert refusal.endswith(f". {YAML_NOT_QUOTED}")
+    assert str(path) not in refusal
+    assert PARSER_SENTINEL not in refusal
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_a_top_level_that_is_not_a_mapping_is_refused_without_the_path(
+    tmp_path: Path,
+) -> None:
+    """The shape the file has is the loader's own vocabulary and stays;
+    the path goes, and so does everything the file holds."""
+    path = planted_path(tmp_path)
+    path.write_text(f"- {PARSER_SENTINEL}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(path)
+
+    refusal = str(caught.value)
+    assert refusal == (
+        f"invalid config in {CONFIG_FROM_FLAG}: top level must be a mapping of "
+        f"server, got list"
+    )
+    assert PARSER_SENTINEL not in refusal
+
+
+def test_a_moved_section_keeps_its_guidance_and_loses_the_path(tmp_path: Path) -> None:
+    """The refusal that sends an operator to the command that writes the
+    section now: what it says about the section is unchanged, and what
+    it said about the file is the door rather than the path."""
+    path = planted_path(tmp_path)
+    path.write_text(
+        f"server:\n  port: 9000\nagents:\n  assistant:\n    prompt: {PARSER_SENTINEL}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(path)
+
+    refusal = str(caught.value)
+    assert refusal.startswith(f"invalid config in {CONFIG_FROM_FLAG}:")
+    assert "agents: moved to the database" in refusal
+    assert str(path) not in refusal
+    assert PARSER_SENTINEL not in refusal
+
+
+def test_the_refusal_names_the_door_the_path_came_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One file, two doors, two sentences.
+
+    The path is not repeated, so the door is the whole of what a reader
+    is given to go and change, and naming the wrong one would send them
+    to edit a flag when what named the file was the environment.
+    """
+    path = planted_path(tmp_path)
+
+    with pytest.raises(ConfigError) as by_flag:
+        load_file_config(path)
+    assert str(by_flag.value) == CONFIG_NOT_FOUND.format(source=CONFIG_FROM_FLAG)
+    assert CONFIG_ENV_VAR not in str(by_flag.value)
+
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(path))
+    with pytest.raises(ConfigError) as by_variable:
+        load_file_config()
+    assert str(by_variable.value) == CONFIG_NOT_FOUND.format(source=CONFIG_FROM_ENV)
+    assert "--config" not in str(by_variable.value)
 
 
 def test_a_malformed_structured_override_carries_no_parser_exception(

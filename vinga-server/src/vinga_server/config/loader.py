@@ -497,7 +497,7 @@ CONFIG_NOT_READABLE = (
 CONFIG_NOT_TEXT = (
     "{source} is not UTF-8 text, so there is no YAML in it to read. Nothing it holds "
     "is quoted back, and nothing of it is decoded far enough to be: a file that fails "
-    "to decode is as likely to be a key or an archive as a mistyped path"
+    "to decode is as likely to be a key or an archive as a config file named by mistake"
 )
 
 CONFIG_UNREADABLE = (
