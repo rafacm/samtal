@@ -84,6 +84,7 @@ from tests.support.deployment import (
 from vinga_server.build_info import revision
 from vinga_server.config import ConfigError, cli, docgen, entities
 from vinga_server.config.cli import installed_version
+from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND
 from vinga_server.config.models import (
     API_MOUNT_PATH,
     DOMAIN_KEYS,
@@ -1886,7 +1887,12 @@ UNRESOLVED = "the change was refused; it would leave these references unresolved
 
 REFUSED_DOCUMENT = "REFUSED_DOCUMENT"
 
-MISSING_CONFIG = "/nowhere/at/all.yaml"
+# A path with nothing at it, carrying the planted credential. A config
+# path is typed, which makes it the last place a refusal may repeat, so
+# the row below is a leak case as much as a wording case: the whole
+# stderr is pinned to the fixed sentence, and the sentinel sweep every
+# row runs then says the path reached no surface at all.
+MISSING_CONFIG = f"/nowhere/at/all/{PLANTED}.yaml"
 
 
 class Refusal(NamedTuple):
@@ -2042,7 +2048,7 @@ REFUSALS: tuple[Refusal, ...] = (
     Refusal(
         ("ota-url",),
         ("ota-url", "--config", MISSING_CONFIG),
-        f"config file not found: {MISSING_CONFIG}",
+        CONFIG_NOT_FOUND.format(source=CONFIG_FROM_FLAG),
         False,
     ),
     Refusal(("info",), ("info", "extra"), USAGE, False),

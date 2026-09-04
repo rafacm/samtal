@@ -375,17 +375,27 @@ def load_environment_file() -> None:
 
 
 def load_file_config(path: str | Path | None = None) -> FileConfig:
-    """The file half of the configuration: `server`."""
+    """The file half of the configuration: `server`.
+
+    The two doors a path arrives through are told apart here, because
+    here is the only place that can: an argument is the `--config` flag
+    every caller of this function feeds it, and the fallback is the
+    environment variable. What comes of that is one phrase naming the
+    door rather than the path, threaded through every refusal below
+    (#291).
+    """
     if path is None:
         env_path = os.environ.get(CONFIG_ENV_VAR)
         path = Path(env_path) if env_path else None
+        source = CONFIG_FROM_ENV if path is not None else NO_CONFIG_FILE
     else:
         path = Path(path)
+        source = CONFIG_FROM_FLAG
 
     _check_moved_environment()
     _check_database_environment()
     if path is not None:
-        _check_config_file(path)
+        _check_config_file(path, source)
 
     token = yaml_file_var.set(path)
     problem: str | None = None
@@ -399,7 +409,7 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         # being handled as its __context__ and would take that quote
         # with it. A key that names an environment variable is where
         # that matters: what lands in it wrongly is the secret itself.
-        problem = _format_validation_error(exc, _source(path))
+        problem = _format_validation_error(exc, source)
     except SettingsError as exc:
         # The same care, for the same reason. This is what a malformed
         # VINGA_ override of a structured key raises, and the parser
@@ -408,7 +418,7 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         # error's own text names the field and the source rather than
         # the value, so the message is unchanged; what goes is the
         # chain that carried the value behind it.
-        problem = f"invalid config in {_source(path)}: {exc}"
+        problem = f"invalid config in {source}: {exc}"
     finally:
         yaml_file_var.reset(token)
     raise ConfigError(problem)
@@ -434,53 +444,175 @@ def compose_config(
     raise ConfigError(problem)
 
 
-def _source(path: Path | None) -> str:
-    return str(path) if path is not None else "the configuration"
+# Reading the config file
+#
+# The first file this process opens on a path nobody validated, and the
+# door a deployment's whole server half comes through. Everything below
+# is held to the rule the `-f` write is held to (#289, #291): what a
+# refusal carries is a fixed sentence chosen by the class of the
+# failure, plus at most the two integers saying where the parser
+# stopped, and every one of them is built inside its handler and raised
+# after it, so nothing walking `__cause__` or `__context__` finds the
+# library exception that holds the path or the buffer.
+
+# What a refusal calls the file: the mechanism that named the path,
+# never the path itself.
+#
+# A config path is typed, on a command line or into a deployment's
+# environment, which makes it the same thing `-f`'s path is and the last
+# place a refusal may repeat. What its reader needs is not the string
+# they just wrote but which of the two doors it came through, because
+# that is the one they go and change. `load_file_config` is the only
+# place that knows, since it is where the argument and the variable are
+# read, so the phrase is chosen there and threaded down from it.
+CONFIG_FROM_FLAG = "the config file --config names"
+
+CONFIG_FROM_ENV = f"the config file {CONFIG_ENV_VAR} names"
+
+# And what a boot with no file at all calls the thing a problem is in:
+# there is no file to name a door of, and what was validated came from
+# the defaults and the environment.
+NO_CONFIG_FILE = "the configuration"
+
+# What a config file that will not read says. One fixed sentence per
+# failure, `{source}` filled in with one of the three phrases above, and
+# none of them holds the path, the operating system's wording or a byte
+# of the file.
+#
+# The library's own `strerror` is not passed through, for the reason the
+# `-f` sentences do not pass it through either: a message this code did
+# not write is a message it cannot promise carries no value, and these
+# are written from the path they were handed.
+CONFIG_NOT_FOUND = (
+    "{source} is not there. The path is not quoted back: a refusal here names the "
+    "rule rather than what was typed"
+)
+
+CONFIG_NOT_READABLE = (
+    "{source} cannot be read: check that it is a file this user may read, rather than "
+    "a directory or one belonging to somebody else. Neither the path nor the system's "
+    "own wording is quoted back"
+)
+
+CONFIG_NOT_TEXT = (
+    "{source} is not UTF-8 text, so there is no YAML in it to read. Nothing it holds "
+    "is quoted back, and nothing of it is decoded far enough to be: a file that fails "
+    "to decode is as likely to be a key or an archive as a mistyped path"
+)
+
+CONFIG_UNREADABLE = (
+    "{source} could not be read. Neither the path nor the system's own wording is "
+    "quoted back"
+)
+
+# Ordered, first match wins, and a subclass comes before the class it
+# extends. The decoding family is in the table because
+# `UnicodeDecodeError` is a `ValueError` rather than an `OSError`: the
+# read succeeds and the decoding is what fails, which is why a config
+# file of bytes used to leave this loader as a traceback, and the
+# exception it leaves as holds the buffer it could not decode.
+_FILE_PROBLEMS: tuple[tuple[type[BaseException], str], ...] = (
+    (FileNotFoundError, CONFIG_NOT_FOUND),
+    (NotADirectoryError, CONFIG_NOT_FOUND),
+    (IsADirectoryError, CONFIG_NOT_READABLE),
+    (PermissionError, CONFIG_NOT_READABLE),
+    (UnicodeError, CONFIG_NOT_TEXT),
+    (OSError, CONFIG_UNREADABLE),
+)
+
+# What the arm catches, read off the table rather than written beside
+# it: a shape the table answers and the arm does not catch is a
+# traceback.
+_FILE_FAILURES = tuple(shape for shape, _ in _FILE_PROBLEMS)
+
+# What a source that will not parse says about what it is not saying.
+#
+# Here rather than in `config/cli.py`, where it was written, for the
+# reason `NEEDS_THE_SERVER_HALF` sits here: two modules say it and only
+# this one is below both. It is one statement about one parser, true of
+# a fragment typed at a command line and of the file a server boots on,
+# and two copies of it would be two sentences free to drift apart.
+YAML_NOT_QUOTED = (
+    "Nothing of what it holds is quoted back: a source that will not parse is one "
+    "nothing here has validated, and what a parser says about one repeats the tag or "
+    "the key it stopped on"
+)
 
 
-def _check_config_file(path: Path) -> None:
+def stopped_at(exc: BaseException) -> str:
+    """Where the parser stopped, when it says: two integers off the
+    exception's mark and nothing else off the exception at all. Empty
+    for the failures that carry no mark.
+
+    Shared with `config/cli.py`, which imports it: the locator is the
+    one thing a refusal about YAML may take from the parser, and a
+    second implementation of the rule is the same rule with a bug
+    pending.
+    """
+    if not isinstance(exc, yaml.MarkedYAMLError) or exc.problem_mark is None:
+        return ""
+    mark = exc.problem_mark
+    return f" at line {mark.line + 1}, column {mark.column + 1}"
+
+
+def _config_text(path: Path, source: str) -> str:
+    """The config file's text, or the fixed sentence for a file that
+    will not give any.
+
+    The sentence is chosen by the class of the failure, which is the
+    reading that cannot be fooled by wording, and is raised after the
+    arm rather than inside it: the exception being handled holds the
+    path and, for a file that will not decode, the bytes it was
+    decoding.
+    """
+    problem: str | None = None
+    try:
+        return path.read_text(encoding="utf-8")
+    except _FILE_FAILURES as exc:
+        problem = next(
+            sentence for shape, sentence in _FILE_PROBLEMS if isinstance(exc, shape)
+        ).format(source=source)
+    raise ConfigError(problem)
+
+
+def _check_config_file(path: Path, source: str) -> None:
     """Pre-flight check with stable, helpful messages: the pydantic-settings
     YAML source silently skips a missing file, and its parse errors do not
     reliably name line and column."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raise ConfigError(f"config file not found: {path}") from None
-    except OSError as exc:
-        raise ConfigError(f"cannot read config file {path}: {exc.strerror}") from exc
+    text = _config_text(path, source)
 
     problem: str | None = None
+    data: object = None
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        # Rendered from the problem and the mark rather than from
-        # str(exc), which quotes the offending source line back, and
-        # raised after the handler: a parser exception retains the
-        # buffer it was parsing, so leaving it as the context would
-        # attach the whole file to a refusal about one line of it.
-        detail = str(exc)
-        if isinstance(exc, yaml.MarkedYAMLError) and exc.problem_mark is not None:
-            mark = exc.problem_mark
-            detail = f"{exc.problem} at line {mark.line + 1}, column {mark.column + 1}"
-        problem = f"invalid YAML in {path}: {detail}"
+        # The locator and nothing else off the exception, and raised
+        # after the handler: a parser exception retains the buffer it
+        # was parsing, so leaving it as the context would attach the
+        # whole file to a refusal about one line of it, and its own
+        # `problem` names the tag or the key it stopped on, which for a
+        # file holding credentials is the one thing it may not repeat.
+        problem = f"invalid YAML in {source}{stopped_at(exc)}. {YAML_NOT_QUOTED}"
     if problem is not None:
         raise ConfigError(problem)
 
     if data is not None and not isinstance(data, dict):
+        # The type name is the shape the file has, not a value out of
+        # it, so it stays where the path goes.
         raise ConfigError(
-            f"invalid config in {path}: top level must be a mapping of "
+            f"invalid config in {source}: top level must be a mapping of "
             f"server, got {type(data).__name__}"
         )
 
     if isinstance(data, dict):
-        _check_moved_keys(path, data)
+        _check_moved_keys(source, data)
 
 
-def _check_moved_keys(path: Path, data: dict) -> None:
+def _check_moved_keys(source: str, data: dict) -> None:
     """A domain section left in the file, refused where the parsed top
     level is already in hand. Ignoring it silently would leave a
     deployment editing a section the server no longer reads."""
-    _check_retired_keys(path, data)
+    _check_retired_keys(source, data)
     moved = [key for key in DOMAIN_KEYS if key in data]
     if not moved:
         return
@@ -489,14 +621,14 @@ def _check_moved_keys(path: Path, data: dict) -> None:
         for key in moved
     )
     raise ConfigError(
-        f"invalid config in {path}:\n{problems}\n"
+        f"invalid config in {source}:\n{problems}\n"
         f"  Remove these sections from the file: the domain half of the "
         f"configuration lives in the database the {DATABASE_ENV_PREFIX}* variables "
         f"name. See {DOMAIN_REFERENCE}."
     )
 
 
-def _check_retired_keys(path: Path, data: dict) -> None:
+def _check_retired_keys(source: str, data: dict) -> None:
     """A section that is gone rather than moved, refused with the
     sentence that says so.
 
@@ -517,7 +649,7 @@ def _check_retired_keys(path: Path, data: dict) -> None:
         return
     problems = "\n".join(f"  - {key}: {RETIRED_SECTIONS[key]}" for key in retired)
     raise ConfigError(
-        f"invalid config in {path}:\n{problems}\n"
+        f"invalid config in {source}:\n{problems}\n"
         f"  Remove these sections from the file: they configure nothing any more."
     )
 
