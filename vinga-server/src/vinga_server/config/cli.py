@@ -3297,15 +3297,37 @@ def _short(value: object) -> str:
     """One value of a body, short enough to sit on a line with the rest
     of the body.
 
-    A list reads as its items, a mapping as the fact that it is one, and
-    everything else as itself. Nothing is printed as a repr: what a list
-    holds is bounded item by item, and a mapping is not opened at all,
-    so a body nested three deep cannot become the line.
+    A structure is named rather than opened, at every depth but one. A
+    mapping reads as `{...}` wherever it appears, including inside a
+    list, because opening one is what puts a key nobody vouched for and
+    whatever it holds onto the line: `str()` of a mapping is its repr,
+    and a repr is not a rendering.
+
+    The one depth that is opened is the outermost list, because that is
+    what an agent's includes and its grants are: a line that said
+    `[...]` where the fragments are named would be hiding the answer
+    rather than bounding it. A list inside that one reads as `[...]`,
+    which is the same rule as the mapping's and is what makes this
+    depth-bounded: nothing here recurses, so a body nested a thousand
+    deep costs one frame and one line rather than a `RecursionError` out
+    of the boundary.
+
+    Everything else reads as itself through the display door.
     """
-    if isinstance(value, list):
-        return "[" + ", ".join(printable(str(item)) for item in value) + "]"
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return "{...}"
+    if isinstance(value, list):
+        return "[" + ", ".join(_item(item) for item in value) + "]"
+    return printable(str(value))
+
+
+def _item(value: object) -> str:
+    """One item of the one list a line opens: a word through the display
+    door, or the fact that it is a structure."""
+    if isinstance(value, Mapping):
+        return "{...}"
+    if isinstance(value, list):
+        return "[...]"
     return printable(str(value))
 
 
