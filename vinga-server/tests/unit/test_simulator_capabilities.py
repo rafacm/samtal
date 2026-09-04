@@ -16,6 +16,7 @@ does NOT.
 """
 
 from dataclasses import replace
+from typing import get_args
 
 import pytest
 
@@ -254,6 +255,54 @@ def test_a_pending_row_naming_a_verb_that_already_exists_fails() -> None:
 
     with pytest.raises(AssertionError):
         nothing_is_claimed_that_this_version_did_not_ship(parked)
+
+
+# What keeps the kind a closed set, since the alias does not
+#
+# `RowKind` is a `Literal`, and nothing enforces it here: this module is
+# outside the one package the type checker runs on, and a frozen
+# dataclass validates no annotation at runtime. A misspelled kind would
+# render on the help page exactly as it does now and simply be invisible
+# to the message pin above, which is the failure the alias looks like it
+# prevents and does not. So the set is closed by an assertion, held to
+# going red like every other one in this file.
+
+
+def every_kind_is_one_of_the_declared_two(
+    rows: tuple[capabilities.Capability, ...],
+) -> None:
+    """No row carries a kind outside what `RowKind` declares."""
+    held = get_args(capabilities.RowKind)
+    for row in rows:
+        assert row.kind in held, row.what
+
+
+def test_every_row_declares_one_of_the_two_kinds() -> None:
+    every_kind_is_one_of_the_declared_two(capabilities.rows())
+
+
+def test_the_constants_are_exactly_the_members_of_the_alias() -> None:
+    """One encoding rather than two.
+
+    The rows are written with the constants and the assertion above
+    reads the alias, so a third kind added to one and not the other
+    would leave a row nothing classifies. Held here instead.
+    """
+    assert {capabilities.MESSAGE, capabilities.PROSE} == set(
+        get_args(capabilities.RowKind)
+    )
+
+
+def test_a_row_whose_kind_is_outside_the_set_fails() -> None:
+    """Doctored the way a typo arrives: one message row's kind
+    misspelled, which the message pin would silently stop counting."""
+    mistyped = tuple(
+        replace(row, kind="messsage") if row.kind == capabilities.MESSAGE else row
+        for row in capabilities.rows()
+    )
+
+    with pytest.raises(AssertionError):
+        every_kind_is_one_of_the_declared_two(mistyped)
 
 
 # What this milestone in particular says
