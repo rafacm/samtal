@@ -157,6 +157,7 @@ from vinga_server.config.responses import (
     SecretValue,
     SessionDetail,
     SessionList,
+    StoredSecretLocation,
     ThreadErasure,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
@@ -2950,7 +2951,8 @@ def _identity_block(info: Mapping[str, object]) -> str:
     )
 
 
-# What a count of the masked configuration depends on, and what says so
+# What a rendering of the masked configuration depends on, and what
+# says so
 #
 # `ConfigDocument` declares the document as `dict[str, Any]` and stops
 # there, deliberately: the document's shape is its own prose, and the
@@ -2959,33 +2961,108 @@ def _identity_block(info: Mapping[str, object]) -> str:
 # the outer mapping and no further, and everything under it is a body
 # nobody has vouched for.
 #
-# A count needs more than that: that a section is a mapping of entries,
-# that a provider section is a mapping of those, and that the default
-# agent is a name or nothing. Those are read as shapes through
+# Both renderings of that document need more than that: that a section
+# is a mapping of entry bodies, that a provider section is a mapping of
+# those, that a device is bound to a list of agent names, and that the
+# default agent is a name or nothing. Those are read as shapes through
 # `_understood`, like every other answer this module renders, so a
 # section that is a number, a list or absent meets the one fixed
 # sentence a body this client cannot read gets, rather than a
 # `TypeError` or a `KeyError` leaving the boundary as a traceback with
 # the answer inside it.
-ENTRIES = dict[str, Any]
+#
+# One shape per fact and one reading for both renderers, because a
+# count and a tree are two renderings of one document and not two
+# documents: `_sections` below is the whole of what either of them
+# knows about the nesting, so a count that walked a section one way
+# while the tree walked it another is a disagreement that cannot be
+# written.
+
+# A mapping of keys with nothing said about what any of them holds. One
+# entry's masked body is this, and so is the document's own mapping of
+# sections, which is read as this for the same reason: what is wanted of
+# either is that it is a mapping at all, and what is under it is read
+# one key at a time by whatever knows the key.
+BODY = dict[str, Any]
+
+ENTRIES = dict[str, BODY]
 
 STAGED_ENTRIES = dict[str, ENTRIES]
 
+# The devices section, which is the one entity-shaped thing in the
+# document that is not an entity: a MAC, and the agents it reaches.
+BOUND = dict[str, list[str]]
+
 NAMED = str | None
 
+# The document's other half, read as the model the API answers it with
+# rather than as a second description of it here.
+STORED = list[StoredSecretLocation]
 
-def _counted(section: object, kind: entities.EntityDescriptor) -> int:
-    """How many entries one section of the masked document holds, read
-    as the nesting the descriptor says it has.
 
-    A kind addressed by two segments is a mapping of mappings in the
-    document exactly as it is two path parameters on the API, which is
-    one fact read off the registry rather than two written down.
+def _nesting(kind: entities.EntityDescriptor) -> object:
+    """How deep one kind's section sits in the document, read off the
+    registry.
+
+    A kind addressed by two segments is a mapping of mappings exactly as
+    it is two path parameters on the API, and one addressed by none is
+    the singleton, which is one body rather than a mapping of them.
+    Which is one fact read off the addressing rather than three written
+    down.
     """
     if len(kind.addressing) > 1:
-        staged = _understood(STAGED_ENTRIES, section, UNREADABLE_READ)
-        return sum(len(under) for under in staged.values())
-    return len(_understood(ENTRIES, section, UNREADABLE_READ))
+        return STAGED_ENTRIES
+    return ENTRIES if kind.addressing else BODY
+
+
+def _sections(document: Mapping[str, object]) -> dict[str, Any]:
+    """Every section of the masked document, read as the shape the
+    registry says it has.
+
+    The one place either renderer learns what a section is. The kinds
+    and their nesting come from the registry, so a kind added there is
+    read here by existing; the devices and the default agent are written
+    out because neither is an entity, and forcing them into a kind's
+    shape would be inventing a generalization rather than finding one.
+
+    The document itself is read too, and not because `ConfigDocument`
+    leaves it in doubt: a renderer that reached into `document["config"]`
+    before knowing it was a mapping would be trusting its caller to have
+    validated, and this is the function that makes the reading true of
+    the document rather than of the path it arrived by.
+
+    `.get` rather than a subscript throughout, so a section the answer
+    left out arrives as None and meets the same refusal a malformed one
+    does, instead of a `KeyError` from outside the boundary.
+
+    Every section rather than only the ones a given rendering prints.
+    The refusal is about the document, not about the line: a body
+    holding a section this client cannot read is one that did not come
+    from this API, and which half of it a particular command would have
+    walked into is not what makes that true.
+    """
+    config = _understood(BODY, document.get("config"), UNREADABLE_READ)
+    read = {
+        kind.moved_key: _understood(_nesting(kind), config.get(kind.moved_key), UNREADABLE_READ)
+        for kind in entities.ENTITIES
+    }
+    return read | {
+        "devices": _understood(BOUND, config.get("devices"), UNREADABLE_READ),
+        "default_agent": _understood(NAMED, config.get("default_agent"), UNREADABLE_READ),
+    }
+
+
+def _counted(section: Mapping[str, object], kind: entities.EntityDescriptor) -> int:
+    """How many entries one section of the masked document holds.
+
+    The section is already read as its shape, so this is arithmetic: a
+    staged kind is counted a level deeper because that is where its
+    entries are, which is the same fact `_nesting` reads off the
+    addressing.
+    """
+    if len(kind.addressing) > 1:
+        return sum(len(under) for under in section.values())
+    return len(section)
 
 
 def _configured_counts(document: Mapping[str, object]) -> str:
@@ -3005,23 +3082,18 @@ def _configured_counts(document: Mapping[str, object]) -> str:
     and forcing them into a kind's shape would be inventing a
     generalization rather than finding one.
 
-    Every section is read as a shape before it is counted, and the
-    default agent before it is printed: see the note above this
-    function. `.get` rather than a subscript, so a section the answer
-    left out arrives as None and meets that refusal too, instead of a
-    `KeyError` from outside the boundary.
+    The document is read as its shapes before any of it is counted, by
+    the same step the tree reads it with: see the note above
+    `_sections`.
     """
-    config = document["config"]
+    read = _sections(document)
     lines = ["", CONFIGURED]
     for kind in entities.ENTITIES:
         if not kind.addressing:
             continue
-        lines.append(f"  {kind.moved_key}: {_counted(config.get(kind.moved_key), kind)}")
-    bound = _understood(ENTRIES, config.get("devices"), UNREADABLE_READ)
-    lines.append(f"  devices: {len(bound)}")
-    default_agent = _understood(NAMED, config.get("default_agent"), UNREADABLE_READ)
-    named = printable(default_agent) if default_agent else "(none)"
-    lines.append(f"  default_agent: {named}")
+        lines.append(f"  {kind.moved_key}: {_counted(read[kind.moved_key], kind)}")
+    lines.append(f"  devices: {len(read['devices'])}")
+    lines.append(f"  default_agent: {_default_agent(read['default_agent'])}")
     return "\n".join(lines) + "\n"
 
 
@@ -3031,36 +3103,48 @@ def _summary(document: Mapping[str, object]) -> str:
 
     Rendered from the same masked document `show` prints, which is what
     a read of the whole configuration answers with, so the summary can
-    say nothing the document does not carry.
+    say nothing the document does not carry. Which also means it can say
+    anything the document carries: the sections are read as their shapes
+    first, and every value that reaches a line goes through the display
+    door, so nothing an answer holds is printed as its repr or gets to
+    steer the terminal the tree lands on.
+
+    A name is the one value read twice, and the two readings are not the
+    same. It is printed through the door like everything else, and it is
+    looked up as it arrived: the identity a stored secret is filed under
+    is the one the store wrote, so a lookup through the bounded spelling
+    would name the slots of a different entity or of none.
     """
-    config = document["config"]
-    stored = _stored_slots(document["secrets"])
+    read = _sections(document)
+    stored = _stored_slots(_understood(STORED, document.get("secrets"), UNREADABLE_READ))
     lines = ["providers:"]
     for stage in PROVIDER_STAGES:
         lines.append(f"  {stage}:")
         lines += [
-            f"    {name}{_summarized('provider', body)}"
+            f"    {printable(name)}{_summarized('provider', body)}"
             + _slots(stored, "provider", entities.provider_identity(stage, name))
-            for name, body in config["providers"].get(stage, {}).items()
+            for name, body in read["providers"].get(stage, {}).items()
         ] or ["    (none)"]
 
     lines.append("mcp_servers:")
     lines += [
-        f"  {name}{_summarized('mcp-server', body)}" + _slots(stored, "mcp_server", name)
-        for name, body in config["mcp_servers"].items()
+        f"  {printable(name)}{_summarized('mcp-server', body)}"
+        + _slots(stored, "mcp_server", name)
+        for name, body in read["mcp_servers"].items()
     ] or ["  (none)"]
 
     lines.append("prompt_fragments:")
     lines += [
-        f"  {name}{_summarized('prompt-fragment', body)}"
-        for name, body in config["prompt_fragments"].items()
+        f"  {printable(name)}{_summarized('prompt-fragment', body)}"
+        for name, body in read["prompt_fragments"].items()
     ] or ["  (none)"]
 
-    lines.append("agent_defaults" + _summarized("agent-defaults", config["agent_defaults"]))
+    lines.append("agent_defaults" + _summarized("agent-defaults", read["agent_defaults"]))
 
     lines.append("agents:")
     lines += [
-        f"  {name}{_summarized('agent', body)}" for name, body in config["agents"].items()
+        f"  {printable(name)}{_summarized('agent', body)}"
+        for name, body in read["agents"].items()
     ] or ["  (none)"]
 
     # The two settings' lines are written here rather than summarized by
@@ -3070,11 +3154,24 @@ def _summary(document: Mapping[str, object]) -> str:
     # than finding one.
     lines.append("devices:")
     lines += [
-        f"  {mac} -> {', '.join(bound)}" for mac, bound in config["devices"].items()
+        f"  {printable(mac)} -> {', '.join(printable(agent) for agent in bound)}"
+        for mac, bound in read["devices"].items()
     ] or ["  (none)"]
 
-    lines.append(f"default_agent: {config['default_agent'] or '(none)'}")
+    lines.append(f"default_agent: {_default_agent(read['default_agent'])}")
     return "\n".join(lines) + "\n"
+
+
+def _default_agent(named: str | None) -> str:
+    """The default agent as either rendering names it: the one printable
+    line of it, or the word for nothing set.
+
+    One function because the two renderings are one sentence about the
+    deployment, and an unset default agent that read as `(none)` in the
+    tree and as an empty line in the counts would be the same fact told
+    two ways.
+    """
+    return printable(named) if named else "(none)"
 
 
 # How one entry of each kind reads in that tree, after its name: which
@@ -3091,19 +3188,34 @@ def _summarized(kind: str, body: Mapping[str, object]) -> str:
 
 def _provider_summary(body: Mapping[str, object]) -> str:
     """Its type, which is what a provider is: everything else in the
-    entry is options for that type."""
-    return f" ({body.get('type')})"
+    entry is options for that type.
+
+    A body is a mapping and nothing is declared about what a key of one
+    holds, so the type is whatever answered. It is rendered by `_short`,
+    the same rule the inlined bodies below are written with rather than
+    a second one here: a word reads as itself through the display door,
+    a mapping reads as the fact that it is one, and neither can arrive
+    as a repr or steer the terminal. An entry with no type at all reads
+    as `None`, which is what it is.
+    """
+    return f" ({_short(body.get('type'))})"
 
 
 def _mcp_server_summary(body: Mapping[str, object]) -> str:
-    return f" ({body.get('transport')})"
+    return f" ({_short(body.get('transport'))})"
 
 
 def _prompt_fragment_summary(body: Mapping[str, object]) -> str:
     """The size rather than the text: this is the tree, and what an
     operator reads it for is which fragments exist and what each of them
     costs the prompt budget. `prompt-fragment show` prints one whole,
-    and `agent preview <name>` prints what an agent adds up to."""
+    and `agent preview <name>` prints what an agent adds up to.
+
+    The one suffix with nothing of the document on it: what it prints is
+    a length this counted, so a fragment whose text is a structure or a
+    number reads as a size rather than as itself, and there is nothing
+    here for the display door to bound.
+    """
     return f" ({len(str(body.get('text', '')))} characters)"
 
 
@@ -3132,6 +3244,13 @@ _SUMMARY: dict[str, Callable[[Mapping[str, object]], str]] = {
 
 
 def _stored_slots(secrets: Sequence[Mapping[str, object]]) -> dict[tuple[str, str], list[str]]:
+    """Which slots hold a stored secret, by the entity holding them.
+
+    Every row is read as `StoredSecretLocation` before it gets here, so
+    the three fields are there and each of them is a string: this walks
+    a shape rather than trusting a body, which is what keeps a row that
+    is a number or a list out of the boundary as a `TypeError`.
+    """
     grouped: dict[tuple[str, str], list[str]] = {}
     for stored in secrets:
         grouped.setdefault((stored["kind"], stored["identity"]), []).append(stored["slot"])
@@ -3140,19 +3259,35 @@ def _stored_slots(secrets: Sequence[Mapping[str, object]]) -> dict[tuple[str, st
 
 def _slots(stored: Mapping[tuple[str, str], list[str]], kind: str, identity: str) -> str:
     slots = stored.get((kind, identity), [])
-    return f"  [secrets: {', '.join(slots)}]" if slots else ""
+    return f"  [secrets: {', '.join(printable(slot) for slot in slots)}]" if slots else ""
 
 
 def _inline(data: Mapping[str, object]) -> str:
-    return " ".join(f"{key}={_short(value)}" for key, value in data.items())
+    """One body on one line, as `key=value` pairs.
+
+    Every half of every pair goes through the display door. A key is a
+    string by JSON's construction and nothing more than that: it is text
+    the answer chose, exactly as the value beside it is, and a key
+    carrying an escape sequence would steer the terminal from the left
+    of the equals sign as readily as from the right.
+    """
+    return " ".join(f"{printable(key)}={_short(value)}" for key, value in data.items())
 
 
 def _short(value: object) -> str:
+    """One value of a body, short enough to sit on a line with the rest
+    of the body.
+
+    A list reads as its items, a mapping as the fact that it is one, and
+    everything else as itself. Nothing is printed as a repr: what a list
+    holds is bounded item by item, and a mapping is not opened at all,
+    so a body nested three deep cannot become the line.
+    """
     if isinstance(value, list):
-        return "[" + ", ".join(str(item) for item in value) + "]"
+        return "[" + ", ".join(printable(str(item)) for item in value) + "]"
     if isinstance(value, dict):
         return "{...}"
-    return str(value)
+    return printable(str(value))
 
 
 def _yaml(data: object) -> str:
