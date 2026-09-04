@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import sys
 from typing import Any, cast
 
@@ -1354,3 +1355,108 @@ async def test_a_builtin_corrected_is_named_and_a_call_that_needed_nothing_is_si
     coerced = only(caplog, "tool_arguments_coerced")
     assert (coerced.source, coerced.tool, coerced.coerced) == ("builtin", "forget", 1)  # type: ignore[attr-defined]
     assert facts(store) == "- the user has a dog"
+
+
+# The board tool with two typed arguments, which is what a call
+# carrying one conversion beside a value nothing may convert needs. One
+# reader, so it stays here rather than in the support module.
+MIXER = {
+    "name": "self.audio_speaker.set_mixer",
+    "description": "Set the speaker volume and gain",
+    "inputSchema": {
+        "type": "object",
+        "properties": {"volume": {"type": "integer"}, "gain": {"type": "number"}},
+    },
+}
+
+
+async def a_board_with_mixer(session: Any) -> FakeDevice:
+    """A discovered board offering `MIXER`, on this session.
+
+    White-box in the one line the other device cases explain: a board's
+    tools arrive from a discovery run the edge starts over the wire, and
+    these sessions have no socket to run one on.
+    """
+    device = FakeDevice([{"tools": [MIXER]}])
+    await device.client.discover()
+    session._device_tools = device.client
+    return device
+
+
+def mixer_call(device: FakeDevice) -> dict[str, Any]:
+    """The arguments the board was actually called with."""
+    (sent,) = [one for one in device.sent if one.get("method") == "tools/call"]
+    return cast(dict[str, Any], sent["params"]["arguments"])
+
+
+async def test_a_value_that_is_not_equal_to_itself_is_not_a_coercion(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`NaN` through the loop, which is a value nothing converted and
+    nothing may report as converted.
+
+    Both provider adapters decode arguments with Python's permissive
+    `json.loads`, which accepts `NaN`, so a model can send one. It is
+    not equal to itself, so a change count asking `!=` would answer that
+    an untouched argument had changed: a copy nobody needed, and an
+    event saying this server did something it did not do.
+    """
+    asked = call("self_audio_speaker_set_mixer", gain=float("nan"))
+    script = ScriptedLlm([[asked], "Left as it was."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    device = await a_board_with_mixer(session)
+
+    with caplog.at_level("INFO"):
+        assert await run_reply(session, "set the gain") == ["Left as it was."]
+
+    # The value reached the board as it was sent, which is a NaN and so
+    # is asserted as one rather than compared to anything.
+    assert math.isnan(mixer_call(device)["gain"])
+    assert not events(caplog, "tool_arguments_coerced")
+    # And no execution copy was made. Asked of the method directly,
+    # because it is the only way to ask: an unchanged value looks the
+    # same on the wire whether it travelled in the model's own call or
+    # in a copy of it, so the copy is invisible from outside exactly
+    # here, which is the case this test is about.
+    (slot,) = session.runtime._reserve_tools([asked])
+    schemas = {asked.name: MIXER["inputSchema"]}
+    assert session.runtime._for_execution(asked, slot, schemas) is asked
+
+
+async def test_a_mixed_call_counts_only_the_argument_that_changed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One quoted integer and one `NaN` in the same call. The count is
+    what the event carries, so it says one rather than two."""
+    asked = call("self_audio_speaker_set_mixer", volume="40", gain=float("nan"))
+    script = ScriptedLlm([[asked], "Turned it up."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    device = await a_board_with_mixer(session)
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "turn it up")
+
+    assert only(caplog, "tool_arguments_coerced").coerced == 1  # type: ignore[attr-defined]
+    arrived = mixer_call(device)
+    assert arrived["volume"] == 40 and isinstance(arrived["volume"], int)
+    assert math.isnan(arrived["gain"])
+
+
+async def test_a_whole_number_written_with_a_point_is_still_a_coercion(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the change count, and the half identity alone
+    answers but comparison does not: `100 == 100.0` in Python, so a
+    float rewritten as the integer its schema declares has to count as
+    the change it is, or it would never reach the board as one."""
+    asked = call("self_audio_speaker_set_mixer", volume=40.0)
+    script = ScriptedLlm([[asked], "Turned it up."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    device = await a_board_with_mixer(session)
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "turn it up")
+
+    assert only(caplog, "tool_arguments_coerced").coerced == 1  # type: ignore[attr-defined]
+    arrived = mixer_call(device)
+    assert arrived["volume"] == 40 and isinstance(arrived["volume"], int)

@@ -77,6 +77,13 @@ def with_lossless_coercions(
     A new dict every time, and the input is never touched: the caller
     keeps the original for the record, the API and the history.
 
+    A value no rule converted is answered as the object it arrived as,
+    which is what lets a caller tell a conversion from a value by
+    identity rather than by comparison. That is not a convenience: a
+    `NaN` is not equal to itself and both provider adapters decode with
+    Python's permissive `json.loads`, which accepts one, so a caller
+    comparing values alone would read an untouched `NaN` as converted.
+
     The result is not necessarily schema-conformant, which is why the
     name says what it guarantees rather than promising conformance:
     unions, nested structure, undeclared properties and every other
