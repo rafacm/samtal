@@ -203,6 +203,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   those rows at the first start after upgrading. Nothing that was ever
   read is lost, sibling credentials on the same entry are untouched,
   and a deployment that never entered one has nothing to delete.
+- **The unit lane's boot tests run against the lane's own database**
+  (#333). The lane promises that every test writes to the per-worker
+  database the autouse truncation clears, and two doors to that fact
+  were closed: the model default and `VINGA_DB_NAME`. There was a
+  third. Pydantic inlines a sub-model's schema, defaults included, into
+  every embedding model's compiled validator at class creation, so a
+  composition whose payload carried a `database` mapping with fields
+  missing filled them from a stale copy, and fifteen boot tests booted
+  against the compose instance's real `vinga` database instead. One of
+  them asserted a row count of zero against a database it had never
+  booted into, which it would have done however many rows the boot
+  wrote. The lane's conftest now rebuilds the whole cascade
+  (`DatabaseConfig`, `ServerConfig`, `FileConfig`, `Config`, innermost
+  first, because a child's rebuild does not propagate upward), the
+  fixture that restores the shipped defaults mirrors the same move and
+  owns its own environment edits so no other finalizer can undo them out
+  of order, and the lane pin grows the payload door, all four connection
+  facts rather than the name alone, and a completeness rule derived from
+  the models so a fourth embedder cannot open the door again silently.
+  Nothing a deployment runs is affected: the pydantic-level mutation
+  lives only in the test lane, and a server's own boot has always
+  resolved its database through the loader.
 - **The simulator holds a conversation on a deployment that issues no
   device tokens** (#369). With `server.auth.enabled: false`, a default
   agent set and the store applied, the server admitted the simulated
