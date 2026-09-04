@@ -137,22 +137,43 @@ deployment that prefers silence turns it off, which is the issue's
 own asymmetry. The domain-config reference, the OpenAPI document
 and the example agent files regenerate or update accordingly.
 
-**The guard is a pure predicate at the two sentence sites.** A
-sentence is withheld when, stripped, it parses as a JSON object
-that names an offered tool: the object's own `"name"`, or the
-`"name"` inside an object under its `"function"` key (the OpenAI
-wire shape models parrot), equals a published name from the
-snapshot already in scope. Nothing else is withheld: JSON that
-names no offered tool, JSON with no name, and prose all speak.
-The predicate lives beside the speaking machinery in
-`runtime/speech.py`, taking `(sentence, offered_names)`; inlining
-it at the two call sites would duplicate the rule, and `text.py`
-stays ignorant of tools. A stated bound, recorded in the module
-docstring: the guard catches the shape actually observed (a
-compact call in one sentence); a pretty-printed call is chopped by
-the splitter's newline rule into fragments that parse as nothing,
-and closing that fully would mean buffering heuristics with their
-own failure modes. The event is what keeps the residue visible.
+**The guard: isolate any complete JSON object in the sentence,
+then match it against the offered tools two ways.** A sentence may
+carry a call beside prose (`Sure: {"volume":"100"}`, or a call
+followed by `Okay.` inside one cut), so the test is not "the
+sentence parses" but "the sentence contains a complete object that
+matches": the guard walks the sentence's `{` positions and asks
+`json.JSONDecoder().raw_decode` for a balanced object at each,
+bounded by the sentence's own length. A decoded object matches,
+and the whole sentence is withheld, in either of two cases, both
+anchored to the tools this session actually offered:
+
+- **A named call**: the object's own `"name"`, or the `"name"`
+  inside an object under its `"function"` key (the OpenAI wire
+  shape models parrot), equals a published name from the snapshot.
+- **An argument-only call**, the shape actually observed
+  (`{"volume":"100"}` carries no name): the object's key set is
+  non-empty and is a subset of the declared top-level `properties`
+  of at least one offered tool's `input_schema`. Matching is by
+  key names only, never by validating values, since the observed
+  value had the wrong type, and a set matching several tools'
+  schemas is withheld the same, because every reading of it is
+  tool-shaped. The cost is stated: an agent speaking a JSON
+  example whose keys mirror an offered tool is withheld too, the
+  event makes it visible, and a deployment for which that is wrong
+  turns the model, not the guard.
+
+Everything else speaks: JSON naming no offered tool and matching
+no offered schema, and prose. The guard and its emission live
+behind one helper beside the speaking machinery in
+`runtime/speech.py`, taking the sentence and the offered
+`ToolDef`s; inlining it at the two call sites would duplicate the
+rule, and `text.py` stays ignorant of tools. A stated bound,
+recorded in the module docstring: a pretty-printed multiline call
+is chopped by the splitter's newline rule into fragments no
+decoder can read, and closing that would mean buffering sentences
+that have already been promised to TTS, stalling live speech on
+every ordinary `{`; the event is what keeps the residue visible.
 
 **Nothing replaces a withheld sentence unless nothing else spoke.**
 Mid-reply, a withheld sentence is dropped and its event emitted;
@@ -238,15 +259,22 @@ Existing assets carry the shapes; nothing they pin is restated.
   first-token timeout after retries, heard as the fallback
   (`tests/unit/test_session_watchdog.py`).
 - **The guard** (`tests/unit/test_speech_guard.py`, new, plus
-  session-level cases in `test_session_tools.py`): the predicate
-  matrix (compact call naming an offered tool withheld, the
-  `function`-wrapped shape withheld, JSON naming no offered tool
-  spoken, JSON with no name spoken, prose about JSON spoken); a
-  scripted reply mixing a leaked call with a real sentence speaks
-  only the real one, emits `sentence_withheld`, and the record
-  keeps the model's text per the content rule already governing
-  turns; a reply that is only a leaked call speaks the fallback
-  with `nothing_sayable`.
+  session-level cases in `test_session_tools.py`): the helper
+  matrix (compact call naming an offered tool withheld; the
+  `function`-wrapped shape withheld; the observed argument-only
+  payload `{"volume":"100"}` against the volume tool's schema
+  withheld; a call embedded beside prose in one sentence withheld;
+  JSON naming no offered tool and matching no offered schema
+  spoken; JSON whose keys are not any offered tool's spoken; prose
+  about JSON spoken); a scripted reply mixing a leaked call with a
+  real sentence speaks only the real one and emits
+  `sentence_withheld`; a reply that is only a leaked call speaks
+  the fallback with `nothing_sayable`. Withheld bytes reach no
+  retained surface: a sentinel-bearing withheld sentence, with
+  recording enabled and a following scripted round, is asserted
+  absent from the device (`sentence_started` and audio), from both
+  log formats, from event payloads, from the stored `TurnRecord`
+  and its legs, and from the next round's request history.
 - **Events**: drivers and `CARRIED` rows for both declarations;
   `events.md` and the README index regenerate through their
   generators; the UNTYPED set is not grown (no new bare log lines
@@ -338,6 +366,16 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    successful validation, since the observed value had the wrong
    type), resolve ambiguous schema matches, and test the observed
    payload directly.
+
+   *Resolution*: accepted in full. The guard now isolates any
+   complete JSON object inside a sentence with `raw_decode` over
+   the sentence's `{` positions, matches it two ways (a named call
+   against the published names, and an argument-only object whose
+   non-empty key set is a subset of at least one offered tool's
+   declared properties, values never validated), withholds on
+   ambiguity with the reason stated, tests the observed payload
+   directly, and states the multiline bound with the streaming
+   argument for it.
 
 2. **P1: retaining the withheld model text contradicts the no-leak
    rule and the record semantics.** The record's `reply` is what
