@@ -211,10 +211,17 @@ multi-leg reply plays it.
 **Two event declarations, payloads under the content rule.**
 
 - `sentence_withheld`, session channel: the sentence's length in
-  characters (never its bytes), and the tool named the way
-  `tool_call` already names one (the `_tool_fragment` policy:
-  builtin names are this server's vocabulary; a far side's name is
-  identified without repeating it). One variant.
+  characters (never its bytes), and the tool identified the way
+  `tool_call` identifies one. The catalog permits one concrete
+  value type per field and `_tool_fragment` returns three, so this
+  follows `tool_call`'s own answer to the same problem:
+  source-specific variants under one declaration, selected by the
+  existing classifier, one per fragment shape (builtin named in
+  this server's vocabulary, an entry-owned tool by its entry, a
+  far-side or unmatched name identified without repeating it; an
+  argument-only match that resolves to no single tool rides the
+  unnamed variant). A sentinel-bearing device or MCP tool name in
+  the test proves no far-side bytes reach payloads or logs.
 - `reply_fallback`, session channel: reason from a closed set with
   one variant per reason, filler-style: `reply_failed` (the
   failure arm) and `nothing_sayable` (the empty-reply case). A
@@ -466,6 +473,12 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    existing classifier, or omit the fragment for one metadata-only
    variant, and prove with a sentinel-bearing far-side tool name
    that nothing reaches logs or payloads.
+
+   *Resolution*: accepted in full; the declaration takes
+   `tool_call`'s own shape, source-specific variants selected by
+   the existing classifier, with the ambiguous argument-only match
+   riding the unnamed variant, and the sentinel case is in the
+   test plan.
 
 7. **P2: cancellation during fallback playback is contradictory.**
    "Never raises" would swallow a barge-in's `CancelledError`.
