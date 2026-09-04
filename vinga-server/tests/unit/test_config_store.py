@@ -1233,6 +1233,35 @@ def test_a_secret_for_an_unknown_entity_or_slot_is_refused(store: ConfigStore) -
         assert SECRET not in _chain(caught.value)
 
 
+def test_the_exempted_option_is_not_a_credential_slot(store: ConfigStore) -> None:
+    """A provider's slots are its secret-shaped option names, so moving
+    `max_tokens` out of that predicate withdraws a slot the store used
+    to accept (#277). Nothing is lost with it: no read, no build and no
+    request ever looked a provider's `max_tokens` up among its stored
+    secrets, which is why the slot was never pinned as accepted either.
+
+    The refusal is held to being the one an ordinary non-slot meets,
+    differentially rather than by copying its sentence here: what makes
+    this right is that `max_tokens` is now an option name like `model`
+    and not a case of its own.
+    """
+    store.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
+
+    with pytest.raises(ConfigError) as withdrawn:
+        store.set_secret(SecretLocation.provider("llm", "claude", "max_tokens"), SECRET)
+    with pytest.raises(ConfigError) as ordinary:
+        store.set_secret(SecretLocation.provider("llm", "claude", "model"), SECRET)
+
+    assert str(withdrawn.value) == str(ordinary.value)
+    assert SECRET not in _chain(withdrawn.value)
+    assert store.load().secrets.locations() == []
+
+    # And `api_key`, which the sentence names as the example, still
+    # fills, so this is not a rule that has stopped admitting anything.
+    store.set_secret(CLAUDE, SECRET)
+    assert store.load().secrets.locations() == [CLAUDE]
+
+
 def test_a_secret_that_is_not_a_non_empty_string_is_refused(store: ConfigStore) -> None:
     """An annotation stops nothing: a null, a number or an object
     arriving from a request body would otherwise be encrypted into an

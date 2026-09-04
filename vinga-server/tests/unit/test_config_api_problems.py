@@ -199,6 +199,26 @@ REFUSALS = [
         ["/beam_size"],
     ),
     Refusal(
+        "the exempted option written as the wrong type",
+        "/providers/llm/local",
+        {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:11434/v1",
+            "model": "qwen3:8b",
+            "max_tokens": "1024",
+        },
+        lambda store, fragment: store.set_provider("llm", "local", fragment),
+        "providers.llm.local",
+        # Which refusal `max_tokens` gets is the whole of #277: the
+        # shared secret-key heuristic matched the fragment `token`
+        # inside it, so this fragment used to be answered as an inline
+        # secret, addressing the whole fragment and advising an
+        # `_env` key nothing reads. It is a declared option of a typed
+        # type now, so it is answered as one, exactly like `beam_size`
+        # above.
+        ["/max_tokens"],
+    ),
+    Refusal(
         "a declared nested option of a typed provider type",
         "/providers/tts/voice",
         {

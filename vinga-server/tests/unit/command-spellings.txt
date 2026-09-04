@@ -1484,8 +1484,8 @@ vinga-server/tests/unit/test_config_docgen.py:490  respell  vinga apply
 vinga-server/tests/unit/test_config_docgen.py:701  respell  vinga-server config cli-reference
 vinga-server/tests/unit/test_config_docgen.py:735  respell  vinga-server config cli-reference
 vinga-server/tests/unit/test_config_examples.py:51  respell  vinga provider set llm claude
-vinga-server/tests/unit/test_config_round_trip.py:436  respell  config export
-vinga-server/tests/unit/test_config_round_trip.py:437  respell  config import
+vinga-server/tests/unit/test_config_round_trip.py:533  respell  config export
+vinga-server/tests/unit/test_config_round_trip.py:534  respell  config import
 vinga-server/tests/unit/test_conversations_docgen.py:145  respell  vinga session delete
 vinga-server/tests/unit/test_conversations_docgen.py:146  respell  vinga session purge
 vinga-server/tests/unit/test_device_bindings.py:207  respell  vinga-server config apply
