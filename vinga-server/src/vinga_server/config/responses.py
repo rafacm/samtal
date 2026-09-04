@@ -351,17 +351,25 @@ class PromptsReload(BaseModel):
 
 
 class FillersReload(BaseModel):
-    """What a reload did to the pre-synthesized filled pauses.
+    """What a reload did to the speech this server synthesizes ahead of
+    time: the filled pauses that mask a slow reply, and the phrase a
+    failed one says.
 
-    Three outcomes and no fourth, because a reload makes exactly one of
-    three decisions about an agent that masks its latency. An agent that
-    masks none, or has just switched masking off, is in none of the
-    three: there was no decision to make about it, and naming it under
-    an outcome would say there had been.
+    Three outcomes per kind and no fourth, because a reload makes
+    exactly one of three decisions about an agent that configures one.
+    An agent that configures neither, or has just switched one off, is
+    in none of that kind's three: there was no decision to make about
+    it, and naming it under an outcome would say there had been.
+
+    Two kinds rather than one set of lists, because one agent can meet
+    them differently: a filled pause carried over unchanged beside a
+    failure phrase just re-synthesized is one honest sentence about that
+    agent, and a single set of outcomes could only tell it as two
+    contradictory ones.
 
     Which clips a conversation plays is decided when it opens, so
     everything here reaches the next conversation and none of it changes
-    what an open one is masking with.
+    what an open one is masking or failing with.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -391,6 +399,33 @@ class FillersReload(BaseModel):
             "agents run with the latency mask off, because a filler is a mask and a "
             "posture where a text-to-speech hiccup blocked a prompt fix would invert "
             "what matters. The next reload tries again."
+        )
+    )
+    fallback_resynthesized: list[str] = Field(
+        description=(
+            "The agents whose failure phrase was spoken again, sorted: a field of the "
+            "effective `fallback` section moved, or the voice that speaks it did. The "
+            "whole section is the unit, so switching the section on is here too; every "
+            "agent named here cost a round of text-to-speech work at the configured "
+            "provider."
+        )
+    )
+    fallback_reused: list[str] = Field(
+        description=(
+            "The agents whose failure phrase was carried over unchanged, sorted. Kept "
+            "apart from the filled pauses' own reuse on purpose: an edit to one "
+            "section never sends the other's words to a voice, so an agent can be here "
+            "while it is under `resynthesized` above."
+        )
+    )
+    fallback_degraded: list[str] = Field(
+        description=(
+            "The agents whose failure phrase would not synthesize, sorted, the ones "
+            "that outran the build's own per-phrase deadline included. The reload "
+            "applied and those agents show their failed replies on the display without "
+            "speaking them, which is what makes this a different outcome from "
+            "`disabled` above: nothing was lost but the audio. The next reload tries "
+            "again."
         )
     )
 

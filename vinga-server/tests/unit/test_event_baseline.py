@@ -101,10 +101,11 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     acts for no agent at all (#83), eighty-six since a handshake
     refused by a shutdown stopped being reported as a full server
     (#318), and eighty-seven since a call whose argument types this
-    server corrected says so (#383)."""
+    server corrected says so (#383), and eighty-eight since a failure
+    phrase that would not synthesize says so too (#384)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 87
+    assert len(set(claimed)) == len(claimed) == 88
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -678,6 +679,9 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.filler:build_agent_fillers #1": (
         ("FillerDisabled", ("agent", "error", "event")),
+    ),
+    "vinga_server.filler:build_agent_fillers #2": (
+        ("FallbackDegraded", ("agent", "error", "event")),
     ),
     "vinga_server.onboarding.keys:_log_mismatch #1": (
         ("OnboardingKeyMismatch", ("attempted_length", "event")),

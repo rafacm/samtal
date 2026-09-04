@@ -2758,6 +2758,37 @@ class FillerDisabled(Variant):
     error: ClassName = value()
 
 
+@dataclass(frozen=True)
+class FallbackDegraded(Variant):
+    """The phrase a failed reply says would not synthesize for one
+    agent, so its failed turns are shown and not spoken.
+
+    Its own record rather than `FillerDisabled`'s, because that one's
+    stated meaning is that latency masking is off, and this is not
+    that: nothing about masking has moved, and the agent still says its
+    piece on the display.
+    """
+
+    CHANNEL: ClassVar[str] = FILLER_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "agent %s: the failure phrase would not synthesize, its failed replies are "
+        "shown and not spoken (%s)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("agent", "error")
+
+    agent: Identifier = value()
+    error: ClassName = value(
+        note=(
+            "The class of what the voice or its transport raised, "
+            "`TimeoutError` where the synthesis outran the build's own "
+            "deadline. The class alone, like every other failure "
+            "vocabulary here: a message from near a response body is "
+            "not this server's to write down."
+        )
+    )
+
+
 # --- capture.py: the recording surface --------------------------------
 
 
@@ -3232,6 +3263,17 @@ FILLER_DISABLED = declare(
     "filler_disabled",
     note="Filler synthesis failed for one agent, so latency masking is off for it.",
     variants=(FillerDisabled,),
+)
+
+FALLBACK_DEGRADED = declare(
+    "fallback_degraded",
+    note=(
+        "The phrase a failed reply says would not synthesize for one "
+        "agent, so its failed turns are shown on the display and not "
+        "spoken. Separate from `filler_disabled`, whose meaning is that "
+        "latency masking is off."
+    ),
+    variants=(FallbackDegraded,),
 )
 
 CAPTURE_STARTED = declare(

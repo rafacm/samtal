@@ -104,7 +104,11 @@ def config_with_agent(
     asr_text: str = "hello",
     llm_reply: str | None = None,
     server: dict[str, object] | None = None,
+    agent: dict[str, object] | None = None,
 ) -> Config:
+    """One agent on mock providers. `agent` is whatever else that entry
+    should say: the four stages are always named here, so a caller adds
+    the section it is about rather than restating the world around it."""
     llm: dict[str, object] = {"type": "mock"}
     if llm_reply is not None:
         llm["reply"] = llm_reply
@@ -116,7 +120,10 @@ def config_with_agent(
             "tts": {"mock": {"type": "mock"}},
             "vad": {"mock": {"type": "mock"}},
         },
-        agents={"assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")},
+        agents={
+            "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+            | (agent or {})
+        },
         default_agent="assistant",
     )
 

@@ -490,7 +490,14 @@ def _applied(
             prompts=PromptsReload(changed=list(prompts)),
             fillers=fillers
             if fillers is not None
-            else FillersReload(resynthesized=[], reused=[], disabled=[]),
+            else FillersReload(
+                resynthesized=[],
+                reused=[],
+                disabled=[],
+                fallback_resynthesized=[],
+                fallback_reused=[],
+                fallback_degraded=[],
+            ),
             providers=providers
             if providers is not None
             else ProvidersReload(built=[], reused=[], retired=[]),
@@ -511,7 +518,14 @@ def test_apply_prints_what_it_did_and_what_is_running(
     run.runtime["reload"] = _applied(
         servers,
         prompts=("sam",),
-        fillers=FillersReload(resynthesized=["sam"], reused=["kid"], disabled=["mute"]),
+        fillers=FillersReload(
+            resynthesized=["sam"],
+            reused=["kid"],
+            disabled=["mute"],
+            fallback_resynthesized=["kid"],
+            fallback_reused=["sam"],
+            fallback_degraded=["mute"],
+        ),
         providers=ProvidersReload(
             built=["tts.voice"], reused=["llm.mock"], retired=["asr.old"]
         ),
@@ -538,6 +552,12 @@ def test_apply_prints_what_it_did_and_what_is_running(
     assert "  resynthesized: sam" in printed
     assert "  reused: kid" in printed
     assert "  disabled: mute" in printed
+    # And the failure phrases beside them, crossed the other way round
+    # on purpose: the two kinds are staled apart, so one agent can be
+    # reused under one and re-synthesized under the other.
+    assert "  fallback_resynthesized: kid" in printed
+    assert "  fallback_reused: sam" in printed
+    assert "  fallback_degraded: mute" in printed
     # And the engines, whose three outcomes an operator reads for the
     # opposite reason: what was built is what a swap of a local model
     # cost, and what was reused is what it did not.

@@ -111,7 +111,14 @@ async def _reload() -> ConfigReloadResult:
     return ConfigReloadResult(
         mcp=McpReloadResult(started=[], restarted=[], stopped=[], unchanged=[], servers={}),
         prompts=PromptsReload(changed=[]),
-        fillers=FillersReload(resynthesized=[], reused=[], disabled=[]),
+        fillers=FillersReload(
+            resynthesized=[],
+            reused=[],
+            disabled=[],
+            fallback_resynthesized=[],
+            fallback_reused=[],
+            fallback_degraded=[],
+        ),
         providers=ProvidersReload(built=[], reused=[], retired=[]),
         agents=AgentsReload(added=[], removed=[], defaults_changed=False),
     )

@@ -5848,6 +5848,30 @@
             "type": "array",
             "title": "Disabled",
             "description": "The agents whose synthesis failed, sorted. The reload applied and those agents run with the latency mask off, because a filler is a mask and a posture where a text-to-speech hiccup blocked a prompt fix would invert what matters. The next reload tries again."
+          },
+          "fallback_resynthesized": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fallback Resynthesized",
+            "description": "The agents whose failure phrase was spoken again, sorted: a field of the effective `fallback` section moved, or the voice that speaks it did. The whole section is the unit, so switching the section on is here too; every agent named here cost a round of text-to-speech work at the configured provider."
+          },
+          "fallback_reused": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fallback Reused",
+            "description": "The agents whose failure phrase was carried over unchanged, sorted. Kept apart from the filled pauses' own reuse on purpose: an edit to one section never sends the other's words to a voice, so an agent can be here while it is under `resynthesized` above."
+          },
+          "fallback_degraded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fallback Degraded",
+            "description": "The agents whose failure phrase would not synthesize, sorted, the ones that outran the build's own per-phrase deadline included. The reload applied and those agents show their failed replies on the display without speaking them, which is what makes this a different outcome from `disabled` above: nothing was lost but the audio. The next reload tries again."
           }
         },
         "additionalProperties": false,
@@ -5855,10 +5879,13 @@
         "required": [
           "resynthesized",
           "reused",
-          "disabled"
+          "disabled",
+          "fallback_resynthesized",
+          "fallback_reused",
+          "fallback_degraded"
         ],
         "title": "FillersReload",
-        "description": "What a reload did to the pre-synthesized filled pauses.\n\nThree outcomes and no fourth, because a reload makes exactly one of\nthree decisions about an agent that masks its latency. An agent that\nmasks none, or has just switched masking off, is in none of the\nthree: there was no decision to make about it, and naming it under\nan outcome would say there had been.\n\nWhich clips a conversation plays is decided when it opens, so\neverything here reaches the next conversation and none of it changes\nwhat an open one is masking with."
+        "description": "What a reload did to the speech this server synthesizes ahead of\ntime: the filled pauses that mask a slow reply, and the phrase a\nfailed one says.\n\nThree outcomes per kind and no fourth, because a reload makes\nexactly one of three decisions about an agent that configures one.\nAn agent that configures neither, or has just switched one off, is\nin none of that kind's three: there was no decision to make about\nit, and naming it under an outcome would say there had been.\n\nTwo kinds rather than one set of lists, because one agent can meet\nthem differently: a filled pause carried over unchanged beside a\nfailure phrase just re-synthesized is one honest sentence about that\nagent, and a single set of outcomes could only tell it as two\ncontradictory ones.\n\nWhich clips a conversation plays is decided when it opens, so\neverything here reaches the next conversation and none of it changes\nwhat an open one is masking or failing with."
       },
       "GrantsDiff": {
         "properties": {
