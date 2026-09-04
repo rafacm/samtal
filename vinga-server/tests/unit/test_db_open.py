@@ -57,8 +57,9 @@ EXPECTED_COLUMNS = {
     "agents": {"name", "body"},
 }
 
-# The head of the packaged domain chain, which is one revision.
-HEAD = "3001_postgres_domain"
+# The head of the packaged domain chain, which is one revision. A new
+# migration moves this line, deliberately.
+HEAD = "3002_drop_max_tokens_secrets"
 
 SCHEMA = DOMAIN_CHAIN.schema
 
