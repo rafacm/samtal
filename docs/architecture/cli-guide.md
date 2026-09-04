@@ -850,6 +850,21 @@ an entry's name and not the address reached, because the no-leak
 posture applies to progress exactly as it applies to a refusal. And
 none of the four things the counterexample below rejects appears in it.
 
+**The empty line is a guarantee rather than a hope, and it took a second
+try.** Two threads write that line, the command's own and the one
+redrawing it, and the first version waited a bounded second for the
+writer and then erased whatever that wait returned. A redraw held inside
+a write for longer than the bound therefore completed afterwards and
+landed on top of what printed next, which for a refused import is the
+one sentence the command has to say. They share a lock now, held across
+the write itself, so a redraw already in flight finishes before the
+erase begins and none starts after it; there is no bounded wait left
+anywhere in it, because a bound is exactly the window that was the bug.
+What is held is that the erase is the last thing written and the writer
+writes nothing afterwards, and it is held by a case that catches a
+redraw inside the stream, leaves the wait while it is still in there and
+reads back the order the bytes finished in.
+
 Which acts narrate is a fact on the act's row, beside the bound rather
 than read off it, because the two say different things: every act has a
 bound, and only two are waits a person sits through. `events tail` is
