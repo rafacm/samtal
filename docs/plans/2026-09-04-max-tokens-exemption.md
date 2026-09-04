@@ -182,3 +182,66 @@ nothing else learns anything.
   rule anywhere. Documentation footprint: the example fragment(s)
   and `CHANGELOG.md`; generated references expected byte-stable
   and asserted so by their freshness pins.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-04, against commit HEAD^ of this section; the
+reviewer ran about 8 minutes. Verdict: ready after the P1/P2
+amendments.
+
+1. **P1: the case-folded exemption admits undeclared spellings.**
+   Option names are case-sensitive (`OpenaiCompatibleOptions`
+   declares only `max_tokens`, the anthropic reader reads only
+   that spelling, and passthrough checks are case-sensitive), so
+   exempting the lowered name would admit `MAX_TOKENS` and
+   `Max_Tokens`, which nothing declares or reads and which the
+   open-doors type could forward. Compare the original name
+   exactly against `{"max_tokens"}` before lowering for the
+   fragment scan, and add the case variants to the refusals.
+
+2. **P1: the no-migration claim is false and creates an
+   unreplayable export.** `_check_slot` accepts `max_tokens` today
+   and `set_secret` stores it; stored rows are loaded and verified
+   at boot, listed as metadata, and rendered into export commands,
+   so after the change an exported
+   `provider secret set ... max_tokens` line would be refused,
+   breaking the documented export-and-reapply recovery. Handle
+   legacy rows explicitly: prefer a forward data migration
+   removing only provider `secrets.max_tokens` rows, exercised by
+   the wheel-migration lane, with boot, reads, listings and
+   exports verified after, and the withdrawal documented.
+
+3. **P1: the regression census does not prove containment or
+   no-leak behavior.** The narrow tuple has six fragments and the
+   planned refusals omit `apikey` and `credential`; there are no
+   prefix/suffix probes (`max_tokens_backup`); `max_tokens_env` is
+   not a probe because `_env` names are handled before fragment
+   matching; the existing table test drives one surface with a
+   dummy value and checks only the exception string; and the MCP
+   case does not exercise `is_url_credential_parameter`. Enumerate
+   every fragment, exact-name neighbors, case variants and nested
+   keys; add `max_tokens` containment for MCP env, headers and URL
+   query parameters; plant sentinels and assert absence from
+   exception chains, API bodies, logs, stdout and stderr in the
+   `PLANTED_KEYS` style.
+
+4. **P2: the unchanged-value marker behavior is not pinned.** The
+   generic `note: MASK` control stays green even if `max_tokens`
+   is still secret-shaped to `_masked_paths`. Store a numeric
+   `max_tokens`, resubmit `max_tokens: "********"`, and assert a
+   typed `/max_tokens` refusal with the stored integer unchanged;
+   under the old predicate the mask would read as a keep marker
+   and succeed.
+
+5. **P2: no test proves a configured value reaches either
+   builder.** The defect was the default always winning, yet the
+   planned tests stop at `.options`. Add factory-level tests for
+   both builders with a non-default value, one continuing through
+   the request seam to the outgoing `max_tokens`.
+
+6. **P2: the anthropic documentation decision is improperly
+   deferred.** The generic uncommenting test covers only typed
+   types, so untyped anthropic is excluded from it; decide now:
+   document `# max_tokens: 1024` in both LLM fragments and add a
+   targeted anthropic uncommenting-install test.
