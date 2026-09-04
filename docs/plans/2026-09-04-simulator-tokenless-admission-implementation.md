@@ -110,3 +110,11 @@ the field to the top level precisely so that the `websocket` object a
 stock board persists into NVS is untouched, and the compatibility
 argument rests on the firmware parser's fixed five keys rather than on
 an observation this milestone would have had to make.
+
+### M1 PR review round
+
+PR [#387](https://github.com/rafacm/vinga/pull/387). Backend codex
+(codex-cli 0.153.0), model `gpt-5.6-sol`, read-only sandbox,
+2026-09-04, against `b4d67c1f`, runtime 4m17s, posted by the
+self-posting script. No findings; verdict mergeable as is. Nothing
+to resolve.
