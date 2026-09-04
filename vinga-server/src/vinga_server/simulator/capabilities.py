@@ -258,7 +258,9 @@ _PROSE_ROWS: tuple[Capability, ...] = (
     ),
     Capability(
         what="the four states of the reply: activating, admitted, unwelcome, and a "
-        "refusal for anything else",
+        "refusal for anything else, told apart by the reply's own word for how to read "
+        "the device token, so a board a deployment issuing none admits is admitted "
+        "rather than turned away",
         side=SUPPORTED,
         verb=CHECK_IN,
     ),
@@ -276,7 +278,7 @@ _PROSE_ROWS: tuple[Capability, ...] = (
     ),
     Capability(
         what="claiming this board through the configuration API with --claim, and "
-        "checking in again afterwards to be issued a token",
+        "checking in again afterwards to be admitted",
         side=SUPPORTED,
         verb=CHECK_IN,
     ),
