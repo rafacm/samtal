@@ -102,8 +102,13 @@ grows into building both the filler phrases and the one fallback
 phrase per agent, under one staleness rule (each kind keyed by its
 own config section and the TTS provider identity, so toggling the
 filler cannot stale the fallback or the reverse), reusing its
-existing never-fails-the-boot arm and `FillerDisabled`-style
-reporting for a fallback phrase that will not synthesize. The
+existing never-fails-the-boot arm. A fallback phrase that will not
+synthesize degrades rather than disappears: the display half of
+#384 needs no PCM and no working TTS provider, so the cache keeps
+the configured phrase with no clip, a terminal failure still sends
+the display message and closes with `tts stop`, only the audio is
+lost, and the telemetry below distinguishes the two without
+carrying the phrase. The
 cache result carries the fallback clip beside the filler clips per
 agent; the exact shape (a field on `FillerClips` versus a sibling
 mapping in `Fillers`) is the implementer's, with the constraint
@@ -115,10 +120,11 @@ test rejects a new `fallback.py` build module: it would restate
 **Playing lives in the runner; the arm just asks.** `FillerRunner`
 already holds the output handle, the clip view, and the paced
 recipe; it gains `speak_fallback()`, which sends
-`sentence_started(phrase)`, then the clip through the existing
-recipe, swallowing `DeviceGone` and reporting any other failure by
-class name outside the arm, filler-style, and never raising to its
-caller. The failure arm calls it after the reply-failed log and
+`sentence_started(phrase)` whenever the section is enabled, then
+the clip through the existing recipe when one was cached
+(display-only degradation otherwise), swallowing `DeviceGone` and
+reporting any other failure by class name outside the arm,
+filler-style. The failure arm calls it after the reply-failed log and
 after `await self._filler.settle()` (so a sounding filler clip is
 not talked over and the shared encoder is not interleaved); the
 `finally`'s own `settle()` stays and is idempotent. The arm's call
@@ -255,10 +261,12 @@ Existing assets carry the shapes; nothing they pin is restated.
   new general-exception cases beside them.
 - **The clip is cached, not synthesized at failure time**: the TTS
   provider fake counts synthesis calls; a failure turn adds none.
-  A fallback phrase that fails boot synthesis disables with the
-  filler's reporting and the boot survives
-  (`tests/unit/test_filler_cache.py`, `test_session_filler.py`
-  shapes). Reload staleness: editing the phrase resynthesizes,
+  A fallback phrase that fails boot synthesis degrades to
+  display-only and the boot survives: a failure turn on that agent
+  still sends `sentence_started(phrase)` and the closing
+  `tts stop` with no audio batch, and the degradation is visible
+  in the telemetry (`tests/unit/test_filler_cache.py`,
+  `test_session_filler.py` shapes). Reload staleness: editing the phrase resynthesizes,
   toggling the filler alone does not touch the fallback clip, and
   the reverse (`config/diff` tests).
 - **Coordination with the filler**: a failure while the filler
@@ -423,6 +431,12 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    message and closes with `tts stop`, audio becomes optional, and
    telemetry distinguishes audio delivery from display-only
    degradation without carrying the phrase.
+
+   *Resolution*: accepted in full. The cache keeps the phrase with
+   no clip, `speak_fallback` sends the display message whenever
+   the section is enabled and plays audio only when a clip was
+   cached, the boot-failure test asserts the display-only turn,
+   and the events from finding 9's resolution distinguish the two.
 
 5. **P1: `spoken` cannot determine whether the whole reply said
    nothing.** `_speak_reply` clears `spoken` after every completed
