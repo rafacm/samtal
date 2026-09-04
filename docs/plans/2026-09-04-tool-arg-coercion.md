@@ -229,8 +229,11 @@ prove it with a planted sentinel.
   the fake device received (`40`, an `int`) and the turn record's
   claim (`"40"`, the `str`), pinning both halves of the split in
   one test. A companion case drives a value coercion cannot help
-  (`"a lot"`) and asserts the dispatch and refusal are exactly
-  today's.
+  (`"a lot"`), with the fake device scripted to answer the
+  firmware-style refusal rather than its permissive default (which
+  succeeds on anything and would let a guessed conversion pass),
+  and asserts the wire carried exactly `"a lot"` and the scripted
+  error result reached the model unchanged.
 - Existing pins stay green by construction and are the negative
   proof: `tests/unit/test_tools_device.py` pins the wire below the
   site, `tests/unit/test_session_record.py` pins the record's
@@ -358,6 +361,11 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    success, not the firmware-style refusal the test claims to pin.
    Script a strict far-side error and assert both the unchanged
    wire value and the error reaching the model.
+
+   *Resolution*: accepted in full; the companion case now scripts
+   the firmware-style refusal and asserts the unchanged wire value
+   and the error result reaching the model, so the test
+   distinguishes left-unchanged from guessed.
 
 6. **P2: the record/history half of the split is under-pinned.**
    The proposed session test reads the wire and the in-flight
