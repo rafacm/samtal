@@ -415,7 +415,7 @@ Existing assets carry the shapes; nothing they pin is restated.
 
 ## Milestones
 
-- [x] **[M1: the failure arm gets a voice](2026-09-04-reply-failure-fallback-implementation.md#m1-the-failure-arm-gets-a-voice)** (PR TBD). `FallbackConfig` and
+- [x] **[M1: the failure arm gets a voice](2026-09-04-reply-failure-fallback-implementation.md#m1-the-failure-arm-gets-a-voice)** (PR [#390](https://github.com/rafacm/vinga/pull/390)). `FallbackConfig` and
   `fallback_for_agent`; the build pass extended per finding 8's
   settled shape (`FallbackClip`, the `fallbacks` mapping, per-kind
   outcomes, generation, reload response, OpenAPI, diff pair,
