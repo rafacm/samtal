@@ -277,17 +277,26 @@ def _reported(usage: Usage | None) -> tuple[int | None, int | None]:
 def _coercions(sent: Mapping[str, Any], executing: Mapping[str, Any]) -> int:
     """How many of a call's arguments the coercion changed.
 
-    By type as well as by value, and that is the whole reason this is a
-    function rather than a `!=` on the two dicts: `100 == 100.0` and
-    `True == 1` in Python, so a comparison of values alone would report
-    a float rewritten as the integer the schema declared as no change at
-    all, and both the copy and the event beside it exist to say the
-    change happened.
+    Identity first, and for anything left alone it is the whole answer:
+    `with_lossless_coercions` answers the object it was handed for every
+    value it did not convert, so the same object is the same argument
+    whatever it compares to. `NaN` is why that has to be the first
+    question. It is not equal to itself, and both provider adapters
+    decode with Python's permissive `json.loads`, which accepts one, so
+    asking `!=` first reports an untouched `NaN` as coerced: a copy
+    nobody needed and an event saying something that did not happen.
+
+    The type is asked beside the value for the other half, because
+    `100 == 100.0` and `True == 1` in Python. A float rewritten as the
+    integer the schema declared is a different object AND a different
+    type, and it has to count as a change here or the conversion would
+    never leave this method.
     """
     return sum(
         1
         for name, held in executing.items()
-        if type(held) is not type(sent[name]) or held != sent[name]
+        if held is not sent[name]
+        and (type(held) is not type(sent[name]) or held != sent[name])
     )
 
 

@@ -230,6 +230,29 @@ def test_the_arguments_handed_in_are_not_touched() -> None:
     assert coerced is not sent
 
 
+def test_a_value_left_alone_is_answered_as_the_object_it_arrived_as() -> None:
+    """The contract the caller's change count is read through.
+
+    A caller has to tell a converted argument from an untouched one, and
+    comparison cannot answer that for every value: `NaN` is not equal to
+    itself, and both provider adapters decode with Python's permissive
+    `json.loads`, which accepts one. So a value no rule converted comes
+    back as the same object, and identity is the honest question.
+    """
+    sent: dict[str, Any] = {
+        "volume": "a lot",
+        "level": float("nan"),
+        "shape": {"nested": "100"},
+        "undeclared": "100",
+    }
+    coerced = with_lossless_coercions(
+        sent, schema_of(volume={"type": "integer"}, level={"type": "number"})
+    )
+
+    for name in sent:
+        assert coerced[name] is sent[name], name
+
+
 def test_no_arguments_at_all_is_no_arguments_at_all() -> None:
     assert with_lossless_coercions({}, INTEGER) == {}
 
