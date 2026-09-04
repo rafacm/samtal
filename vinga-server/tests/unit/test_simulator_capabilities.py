@@ -39,11 +39,16 @@ def every_declared_message_is_classified(rows: tuple[capabilities.Capability, ..
     message with no row is a claim the help does not make, which is how a
     fourth listening state would arrive silently supported. A row for a
     message the protocol does not declare is a claim about nothing.
+
+    Which rows are message rows is the kind they declare, not the words
+    they start with. A prose row may therefore be worded any way at all,
+    and an invented message row is counted here only if it says it is
+    one.
     """
     named = capabilities.named_message
     declared = {named(row, "sending") for row in capabilities.sent_messages()}
     declared |= {named(row, "reading") for row in capabilities.received_messages()}
-    classified = {row.what for row in rows if row.what.startswith(("sending ", "reading "))}
+    classified = {row.what for row in rows if row.kind == capabilities.MESSAGE}
     assert classified == declared
 
 
@@ -104,8 +109,16 @@ def test_the_read_side_is_closed_exactly_as_the_send_side_is() -> None:
     """The second pin, stated as its own claim: a message type the server
     can send and this table does not name is one a session would meet as
     a surprise."""
+    # The split is deliberately two different reads. Which rows are
+    # message rows at all is the kind they declare. WHICH HALF of the
+    # wire one is stays an inspection of the `what`, because that
+    # spelling has exactly one author, `named_message`, and this reads
+    # that one format rather than English: a direction field on the row
+    # would widen the table for the sake of this line alone.
     reading = {
-        row.what for row in capabilities.rows() if row.what.startswith("reading ")
+        row.what
+        for row in capabilities.rows()
+        if row.kind == capabilities.MESSAGE and row.what.startswith("reading ")
     }
     for message_type in SERVER_MESSAGE_TYPES:
         assert any(f"reading {message_type}" in what for what in reading), message_type
@@ -131,9 +144,18 @@ def test_nothing_is_claimed_supported_that_this_milestone_did_not_ship() -> None
 
 def test_a_removed_entry_fails_the_completeness_assertion() -> None:
     """Doctored in the direction a real omission takes: one message row
-    dropped."""
+    dropped.
+
+    The row is found by the kind it declares, and named by the one
+    spelling `named_message` owns rather than by a prefix.
+    """
+    abort = capabilities.named_message(
+        ("abort", capabilities.NONE_DECLARED, capabilities.NONE_DECLARED), "sending"
+    )
     thinned = tuple(
-        row for row in capabilities.rows() if not row.what.startswith("sending abort")
+        row
+        for row in capabilities.rows()
+        if not (row.kind == capabilities.MESSAGE and row.what == abort)
     )
 
     with pytest.raises(AssertionError):
@@ -141,6 +163,10 @@ def test_a_removed_entry_fails_the_completeness_assertion() -> None:
 
 
 def test_an_invented_entry_fails_it_from_the_other_side() -> None:
+    """The invented row declares itself a message row, which under
+    declared kinds is what puts it in front of the assertion at all: a
+    claim about the wire that does not say it is one is not counted, and
+    saying it is one is what makes it a claim about nothing."""
     invented = (
         *capabilities.rows(),
         capabilities.Capability(
