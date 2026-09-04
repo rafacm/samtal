@@ -75,6 +75,16 @@ KEY_SENTINEL = "sk-test-9d41ac60-never-a-real-credential"
 # so one assertion covers both halves of the same paste.
 URL_KEY_SENTINEL = "sk-live-4b7d2e10-never-a-real-one"
 
+# The fourth sentinel, for the one refusal below whose rejected value
+# is not a credential-shaped key but a credential pasted where an
+# integer belongs. `max_tokens` is a declared option again (#277), so a
+# value written there is refused for its type, and pydantic builds that
+# message from the constraint rather than from the input; this is what
+# holds it to that. Distinct from the three sentinels around it, and
+# not an integer, because a case asserting the absence of a value the
+# request never carried asserts nothing at all.
+MAX_TOKENS_SENTINEL = "sk-test-7c9e4d15-never-a-real-cap"
+
 
 @pytest.fixture
 def keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,12 +124,21 @@ def client(api: FastAPI) -> Iterator[TestClient]:
 
 
 class Refusal(NamedTuple):
+    """One refusal, and what it must not carry.
+
+    `sentinel` is what to look for, and it is a field rather than the
+    module's constant for the reason `PlantedKey` below has one: the
+    value a request was refused for differs per case, and asserting the
+    absence of a value that request never sent asserts nothing.
+    """
+
     what: str
     path: str
     fragment: dict[str, object]
     write: Callable[[ConfigStore, dict[str, object]], None]
     entity: str
     pointers: list[str]
+    sentinel: str = SENTINEL
 
 
 REFUSALS = [
@@ -205,7 +224,7 @@ REFUSALS = [
             "type": "openai_compatible",
             "base_url": "http://localhost:11434/v1",
             "model": "qwen3:8b",
-            "max_tokens": "1024",
+            "max_tokens": MAX_TOKENS_SENTINEL,
         },
         lambda store, fragment: store.set_provider("llm", "local", fragment),
         "providers.llm.local",
@@ -217,6 +236,12 @@ REFUSALS = [
         # type now, so it is answered as one, exactly like `beam_size`
         # above.
         ["/max_tokens"],
+        # And what it is refused FOR is a credential pasted where the
+        # cap goes, which is the ordinary way a value lands in a typed
+        # field that will not take it. A plain "1024" would have been
+        # refused just as well and would have made every no-leak
+        # assertion about a string the request did not carry.
+        MAX_TOKENS_SENTINEL,
     ),
     Refusal(
         "a declared nested option of a typed provider type",
@@ -322,7 +347,7 @@ def test_a_refusal_names_its_entity_and_addresses_each_problem(
     assert detail.startswith(f"invalid {case.entity}:")
     assert paths(body) == case.pointers
     assert len(detail.splitlines()) == 1 + len(case.pointers)
-    assert SENTINEL not in response.text
+    assert case.sentinel not in response.text
 
 
 @pytest.mark.parametrize("case", REFUSALS, ids=REFUSAL_IDS)
@@ -348,6 +373,82 @@ def test_the_api_answers_the_repository_s_own_words(
         {"path": problem.path, "message": problem.message}
         for problem in caught.value.problems
     ]
+
+
+def test_every_refusal_names_the_sentinel_it_actually_carries() -> None:
+    """The guard the case below rests on, and the one the `max_tokens`
+    row went without.
+
+    A no-leak assertion about a value the request never sent is green
+    whatever the refusal says, so the table is held to declaring the
+    sentinel it plants: a fragment carrying one of this module's
+    sentinels must name that one, and a fragment carrying none is a case
+    about shape rather than about a value and says so by leaving the
+    field at its default.
+    """
+    sentinels = (SENTINEL, KEY_SENTINEL, URL_KEY_SENTINEL, MAX_TOKENS_SENTINEL)
+    for case in REFUSALS:
+        written = str(case.fragment)
+        carried = [sentinel for sentinel in sentinels if sentinel in written]
+        assert carried in ([], [case.sentinel]), case.what
+
+
+@pytest.mark.parametrize("case", REFUSALS, ids=REFUSAL_IDS)
+def test_no_refusal_carries_the_value_it_was_refused_for(
+    client: TestClient,
+    store: ConfigStore,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    case: Refusal,
+) -> None:
+    """The standing no-leak claim, per refusal and on both paths to it.
+
+    The two cases above are about what a refusal SAYS, and each of them
+    checks one surface in passing. This one is about what a refusal must
+    not say, and it is separate because the surfaces are not one: an
+    exception carries its message, its repr, its cause, its context and
+    its structured problems, a response carries a body and headers, a
+    log line carries whatever the formatter puts in it, and the two
+    process streams carry anything that never went through the logging
+    machinery at all.
+
+    The value looked for is the case's own, which is the half the
+    `max_tokens` row made necessary: it is refused for a credential
+    pasted where an integer belongs rather than for a credential-shaped
+    key, so the module's key sentinel says nothing about it.
+    """
+    with pytest.raises(ConfigError) as caught:
+        case.write(store, case.fragment)
+
+    refusal = caught.value
+    assert case.sentinel not in str(refusal)
+    assert case.sentinel not in repr(refusal)
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+    for carried in refusal.problems:
+        assert case.sentinel not in carried.path
+        assert case.sentinel not in carried.message
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(case.path, json=case.fragment)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert case.sentinel not in body["detail"]
+    for error in body["errors"]:
+        assert case.sentinel not in error["path"]
+        assert case.sentinel not in error["message"]
+    assert case.sentinel not in response.text
+    assert case.sentinel not in str(response.headers)
+
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    for record in caplog.records:
+        assert case.sentinel not in logs.JsonFormatter().format(record)
+        assert case.sentinel not in text.format(record)
+
+    streams = capsys.readouterr()
+    assert case.sentinel not in streams.out
+    assert case.sentinel not in streams.err
 
 
 # The mechanism
