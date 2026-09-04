@@ -63,7 +63,15 @@ field is required like `side`, not defaulted: the issue's point is
 that classification is declared, and a default is a classification
 nobody wrote. The cost is one mechanical token on each of the 20
 prose rows and the derived constructor; the constants join
-`__all__`. The alias is spelled `RowKind` because `Kind` and
+`__all__`. The `Literal` is honest about what it is here: this
+module is outside the one package the type checker runs on, and a
+dataclass validates no annotation at runtime, so the closed set is
+enforced by a test invariant rather than assumed from the alias:
+every canonical row's kind is one of the two declared values, the
+two constants are exactly the `Literal`'s members (one encoding,
+not two), and a bite case hands the invariant a table carrying a
+row with an out-of-set kind and watches it go red, the same
+held-to-going-red discipline every other helper in the file keeps. The alias is spelled `RowKind` because `Kind` and
 `ArgKind` are taken by the events vocabulary and grep should stay
 unambiguous.
 
@@ -201,6 +209,11 @@ about 6 minutes. Verdict: ready after the P1/P2 amendments.
    the two declared values, a bite case for an invalid kind, and
    an assertion that the constants agree with the `Literal`
    members rather than being a second unchecked encoding.
+
+   *Resolution*: accepted in full. The plan now states the alias
+   is unchecked in this module and adds the test invariant (every
+   canonical kind in the closed set, the constants exactly the
+   `Literal`'s members) with its own out-of-set bite case.
 
 4. **P2: the read-side design still parses wording, contrary to
    the plan's claims.** Filtering by kind prevents prose
