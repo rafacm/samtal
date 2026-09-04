@@ -443,7 +443,7 @@ Existing assets carry the shapes; nothing they pin is restated.
   owner of paced clip playback grows its second caller's verb) and
   the config models; no new module. Documentation footprint as
   listed; the root README `vinga events` line lands here.
-- [ ] **M2: the sentence guard.** The predicate in
+- [x] **[M2: the sentence guard](2026-09-04-reply-failure-fallback-implementation.md#m2-the-sentence-guard)** (PR TBD). The predicate in
   `runtime/speech.py`; the two `_tool_loop` sites; the
   empty-reply fallback with `nothing_sayable`; the
   `sentence_withheld` event; the guard and session tests; the
