@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from sqlalchemy import inspect, text
 
 import vinga_server.app as app_module
+from tests.conftest import LANE_DATABASE
 from tests.support.configs import config_with_agent
 from vinga_server.app import StartupFailed, create_app
 from vinga_server.config import Config
@@ -186,14 +187,30 @@ def test_recording_off_starts_no_writer_and_writes_no_rows(
 ) -> None:
     """Criterion 1, restated for a store with no file (#283): an absent
     or disabled section leaves the server as it was, which now means no
-    writer, no rows, and nothing said."""
+    writer, no rows, and nothing said.
+
+    One configuration, built once and used for both halves, because for
+    a while this test was two halves naming two databases: the boot went
+    through the payload door onto `vinga` while the count opened the
+    lane's own, so the zero it asserted was about a database it had
+    never touched and would have been zero however many rows the boot
+    wrote (#333). The count is queried through THIS configuration's own
+    section, and the connection is asked which database it landed in
+    before it counts anything, so the two halves cannot come apart again
+    without saying so.
+    """
+    config = quiet_config(section=section)
+    assert config.server.database.name == LANE_DATABASE
+
     with caplog.at_level("INFO"):
-        with TestClient(create_app(quiet_config(section=section))) as client:
+        with TestClient(create_app(config)) as client:
             assert client.app.state.composition.conversations is None
 
-    engine = open_conversations(DatabaseConfig())
+    engine = open_conversations(config.server.database)
     try:
         with engine.connect() as connection:
+            landed = connection.execute(text("select current_database()")).scalar()
+            assert landed == LANE_DATABASE
             counted = connection.execute(
                 text(f"select count(*) from {SCHEMA}.sessions")
             ).scalar()
