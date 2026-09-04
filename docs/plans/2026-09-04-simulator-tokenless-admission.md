@@ -109,11 +109,16 @@ last step is amended: the field decides when it is present, and a
 missing field (an older server image, exactly the skew #386
 documents) falls back to today's token rule, so the simulator
 against an old image behaves as it does now rather than worse.
-A reply whose field contradicts its token (`"token"` with an empty
-token, `"open"` or `"denied"` with a non-empty one) is `Refused` as
-the contradictory replies already are: refused rather than
-resolved. An unknown literal in the field is read as the field
-being absent, so a newer server never strands an older simulator.
+A reply whose field contradicts what stands beside it is `Refused`
+as the contradictory replies already are, refused rather than
+resolved, and the matrix is stated whole: `"token"` with an empty
+token; `"open"` or `"denied"` with a non-empty one; and an
+activation object beside `"open"` or `"token"`, since a board
+being claimed is by definition not yet admitted and no server
+decision site can emit that pairing. Activation is compatible only
+with an absent field (an older server) or `"denied"`, and the
+contradiction checks run before the activation classification the
+way the existing token-beside-activation check already does.
 
 **`converse()` presents no credential it does not have.** The
 websocket opener currently always sends `Authorization: Bearer
@@ -180,8 +185,11 @@ simulator's `read()` applies it, and no third place re-derives it.
   resolved websocket target; a `"denied"` reply classifies
   `Unwelcome`; a field-less reply keeps today's classification both
   ways (the fixtures' existing bodies, unchanged, are that case);
-  the two contradictions refuse; an unknown literal falls back to
-  the token rule. The existing
+  every row of the contradiction matrix refuses, as hostile-reply
+  cases: `"token"` with an empty token, `"open"` and `"denied"`
+  with a non-empty one, and an activation object beside `"open"`
+  (the empty-token variant included) and beside `"token"`; an
+  unknown value falls back to the token rule. The existing
   `test_the_conversation_verb_refuses_a_board_that_may_not_speak`
   keeps its `unwelcome()` half by making that fixture an explicit
   `"denied"` (or leaving it field-less), and a new case beside it
@@ -298,6 +306,13 @@ read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
    `"denied"`; `activation + "open"` and `activation + "token"`
    must be `Refused`, with hostile-reply tests including the
    empty-token `"open"` case.
+
+   *Resolution*: accepted in full. The contradiction matrix is now
+   stated whole in the classification section, activation is
+   declared compatible only with an absent field or `"denied"`,
+   the checks are ordered before the activation classification,
+   and the test list names every row as a hostile-reply case,
+   the empty-token `"open"`-beside-activation variant included.
 
 3. **P2: the claimed complete `Unwelcome` diagnosis still omits
    reachable causes.** `onboarding/unbound.py` can suppress
