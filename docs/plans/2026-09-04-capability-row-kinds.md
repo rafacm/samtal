@@ -45,7 +45,11 @@ left behind in the 2026-08-25 implementation doc. Nothing outside
 the module and its test reads `Capability` fields except the two
 `cli.py` epilog calls, and the epilog renders `side`, `what`,
 `reason` and `verb` only, so a new field that changes no text
-leaves `docs/reference/cli.md` and the census manifest untouched.
+leaves `docs/reference/cli.md` byte-identical. The census manifest
+is a different matter: it records physical line positions across
+every tracked file, `CHANGELOG.md` and the 2026-08-25
+implementation doc included, so this plan's own CHANGELOG entry
+and dated pointer stale it and it regenerates through its module.
 
 ## Open questions, resolved
 
@@ -126,8 +130,11 @@ knowing how message rows are worded.
   default, so a missed site is a `TypeError` at import, caught by
   the first test run rather than by review.
 - **Accidental text drift.** No `what`, `reason` or heading
-  changes; the docgen freshness pin and the census both go red if
-  a byte moves, and the plan changes none.
+  changes; the docgen freshness pin goes red if a rendered byte
+  moves, and the plan changes none. The census manifest stales on
+  this plan's own doc edits regardless and regenerates through
+  `uv run python -m tests.unit.test_command_spellings`, verified
+  before the unit lane.
 
 ## Milestones
 
@@ -139,9 +146,11 @@ knowing how message rows are worded.
   entry; the implementation-doc section. Design footprint: deepens
   `Capability` (a row states its own classification, and the pins
   stop parsing English); no new module, no interface widening
-  beyond the one declared fact. Documentation footprint: none
-  generated (no rendered byte changes, asserted by the existing
-  freshness pins); `CHANGELOG.md` and the dated pointer only.
+  beyond the one declared fact. Documentation footprint:
+  `docs/reference/cli.md` stays byte-identical (asserted by its
+  freshness pin); the census manifest regenerates through its
+  module because the CHANGELOG entry and the dated pointer move
+  recorded line positions; `CHANGELOG.md` and the dated pointer.
 
 ## Plan review round
 
@@ -157,6 +166,11 @@ about 6 minutes. Verdict: ready after the P1/P2 amendments.
    `docs/reference/cli.md` stays byte-identical. Say so, add the
    regeneration to the footprint, and verify with the generator
    module before the unit lane.
+
+   *Resolution*: accepted in full. The no-byte-moves claim is now
+   scoped to `docs/reference/cli.md`; the facts section, the risk
+   and the milestone footprint all carry the manifest regeneration
+   with its reason and the verification order.
 
 2. **P2: the freedom pin does not work with the helpers as
    shaped.** `every_row_renders_on_the_side_it_declares` renders
