@@ -78,8 +78,14 @@ a place there (it contains a fragment, it is a declared option a
 builder reads, and it is not a credential).
 
 **The exemption lives inside `secret_option_fragment`, so every
-reader agrees by construction.** The compare is on the lowered
-name, before the fragment scan. Because all six consumers derive
+reader agrees by construction.** The compare is exact and
+case-sensitive, on the original name against the one-entry set,
+before the lowering the fragment scan does: option names are
+case-sensitive everywhere they are declared and read, so
+`MAX_TOKENS` and `Max_Tokens` are spellings nothing declares, and
+exempting them would hand the open-doors type a passthrough field
+the fix never meant to admit. The case variants join the refusal
+matrix. Because all six consumers derive
 from this one function, the write refusal, the slot check, the
 display mask, the unchanged-value marks and the record path move
 together automatically, which is the issue's move-together
@@ -199,6 +205,10 @@ amendments.
    open-doors type could forward. Compare the original name
    exactly against `{"max_tokens"}` before lowering for the
    fragment scan, and add the case variants to the refusals.
+
+   *Resolution*: accepted in full; the compare is exact and
+   case-sensitive on the original name, with the case variants in
+   the refusal matrix and the passthrough consequence stated.
 
 2. **P1: the no-migration claim is false and creates an
    unreplayable export.** `_check_slot` accepts `max_tokens` today
