@@ -227,8 +227,19 @@ def _kept_fallback(
 
     A phrase kept with no clip is kept as it is rather than retried: it
     is the same phrase in the same voice, and the voice already answered
-    for it. The retry is the next apply, where a rebuilt engine is a
-    different object and this comparison says so.
+    for it. So an ordinary apply that moved neither carries the
+    degradation over and reports the agent as reused, which is what the
+    reload response says in as many words. What retries it is a change
+    to its own section or to the entry its voice is built from, since a
+    rebuilt engine is a different object and this comparison says so,
+    and a restart, which composes from no previous world at all.
+
+    Unlike the filler beside it, where a failed synthesis leaves nothing
+    in the mapping and the next build therefore finds nothing to keep.
+    The difference is the degradation itself: this kind keeps the words
+    when it loses the audio, and there is no way to hold a usable
+    display half and a retriable audio half in one entry without saying
+    which of the two a caller is looking at.
     """
     if previous is None:
         return None

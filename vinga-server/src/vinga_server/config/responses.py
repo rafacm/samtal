@@ -424,8 +424,12 @@ class FillersReload(BaseModel):
             "that outran the build's own per-phrase deadline included. The reload "
             "applied and those agents show their failed replies on the display without "
             "speaking them, which is what makes this a different outcome from "
-            "`disabled` above: nothing was lost but the audio. The next reload tries "
-            "again."
+            "`disabled` above: nothing was lost but the audio. A later reload retries "
+            "one of them when its `fallback` section or the voice that would speak it "
+            "changes, and not otherwise: the phrase is cached without audio rather "
+            "than absent, so an apply that moved neither carries it over and reports "
+            "the agent under `fallback_reused`. Restarting the server retries every "
+            "one of them, since a start keeps nothing from the process before it."
         )
     )
 

@@ -287,3 +287,52 @@ async def test_rewording_the_failure_phrase_leaves_the_filler_alone() -> None:
     assert second.clips["assistant"] is first.clips["assistant"]
     assert second.fallback_resynthesized == ("assistant",)
     assert second.fallbacks["assistant"].phrase == "Sorry, I broke."
+
+
+async def test_an_unchanged_degraded_phrase_is_carried_over_rather_than_retried() -> None:
+    """What the reload response promises, pinned against what the cache
+    actually does.
+
+    A failure phrase that lost its audio is cached without it rather
+    than left out, because the words are the half the display needs. So
+    an apply that moved neither the section nor the voice finds a clip
+    to keep and keeps it: the agent is reused, no phrase is sent to a
+    voice, and the degradation survives. That is the opposite of the
+    filled pause beside it, whose failed synthesis leaves nothing in the
+    mapping and is therefore tried again by the very next build, and the
+    two descriptions have to say which of the two they are.
+    """
+    config = config_with_agent()
+    providers = voiced(config, BrokenTts())
+    first = await build_agent_fillers(config, providers)
+    assert first.fallback_degraded == ("assistant",)
+
+    second = await build_agent_fillers(
+        config, providers, previously(config, first, providers)
+    )
+
+    assert second.fallback_reused == ("assistant",)
+    assert second.fallback_degraded == ()
+    # The object itself, which is what says nothing was asked of the
+    # voice a second time, and the degradation with it.
+    assert second.fallbacks["assistant"] is first.fallbacks["assistant"]
+    assert second.fallbacks["assistant"].clip is None
+
+
+async def test_moving_the_phrase_retries_a_degraded_agent() -> None:
+    """And the condition the description names: an edit to the section
+    is what asks the voice again, so an operator who wants a retry has
+    something to do other than wait for a reload that would not have
+    done one."""
+    providers = voiced(config_with_agent(), BrokenTts())
+    before = config_with_agent()
+    first = await build_agent_fillers(before, providers)
+
+    after = config_with_agent(agent={"fallback": {"phrase": "Sorry, I broke."}})
+    second = await build_agent_fillers(
+        after, providers, previously(before, first, providers)
+    )
+
+    assert second.fallback_degraded == ("assistant",)
+    assert second.fallback_reused == ()
+    assert second.fallbacks["assistant"].phrase == "Sorry, I broke."
