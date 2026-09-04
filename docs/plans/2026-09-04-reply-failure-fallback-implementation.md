@@ -378,7 +378,7 @@ From `vinga-server/`:
 - `uv run ruff check .` clean.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`: 5393 passed,
   19 skipped.
-- `uv run pytest tests/integration -q`: see the PR's verification list.
+- `uv run pytest tests/integration -q`: 239 passed.
 - `python3 scripts/check_doc_links.py .` from the repository root: 185
   files, 0 failures.
 
