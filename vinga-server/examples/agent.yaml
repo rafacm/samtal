@@ -62,6 +62,15 @@ prompt_includes:
 # filler:
 #   enabled: false
 
+# What this agent says when a reply fails outright, which it does unless
+# this says otherwise. An agent may name its own fallback section, which
+# replaces the inherited one wholly rather than merging with it; see
+# examples/agent-defaults.yaml for what the section holds. Off leaves
+# this agent's failed turns silent, which is what they were before the
+# phrase existed.
+# fallback:
+#   enabled: false
+
 # Whether this agent remembers anything, which it does unless this says
 # otherwise. Off is the whole family at once: no memory tools are
 # offered and no remembered facts, no notes about the board and no

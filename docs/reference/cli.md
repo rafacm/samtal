@@ -1492,6 +1492,8 @@ fragment fields for agent (agents.<name>):
     The MCP servers whose tools this layer offers the model.
   filler: FillerConfig | null  (default: null)
     Latency masking with a pre-synthesized filled pause.
+  fallback: FallbackConfig | null  (default: null)
+    What a failed reply says out loud and on the display.
   memory: MemoryPolicy | null  (default: null)
     Whether this layer may remember anything.
   prompt_includes: list[str] | null  (default: null)
@@ -1509,6 +1511,10 @@ fragment fields for agent (agents.<name>):
   filler.phrases: list[str]  (default: [])
     The phrases to play, written in the agent's own language; the player
     rotates through them rather than always playing the same one.
+  fallback.enabled: bool  (default: true)
+    Whether a failed reply says so out loud and on the display.
+  fallback.phrase: str  (default: "I ran into a problem and could not answer. The server log has the details.")
+    What a failed reply says, written in the agent's own language.
   memory.enabled: bool  (default: true)
     Whether this agent may remember anything.
 
@@ -1671,6 +1677,8 @@ fragment fields for agent defaults (agent_defaults):
     The MCP servers whose tools this layer offers the model.
   filler: FillerConfig | null  (default: null)
     Latency masking with a pre-synthesized filled pause.
+  fallback: FallbackConfig | null  (default: null)
+    What a failed reply says out loud and on the display.
   memory: MemoryPolicy | null  (default: null)
     Whether this layer may remember anything.
   prompt_includes: list[str] | null  (default: null)
@@ -1686,6 +1694,10 @@ fragment fields for agent defaults (agent_defaults):
   filler.phrases: list[str]  (default: [])
     The phrases to play, written in the agent's own language; the player
     rotates through them rather than always playing the same one.
+  fallback.enabled: bool  (default: true)
+    Whether a failed reply says so out loud and on the display.
+  fallback.phrase: str  (default: "I ran into a problem and could not answer. The server log has the details.")
+    What a failed reply says, written in the agent's own language.
   memory.enabled: bool  (default: true)
     Whether this agent may remember anything.
 
@@ -2771,7 +2783,7 @@ Usage: vinga schema [OPTIONS] [ENTITY] [STAGE] [TYPE]
 
 Arguments:
   ENTITY  provider, mcp-server, prompt-fragment, agent, agent-defaults, mcp-
-          grant, filler, memory, domain (default: domain)
+          grant, filler, fallback, memory, domain (default: domain)
   STAGE   with TYPE, the options of one provider type: llm, asr, tts or vad
   TYPE    with STAGE, the provider type whose options to print
 

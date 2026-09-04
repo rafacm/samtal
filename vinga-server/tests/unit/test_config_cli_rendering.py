@@ -685,6 +685,7 @@ DIFF_EMPTY: dict[str, object] = {
         "grants": {"applies": "reload", "changed": []},
         "prompt": {"applies": "reload", "changed": []},
         "filler": {"applies": "reload", "changed": []},
+        "fallback": {"applies": "reload", "changed": []},
     },
     "devices": {"applies": "check-in"},
     "default_agent": {"applies": "check-in"},
@@ -725,7 +726,7 @@ def test_the_comparison_head_names_the_command_that_crosses_each_label(
 
 
 def test_the_comparison_names_what_moved_and_where_it_reaches() -> None:
-    """The three clocks an agent's entry has, each printed under the
+    """The four clocks an agent's entry has, each printed under the
     agent kind that holds them."""
     body = {**DIFF_EMPTY}
     body["agents"] = {

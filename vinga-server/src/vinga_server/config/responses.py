@@ -728,23 +728,53 @@ class FillerDiff(BaseModel):
     )
 
 
+class FallbackDiff(BaseModel):
+    """The agents whose failure phrase the stored configuration would
+    move, which is the half of an agent entry a reload synthesizes again
+    and the next conversation opens on.
+
+    Beside `filler` rather than folded into it, because the two are
+    staled apart: an operator who switched the latency mask off has not
+    asked for a failure phrase to be sent to a voice, and the reverse.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applies: Applies
+    changed: tuple[str, ...] = Field(
+        description=(
+            "The agents whose stored `fallback` section differs from what this server "
+            "is serving, sorted. A reload synthesizes the new phrase in each agent's "
+            "own voice and the next session speaks it when a reply fails; a "
+            "conversation already open keeps the phrase it opened on. Only agents both "
+            "sides hold are compared, for the reason the prompt half gives, and only "
+            "each agent's own section: what `agent_defaults.fallback` holds is "
+            "inherited by every agent that configures none of its own, and an edit to "
+            "it is reported against `agent_defaults` instead."
+        )
+    )
+
+
 class AgentsDiff(EntityDiff):
     """The agents. A reload applies the whole entry, so `changed` above
-    compares the whole entry, and the three entries below break that one
+    compares the whole entry, and the four entries below break that one
     answer into the moments a conversation meets each part at: `grants`
-    at its next utterance, `prompt` at its next activation, `filler` when
-    the next conversation opens.
+    at its next utterance, `prompt` at its next activation, `filler` and
+    `fallback` when the next conversation opens.
 
     A breakdown and not an exception: an agent whose prompt alone moved
     is in `changed` and in `prompt`, which is one change reported at the
-    altitude an operator asks about it. The three carry `reload` for the
+    altitude an operator asks about it. The four carry `reload` for the
     same reason the kind does, and they exist because the clocks differ
-    and a single label cannot say which one an edit is on.
+    and a single label cannot say which one an edit is on. The last two
+    share a clock and stay apart anyway, because they are re-synthesized
+    apart.
     """
 
     grants: GrantsDiff
     prompt: PromptDiff
     filler: FillerDiff
+    fallback: FallbackDiff
 
 
 class SingletonDiff(BaseModel):

@@ -66,6 +66,22 @@ prompt_includes:
 #     - "Hmm, let me see..."
 #     - "Good question..."
 
+# What a failed reply says out loud and on the display, which it does
+# unless this says otherwise. A reply that fails terminally used to be a
+# silent turn, which from the couch is indistinguishable from a slow
+# one; the phrase below is spoken instead, synthesized once at boot in
+# the agent's own voice and cached exactly like the filler clips above,
+# so a broken turn costs no text-to-speech call and says its piece even
+# when the voice is what broke. It is fixed configuration and never the
+# failure's own words, which arrive from the far side of a network.
+# Written here it is the deployment-wide default, and an agent that
+# names its own fallback section replaces this one wholly, like the
+# stage fields above. Setting enabled to false leaves that agent's
+# failed turns silent.
+# fallback:
+#   enabled: true
+#   phrase: "I ran into a problem and could not answer. The server log has the details."
+
 # Whether agents remember anything, which they do unless this says
 # otherwise. Written here it is the deployment-wide answer, and an agent
 # that names its own memory section replaces this one wholly, like the

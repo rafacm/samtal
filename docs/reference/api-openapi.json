@@ -4813,6 +4813,9 @@
           },
           "filler": {
             "$ref": "#/components/schemas/FillerDiff"
+          },
+          "fallback": {
+            "$ref": "#/components/schemas/FallbackDiff"
           }
         },
         "additionalProperties": false,
@@ -4824,10 +4827,11 @@
           "changed",
           "grants",
           "prompt",
-          "filler"
+          "filler",
+          "fallback"
         ],
         "title": "AgentsDiff",
-        "description": "The agents. A reload applies the whole entry, so `changed` above\ncompares the whole entry, and the three entries below break that one\nanswer into the moments a conversation meets each part at: `grants`\nat its next utterance, `prompt` at its next activation, `filler` when\nthe next conversation opens.\n\nA breakdown and not an exception: an agent whose prompt alone moved\nis in `changed` and in `prompt`, which is one change reported at the\naltitude an operator asks about it. The three carry `reload` for the\nsame reason the kind does, and they exist because the clocks differ\nand a single label cannot say which one an edit is on."
+        "description": "The agents. A reload applies the whole entry, so `changed` above\ncompares the whole entry, and the four entries below break that one\nanswer into the moments a conversation meets each part at: `grants`\nat its next utterance, `prompt` at its next activation, `filler` and\n`fallback` when the next conversation opens.\n\nA breakdown and not an exception: an agent whose prompt alone moved\nis in `changed` and in `prompt`, which is one change reported at the\naltitude an operator asks about it. The four carry `reload` for the\nsame reason the kind does, and they exist because the clocks differ\nand a single label cannot say which one an edit is on. The last two\nshare a clock and stay apart anyway, because they are re-synthesized\napart."
       },
       "AgentsReload": {
         "properties": {
@@ -5772,6 +5776,29 @@
         ],
         "title": "Erasure",
         "description": "What a deletion took, per table.\n\nCounts rather than an acknowledgement sentence, because the caller\nof a purge asked about a set it named by selector and cannot know\nwhat was in it. Eight numbers rather than one, because the tables go\nfor different reasons: a session's own row, the turns that named it\nwherever their thread is, the invocations under those turns, the\nsession's telemetry, the recap checkpoints whose coverage held an\nerased turn, the threads left with nothing, and the two halves of\nthe memory those threads took with them."
+      },
+      "FallbackDiff": {
+        "properties": {
+          "applies": {
+            "$ref": "#/components/schemas/Applies"
+          },
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed",
+            "description": "The agents whose stored `fallback` section differs from what this server is serving, sorted. A reload synthesizes the new phrase in each agent's own voice and the next session speaks it when a reply fails; a conversation already open keeps the phrase it opened on. Only agents both sides hold are compared, for the reason the prompt half gives, and only each agent's own section: what `agent_defaults.fallback` holds is inherited by every agent that configures none of its own, and an edit to it is reported against `agent_defaults` instead."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "applies",
+          "changed"
+        ],
+        "title": "FallbackDiff",
+        "description": "The agents whose failure phrase the stored configuration would\nmove, which is the half of an agent entry a reload synthesizes again\nand the next conversation opens on.\n\nBeside `filler` rather than folded into it, because the two are\nstaled apart: an operator who switched the latency mask off has not\nasked for a failure phrase to be sent to a voice, and the reverse."
       },
       "FillerDiff": {
         "properties": {
@@ -7595,6 +7622,27 @@
         "title": "PromptFragmentConfig",
         "type": "object"
       },
+      "FallbackConfig": {
+        "additionalProperties": false,
+        "description": "What the user hears when a reply fails outright.\n\nA terminally failed reply used to be a silent turn: the failure was\nlogged and nothing reached the speaker or the display, so from the\ncouch a broken pipeline was indistinguishable from a slow one\n(#384). This is the short fixed phrase that ends that silence,\nsynthesized in the agent's own voice at the server start and cached\nas PCM exactly the way a filler clip is, spoken from the failure arm\nand shown on the display.\n\nOn by default, which is the one place this differs from the filler\nbeside it: the silent turn is at its worst during onboarding, where\nmisconfiguration is likeliest and nobody has a log open. A\ndeployment that would rather have silence turns it off.\n\nCached rather than synthesized when the failure happens, for the two\nreasons the filler gives and one more: synthesis at failure time\nwould add latency to a turn that has already gone wrong, and the TTS\nprovider may itself be what failed. A phrase that will not\nsynthesize degrades rather than disappears, since the display half\nneeds no audio at all: the failure still shows the sentence and\nstill closes with the `tts stop` a device waits on, and only the\naudio is lost.",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "description": "Whether a failed reply says so out loud and on the display. On by default, because a silent turn is indistinguishable from a slow one; a deployment that would rather have silence sets this to false.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "phrase": {
+            "default": "I ran into a problem and could not answer. The server log has the details.",
+            "description": "What a failed reply says, written in the agent's own language. Fixed configuration and never the failure's own words, which arrive from the far side of a network and are not this server's to speak.",
+            "minLength": 1,
+            "title": "Phrase",
+            "type": "string"
+          }
+        },
+        "title": "FallbackConfig",
+        "type": "object"
+      },
       "FillerConfig": {
         "additionalProperties": false,
         "description": "Masking reply latency with a pre-synthesized filled pause.\n\nOff by default. When enabled, the phrases are synthesized in the\nagent's own voice ahead of time and cached as PCM; a reply whose\nfirst audio has not started within `delay_ms` of the utterance being\ntranscribed plays one, and the real reply queues behind its tail.\n\"Ahead of time\" is the server start, and a reload after it: an edit\nhere is synthesized again while the process runs and reaches the\nnext conversation, since a conversation already open keeps the clips\nit opened with. A synthesis failure logs a warning and leaves the\nfeature off for that agent rather than failing the boot or refusing\nthe reload.",
@@ -7771,6 +7819,18 @@
             "default": null,
             "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
           },
+          "fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What a failed reply says out loud and on the display. Unset inherits the agent_defaults section, and an agent under neither speaks the declared default phrase, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `fallback: {enabled: false}` opts an agent out and leaves its failed turns silent."
+          },
           "memory": {
             "anyOf": [
               {
@@ -7905,6 +7965,18 @@
             ],
             "default": null,
             "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What a failed reply says out loud and on the display. Unset inherits the agent_defaults section, and an agent under neither speaks the declared default phrase, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `fallback: {enabled: false}` opts an agent out and leaves its failed turns silent."
           },
           "memory": {
             "anyOf": [
