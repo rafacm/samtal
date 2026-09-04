@@ -17,12 +17,15 @@ secret rather than by reading the code that drops it.
 """
 
 import json
+import sys
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
 
-from tests.support.configs import BOTH_MAC, POET_MAC, base_config
-from tests.support.device_tools import FakeDevice
+from tests.support.configs import BOTH_MAC, POET_MAC, STDIO_SERVER, base_config
+from tests.support.device_tools import VOLUME, FakeDevice
 from tests.support.events import both_formats, events, fields_of, only
 from tests.support.providers import ScriptedLlm, built_world
 from tests.support.records import SpyStore
@@ -31,8 +34,10 @@ from tests.support.sockets import OrderedSocket
 from vinga_server.config import Config
 from vinga_server.device.session import DeviceSession
 from vinga_server.filler import build_agent_fillers
+from vinga_server.providers import LlmProvider, TextDelta, Turn
 from vinga_server.providers.base import TtsProvider
 from vinga_server.providers.mock import MockTts
+from vinga_server.tools.mcp import McpServers
 
 # One frame of silence, which the mock ASR answers with "hello" whatever
 # it holds: these tests are about what the reply speaks, not what was
@@ -426,3 +431,128 @@ async def test_a_far_side_tool_name_reaches_no_payload_or_log(
     assert fields_of(withheld)["source"] == "device"
     assert "tool" not in fields_of(withheld)
     assert SENTINEL not in both_formats(caplog)
+
+
+# --- what a withholding is named, when the world moves under it -------
+#
+# The guard matches a sentence against the tools this reply offered, and
+# the record has to say what this reply offered. Both registries behind
+# a name move on their own clocks: a board republishes its tools when a
+# discovery finishes, and an apply replaces the MCP registry whole, so
+# an entry can stop owning a name or a different entry can start. A
+# record that asked them at the moment a sentence was withheld would
+# report a board tool as `unknown` or attribute a name to somebody
+# else's entry (#391).
+#
+# Both cases put the change exactly where it can do that: the model is
+# what runs between the snapshot and the withholding, so the swap
+# happens when the model is asked to stream.
+
+
+class SwappingLlm(LlmProvider):
+    """A model that changes the world before it answers.
+
+    The snapshot is taken before the round and the withholding happens
+    inside it, so a change made here lands in the one window these two
+    cases are about. Nothing else about it is scripted: one delta, and
+    the round ends.
+    """
+
+    def __init__(self, text: str, swap: Any) -> None:
+        self._text = text
+        self._swap = swap
+
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[Any] = (),
+        tool_choice: Any = "auto",
+    ) -> AsyncIterator[Any]:
+        self._swap()
+        yield TextDelta(self._text)
+
+
+async def test_a_board_that_rediscovers_mid_reply_is_still_named_a_device_tool(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The device half. The tool was on the table when the sentence was
+    matched against it, so the record says which namespace it came
+    from; a board whose tools have since gone does not make it a name
+    nobody published."""
+    board = FakeDevice([{"tools": [VOLUME]}])
+    await board.client.discover()
+    published = board.client.tools()[0].name
+    leaked = json.dumps({"name": published, "arguments": {"volume": "40"}})
+    session = session_for(base_config(), POET_MAC)
+
+    def refreshed() -> None:
+        session._device_tools = None
+
+    session._device_tools = board.client
+    session.runtime._providers = replace(
+        session.runtime._providers, llm=cast(Any, SwappingLlm(leaked, refreshed))
+    )
+
+    with caplog.at_level("INFO"):
+        assert await run_reply(session, "turn it up") == []
+
+    assert fields_of(only(caplog, "sentence_withheld"))["source"] == "device"
+
+
+async def test_an_apply_that_moves_an_entry_mid_reply_names_the_entry_that_offered_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The MCP half, and the one that could put another operator's
+    entry name on the record. The name was offered by `tools`, so
+    `tools` is what the record says, whatever the registry standing
+    there afterwards claims."""
+    leaked = json.dumps({"name": "tools__secret_word", "arguments": {}})
+    config = base_config(
+        mcp_servers={
+            "tools": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(STDIO_SERVER)],
+            }
+        },
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": ["tools"]},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        session = session_for(base_config(), POET_MAC, mcp_servers=servers)
+
+        def applied() -> None:
+            # What an apply leaves behind: a registry in which another
+            # entry owns the namespace this reply's name came from.
+            session.runtime._mcp_servers = cast(Any, RenamedTo("intruder"))
+
+        session.runtime._providers = replace(
+            session.runtime._providers, llm=cast(Any, SwappingLlm(leaked, applied))
+        )
+
+        with caplog.at_level("INFO"):
+            assert await run_reply(session, "ask the server") == []
+    finally:
+        await servers.stop_all()
+
+    withheld = fields_of(only(caplog, "sentence_withheld"))
+    assert (withheld["source"], withheld["entry"]) == ("mcp", "tools")
+    assert "intruder" not in both_formats(caplog)
+
+
+class RenamedTo:
+    """The registry an apply put where the old one was, answering a
+    different entry for every name it is asked about. Only `owner_of`,
+    because that is the whole of what the reply path asks a registry
+    once its round has no calls in it."""
+
+    def __init__(self, entry: str) -> None:
+        self._entry = entry
+
+    def owner_of(self, published: str) -> str:
+        return self._entry

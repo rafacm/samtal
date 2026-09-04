@@ -382,6 +382,32 @@ def _tool_called(
     )
 
 
+@dataclass(frozen=True)
+class _Origin:
+    """Where one offered tool came from, as this reply may name it.
+
+    The classifier's two answers, kept together because they are one
+    answer: the namespace, and the configured entry for the one
+    namespace that has one. Frozen and built where the offer is taken,
+    so what a withheld sentence is reported as is a fact about the
+    reply rather than a question asked of the registries afterwards.
+
+    Nothing far-side is in it. An MCP tool keeps the entry an operator
+    wrote and never the server's own name for the tool, and a device
+    tool keeps neither, which is the naming policy `tool_call` follows
+    made structural at the point the provenance is captured.
+    """
+
+    source: str
+    entry: str | None
+
+
+# What a withholding that resolved to no single tool is reported as.
+# One instance rather than a construction at each of the two sites that
+# reads it, since it holds nothing about anything.
+_UNKNOWN_ORIGIN = _Origin(UNKNOWN, None)
+
+
 def _sentence_withheld(
     source: str,
     entry: str | None,
@@ -1749,6 +1775,13 @@ class PipelineRuntime:
         # time and the dispatch below cannot see them. Read by published
         # name, which is the name a call carries.
         schemas = {tool.name: tool.input_schema for tool in tools}
+        # And where each of them came from, resolved on the same line
+        # for the same reason and derived from the snapshot rather than
+        # taken beside it. A withheld sentence is named from this
+        # rather than from the registries later on: they move under a
+        # reply, and a name matched against what this reply offered
+        # must be reported as what this reply offered it as (#391).
+        origins = self._offered_origins(tools)
         working = list(self._turns)
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
         self._output.restart_pacing()
@@ -1795,7 +1828,7 @@ class PipelineRuntime:
                             if first_token_at is None and text.strip():
                                 first_token_at = loop.time()
                             for sentence in splitter.push(text):
-                                if self._withheld(sentence, tools):
+                                if self._withheld(sentence, tools, origins):
                                     continue
                                 speaking = await self._speak_after(
                                     speaking, sentence, providers.tts, resampler, leg, spoken
@@ -1814,7 +1847,7 @@ class PipelineRuntime:
                 slots = self._reserve_tools(calls)
                 self._llm_round_done(providers.llm, working, began, first_token_at, usage)
                 tail = splitter.flush()
-                if tail is not None and not self._withheld(tail, tools):
+                if tail is not None and not self._withheld(tail, tools, origins):
                     speaking = await self._speak_after(
                         speaking, tail, providers.tts, resampler, leg, spoken
                     )
@@ -2577,7 +2610,42 @@ class PipelineRuntime:
         )
         return prompt.with_scopes(self._know_how, scopes).text
 
-    def _withheld(self, sentence: str, tools: Sequence[ToolDef]) -> bool:
+    def _offered_origins(self, tools: Sequence[ToolDef]) -> dict[str, _Origin]:
+        """Where each tool this reply offers came from, classified while
+        the offer is being made.
+
+        Derived from the snapshot rather than gathered beside it, so
+        the two cannot come to disagree about which tools this reply
+        has: the names are the snapshot's names, and every one of them
+        gets an answer.
+
+        Read once, here, because the two registries behind it move. A
+        board finishes a discovery and republishes its tools; an apply
+        replaces the MCP registry whole, and an entry that owned a name
+        can stop owning it or be replaced by another entry that does.
+        Asking them at the moment a sentence is withheld would report a
+        name matched against this reply's offer as whatever the world
+        happens to say a round later: `unknown` for a board tool that
+        has since been re-discovered, or somebody else's entry for a
+        name an apply moved (#391). What the record has to say is what
+        this reply offered, so the answer is taken when the offer is.
+
+        Sanitized by construction. What is kept per name is the
+        namespace it came from and, for an MCP tool, the configured
+        entry an operator wrote, which are the two things the naming
+        policy may print; the far side's own name never enters.
+        """
+        published = {one.name for one in self._output.device_tools()}
+        return {
+            tool.name: _Origin(*tool_source(
+                tool.name, published, self._mcp_servers.owner_of(tool.name)
+            ))
+            for tool in tools
+        }
+
+    def _withheld(
+        self, sentence: str, tools: Sequence[ToolDef], origins: Mapping[str, _Origin]
+    ) -> bool:
         """Whether this sentence is a leaked tool call, in which case it
         has already been reported and nothing else happens to it.
 
@@ -2592,32 +2660,40 @@ class PipelineRuntime:
         the withheld bytes reach no payload, no log line and no list
         this reply carries (#385).
         """
-        return withhold_tool_shaped(sentence, tools, self._report_withheld)
+        return withhold_tool_shaped(
+            sentence, tools, functools.partial(self._report_withheld, origins)
+        )
 
-    def _report_withheld(self, tool: str | None, characters: int) -> None:
+    def _report_withheld(
+        self, origins: Mapping[str, _Origin], tool: str | None, characters: int
+    ) -> None:
         """Say that a sentence was withheld, and remember for this reply
         that one was.
 
-        The name is classified exactly as a call the model issued is,
-        through the same function and the same two lookups, so a tool
-        the model leaked into its speech is named on this record the way
-        it would have been named on its `tool_call`. A withholding that
-        resolved to no single tool is `unknown` and names nothing, which
-        is the shape a device tool takes too.
+        The name is named as this reply offered it, read out of the
+        provenance taken with the snapshot the sentence was matched
+        against, so a tool the model leaked into its speech is named on
+        this record the way it would have been named on its `tool_call`
+        and stays named that way however the registries move underneath.
+
+        `unknown` is left for the one thing that genuinely is unknown:
+        an argument-only match whose keys fit more than one offered
+        tool, which names none of them because which one it was is what
+        could not be decided. A name the guard answered is always one of
+        the offered names, so the lookup below always has it; the
+        default is what an unreachable third case would read as rather
+        than a second meaning for the token.
         """
         self._reply_withheld = True
-        source, entry = (
-            (UNKNOWN, None)
-            if tool is None
-            else tool_source(
-                tool,
-                {one.name for one in self._output.device_tools()},
-                self._mcp_servers.owner_of(tool),
-            )
-        )
+        origin = _UNKNOWN_ORIGIN if tool is None else origins.get(tool, _UNKNOWN_ORIGIN)
         self._events.emit(
             lambda: _sentence_withheld(
-                source, entry, tool, self._agent, self._conversation, characters
+                origin.source,
+                origin.entry,
+                tool,
+                self._agent,
+                self._conversation,
+                characters,
             )
         )
 
