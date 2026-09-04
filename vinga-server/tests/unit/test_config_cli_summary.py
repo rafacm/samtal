@@ -611,3 +611,72 @@ def test_a_list_where_a_word_belongs_reads_as_its_items(
 
     assert "  house ([?[31mred, stdio])" in printed
     assert "\x1b" not in printed
+
+
+@pytest.mark.parametrize(
+    ("section", "body"),
+    [
+        pytest.param(
+            "mcp_servers", {"house": {"transport": [{"credential": ANSWERED}]}}, id="a-suffix"
+        ),
+        pytest.param(
+            "agents", {"sam": {"mcp": [{"server": "house", "token": ANSWERED}]}}, id="an-agent"
+        ),
+        pytest.param(
+            "agent_defaults", {"mcp": [{"server": "house", "token": ANSWERED}]}, id="a-default"
+        ),
+        pytest.param(
+            "agents", {"sam": {"mcp": [[{"token": ANSWERED}]]}}, id="a-list-inside-a-list"
+        ),
+        # A mapping under a list under a list, which is the depth that
+        # says the rule is not one level of special-casing.
+        pytest.param(
+            "agents",
+            {"sam": {"mcp": [{"grants": [{"token": ANSWERED}]}]}},
+            id="a-mapping-three-deep",
+        ),
+    ],
+)
+def test_a_mapping_inside_a_list_is_not_opened_either(
+    section: str,
+    body: object,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The depth the rule has to hold at, and the one it used to stop at.
+
+    A list was opened item by item with `str()`, so a mapping one level
+    down arrived on the line as its repr: `[{'credential': '...'}]`,
+    keys, quotes, nested value and all. A mapping is named wherever it
+    is, so what a list opens is words and the fact that its items are
+    structures, and nothing below that reaches the terminal.
+    """
+    printed = rendered(run, monkeypatch, capsys, **{section: body})
+
+    assert ANSWERED not in printed
+    assert "credential" not in printed
+    assert "token" not in printed
+    # Named rather than dropped: the line says a structure is there.
+    assert "{...}" in printed or "[...]" in printed
+
+
+def test_a_grant_written_as_an_object_reads_as_one(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The well-formed document the rule above changes, pinned so the
+    change is a decision rather than a side effect.
+
+    An `mcp` entry may be a bare server name or an object naming the
+    tools it grants, and the tree used to print the object form as a
+    Python repr. It now reads as the structure it is, beside the bare
+    names that are printed whole.
+    """
+    printed = rendered(
+        run,
+        monkeypatch,
+        capsys,
+        agents={"sam": {"mcp": ["lights", {"server": "house", "tools": ["turn_on"]}]}},
+    )
+
+    assert "  sam: mcp=[lights, {...}]\n" in printed
