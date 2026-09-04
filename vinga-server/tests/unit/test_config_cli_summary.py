@@ -542,6 +542,118 @@ def test_an_export_prints_back_a_section_it_never_walks_into(
         assert ANSWERED not in surface
 
 
+# A location this client cannot write down
+#
+# `export` renders every stored credential as the command that enters
+# it, and those lines are `#` comments inside a YAML document. The
+# identity and the slot go into them as written, because the command has
+# to address the entity it names, and `shlex.quote` is what makes such a
+# line safe to PASTE rather than safe to READ: quoting keeps a newline,
+# and a newline ends the `#`, so the rest of an identity lands on a bare
+# line of a document whose own header says to import it. Every other
+# unprintable character reaches the terminal as itself.
+#
+# So a location that cannot be written down refuses the whole export,
+# which is the gate's rule the other way round: what cannot be rendered
+# is not rendered. `list` and `show` neutralize the same values instead,
+# because neither has to produce a runnable command.
+
+
+def location(**fields: object) -> dict[str, object]:
+    """A document with one stored credential filed against a provider
+    that is in it."""
+    return document(
+        secrets=[
+            {"kind": "provider", "identity": "llm.brain", "slot": "api_key", "shadows": None}
+            | fields
+        ]
+    )
+
+
+UNWRITABLE = [
+    pytest.param(location(identity=f"llm.brain\n{ANSWERED}"), id="a-newline-in-an-identity"),
+    pytest.param(location(slot=f"api_key\n{ANSWERED}"), id="a-newline-in-a-slot"),
+    pytest.param(location(identity=f"llm.brain{STEERING}"), id="an-escape-in-an-identity"),
+    pytest.param(location(slot=f"api_key{STEERING}"), id="an-escape-in-a-slot"),
+    # The one that changes what a line says without adding a character
+    # anything would notice: a right-to-left override makes a pasted
+    # command read as something other than what it runs.
+    pytest.param(location(identity=f"llm.\u202e{ANSWERED}"), id="an-override-in-an-identity"),
+]
+
+
+@pytest.mark.parametrize("body", UNWRITABLE)
+def test_a_location_that_cannot_be_written_down_refuses_the_export(
+    body: object,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nothing of the document reaches stdout, which is the whole of
+    what the refusal buys: a half-written export is a file with a bare
+    line in it, and the bare line is the attack."""
+    refusal("export", body, run, monkeypatch, capsys, caplog)
+
+
+@pytest.mark.parametrize("body", UNWRITABLE)
+def test_no_refusal_of_a_location_is_retained_on_its_chain(body: object) -> None:
+    with pytest.raises(ConfigError) as caught:
+        cli.EXPORT_ALL.render(cli.EXPORT_ALL.read(body))
+
+    assert str(caught.value) == cli.UNREADABLE_READ
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert ANSWERED not in chain(caught.value)
+
+
+@pytest.mark.parametrize("body", UNWRITABLE)
+@pytest.mark.parametrize("command", ["list", "show"])
+def test_the_renderings_that_need_no_command_neutralize_it_instead(
+    command: str,
+    body: object,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The other side of that decision. Neither the tree nor `show`
+    builds a line anyone runs, so both print the location through the
+    display door and go on: refusing there would withhold a deployment's
+    shape over a character in one slot name."""
+    answering(monkeypatch, body)
+    capsys.readouterr()
+
+    assert run(command) == 0
+
+    printed = capsys.readouterr().out
+    # Line by line, because a newline is the one unprintable character
+    # the whole output is entitled to: what is claimed is that every
+    # line of it is a line a terminal only prints.
+    assert all(line.isprintable() for line in printed.splitlines())
+
+
+def test_a_name_only_a_terminal_could_love_still_exports_as_written(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The control beside those refusals. A space, a percent sign, a
+    character outside ASCII and a leading dash are all legal in a name,
+    and every one of them survives the write path, so an export that
+    bounded or stripped a location would render a command addressing an
+    entity that does not exist."""
+    answering(
+        monkeypatch,
+        location(identity="llm.agente-café 100%-sure", slot="--from-env"),
+    )
+    capsys.readouterr()
+
+    assert run("export") == 0
+
+    printed = capsys.readouterr().out
+    assert printed.splitlines()[-1] == (
+        "#   vinga provider secret set -- llm 'agente-café 100%-sure' --from-env"
+    )
+
+
 @pytest.mark.parametrize("body", UNWALKABLE)
 def test_no_refusal_of_a_document_is_retained_on_its_chain(body: object) -> None:
     """Read through the act's own renderer, because that is where the

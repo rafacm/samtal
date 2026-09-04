@@ -2154,9 +2154,19 @@ HOLDER_KIND = Literal[tuple(_SECRET_HOLDER)]
 
 def _exported(document: Mapping[str, object]) -> str:
     """The whole stored configuration as one applicable document, read
-    through the gate `show` reads it through and for the same reasons."""
+    through the gate `show` reads it through and for the same reasons.
+
+    The foot is rendered before the head, though it is printed after it.
+    A location this client cannot write down refuses the whole document,
+    and building the document first would mean building it to throw it
+    away: nothing of it would reach an operator either way, since the
+    export is one string printed at once, but a refusal that comes after
+    the work reads as an afterthought and invites a later edit to print
+    the head early.
+    """
     config, secrets = _halves(document)
-    return EXPORT_HEADER + _yaml(config) + _secret_commands(secrets)
+    commands = _secret_commands(secrets)
+    return EXPORT_HEADER + _yaml(config) + commands
 
 
 def _secret_commands(secrets: Sequence[Mapping[str, object]]) -> str:
@@ -2194,14 +2204,26 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
     sentence rather than a `KeyError` carrying the name it supplied.
 
     The identity and the slot are the one thing in these renderings that
-    does not go through the display door, and deliberately. What this
-    builds is a command an operator pastes to address the entity it
-    names, so a spelling bounded at a hundred and twenty characters or
-    stripped of its edges would address a different entity or none.
-    `shlex.quote` is what makes the line safe to paste, and the write
-    path refuses a control character in a name, so what is left is an
-    answer that did not come from this API, whose export is not a
-    document to run either way.
+    is printed as written rather than through the display door. What
+    this builds is a command an operator pastes to address the entity it
+    names, and the door bounds at a hundred and twenty characters and
+    replaces what it cannot print, so a location put through it would
+    address a different entity or none.
+
+    So they are refused instead, which is the same rule the other way
+    round: a location this client cannot render as written is one it
+    does not render. `shlex.quote` is what makes a line safe to paste,
+    and it is not what makes a line safe to READ: quoting keeps a
+    newline, and a newline ends the `#` that makes this a comment, so
+    the rest of the identity lands on a bare line of a YAML document
+    whose own header says to import it. Every other unprintable
+    character reaches the terminal as itself for the same reason.
+
+    Refused whole, and not per character: the fixed sentence names
+    neither the location nor what was in it, exactly as every other
+    unreadable answer's does. The write path refuses a control character
+    in a name, so nothing this API stored can meet this; what can is an
+    answer that did not come from it, which is what the gate is for.
     """
     holder = _SECRET_HOLDER[_understood(HOLDER_KIND, stored["kind"], UNREADABLE_READ)]
     return [
@@ -2210,9 +2232,27 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
         "secret",
         "set",
         "--",
-        *entities.addressed(holder, str(stored["identity"])),
-        str(stored["slot"]),
+        *entities.addressed(holder, _as_written(stored["identity"])),
+        _as_written(stored["slot"]),
     ]
+
+
+def _as_written(value: object) -> str:
+    """One word of an exported command, as the answer wrote it, or the
+    refusal for one that cannot be written down.
+
+    `str.isprintable` is the question, and it is the predicate the
+    display door replaces by: what that door turns into a question mark
+    is exactly what this refuses. Which is why the rule is not spelled
+    out here as a set of characters. It covers the line separators, the
+    C0 and C1 controls and DEL, and the format characters a terminal
+    obeys silently, of which the right-to-left override is the one that
+    makes a pasted command read as something other than what it runs.
+    """
+    written = str(value)
+    if not written.isprintable():
+        raise ConfigError(UNREADABLE_READ)
+    return written
 
 
 def _exported_entity(kind: entities.EntityDescriptor) -> Callable[[Any], str]:
