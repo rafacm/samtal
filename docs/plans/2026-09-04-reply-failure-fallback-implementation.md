@@ -152,3 +152,127 @@ Generated references were regenerated through their generators:
 `config reference`, `config openapi`, `config cli-reference`, `events
 reference`, and the command-spellings manifest through
 `uv run python -m tests.unit.test_command_spellings`.
+
+### M1 PR review round
+
+PR [#390](https://github.com/rafacm/vinga/pull/390). Backend codex
+(codex-cli 0.153.0), model `gpt-5.6-sol`, read-only sandbox,
+2026-09-04, against `11be9575`, runtime 9m43s. Five findings, two P1
+and three P2, each fixed in a commit of its own.
+
+Two of the five are the same failure seen twice, and it is worth naming:
+**the notice was written as if the moment it runs in were quiet.** It is
+not. The failure arm runs with a provider exception still active and
+with a barge-in able to land at any await inside it, and both findings
+are what that costs: an exception the arm took care to reduce to a class
+name riding out on a cancellation, and a cancellation swallowed into a
+wait so the notice walks on into frames the same barge-in has paused.
+Neither is visible from the arm's own code; both are visible from the
+state the arm is standing in.
+
+1. **P1: a barge-in while settling the filler is swallowed and can wedge
+   the session.** The failure arm waits in `FillerRunner.settle()`
+   before it starts the notice, and `settle()` suppressed every
+   `CancelledError`, including a cancellation of the reply task itself.
+   The confirmation ladder pauses the outgoing frames before it cancels
+   and resumes them only after the cancel has been awaited
+   (`runtime/turntaking.py`), so a swallowed cancellation lets the arm
+   reach a paced send that cannot complete until the cancel it is
+   blocking returns (`device/pacing.py`). Fix: tell a cancellation of
+   the child clip task apart from one of the current task and re-raise
+   the latter, with a test combining a sounding filler, a terminal reply
+   failure and a confirmed barge-in.
+
+   *Resolution* (`00eb1416`): accepted in full. The two are told apart
+   by counting cancellation requests against the current task rather
+   than by asking which task ended up cancelled, since a cancel
+   delivered to a task awaiting another one cancels that other one too
+   and the clip's own state therefore says nothing about who asked. The
+   count is taken before the await, which also keeps a reply that was
+   ALREADY cancelled from re-raising and losing the closing `tts stop`
+   its `finally` still owes the device. `tail()` got the same treatment,
+   beyond what the finding asked: it is the identical wait, and a
+   barge-in landing while the reply queues behind a clip's tail was
+   being swallowed into the reply the same way. The test drives the real
+   ladder with the confirmation held until the reply has failed, which
+   is what puts the cancel inside the wait; without the fix it reports
+   the phrase going out in the middle of a confirmed barge-in.
+
+2. **P1: mid-fallback cancellation leaks the provider exception through
+   `__context__`.** The notice ran inside the `except Exception` arm, so
+   the provider's exception was the active one when `speak_fallback()`
+   re-raised a `CancelledError`, and Python attached it, message and
+   causes included. Fix per the reviewer: record that a notice is owed,
+   leave the handler, and only then settle and play, so nothing is
+   active when the cancellation propagates; extend the cancellation test
+   with sentinel-bearing messages and causes and assert the propagated
+   chain carries none of them.
+
+   *Resolution* (`1fdc8cd6`): accepted in full and implemented as
+   described. The arm sets `unanswered` and returns; the notice is said
+   from the statement after the handler. The body is nested inside a
+   second `try` so the outer `finally` still owns the closing `tts
+   stop`, which a cancellation raised from the notice must not take
+   away. The test walks the whole `__cause__`/`__context__` chain rather
+   than its first link, since a wrapped vendor error has both, and fails
+   against the previous shape.
+
+3. **P2: `reply_fallback` recorded successful audio before any device
+   operation succeeded.** The record was written with `audio` read off
+   cache presence alone, before `begin_speaking`, `sentence_started`,
+   the encode and the send, so a disconnect, a cancellation or a
+   playback failure produced a record claiming a phrase that never went
+   out, and the baseline driver enshrined exactly that. Fix: track what
+   was actually delivered, write the record from it, emit nothing for a
+   pre-delivery `DeviceGone` or cancellation, split the typed-success
+   and untyped-playback-failure drivers, and add refusal cases.
+
+   *Resolution* (`97738c54`): accepted in full. Two flags track the
+   display send and the audio send as they happen, and the record is
+   written in a `finally` from what they answered: nothing at all where
+   nothing was delivered, and `audio` saying whether the phrase was
+   heard as well as seen where the display send landed. The `finally` is
+   what keeps a cancellation arriving after the display send from
+   erasing the fact that the user saw it. The baseline gained a second
+   driver so one path no longer stands for both, and three refusal cases
+   landed beside the existing ones: a device gone before the notice
+   (nothing recorded), a device gone between the display and the speaker
+   (recorded, `audio` false), and an encode that raises after the
+   display (recorded, `audio` false, the failure reported by class).
+
+4. **P2: the documents called a per-start cost a one-time upgrade
+   cost.** Every start calls `build_agent_fillers(..., previous=None)`,
+   so nothing is reused across processes. Fix the README, the CHANGELOG
+   and the governing plan's own wording: every start synthesizes one
+   phrase per enabled agent, and unchanged clips are reused only across
+   applies within one process.
+
+   *Resolution* (`187e70d7`): accepted in full, all three moved
+   together. The wording now says the cost is paid again at every
+   restart, redeploy and container replacement, and names where the
+   reuse actually lives. The plan's risk section and its finding 12
+   resolution are amended in place rather than annotated, with a
+   sentence saying this round corrected them.
+
+5. **P2: the reload contract promised a retry the cache prevents.**
+   `fallback_degraded`'s description said "The next reload tries again",
+   but `_kept_fallback()` reuses an unchanged clip even when it holds no
+   audio, so an ordinary apply reports `fallback_reused` and retries
+   nothing. Fix the source description, regenerate the references, and
+   pin the unchanged degraded outcome with a test.
+
+   *Resolution* (`e0bece17`): accepted in full. The description names
+   the two things that do retry one, an edit to its own section and a
+   change to the voice that would speak it, and adds that a restart
+   retries every one of them since a start keeps nothing from the
+   process before it. `_kept_fallback`'s own note says the same from the
+   other side and names the difference from the filled pause, whose
+   failed synthesis leaves nothing in the mapping and is therefore
+   retried by the very next build. Two tests pin the pair, and the API
+   document was regenerated through its generator.
+
+The behavior was left alone in finding 5 rather than made to retry, per
+the reviewer's own framing: keeping the words without the audio is what
+the display half needs, and there is no way to hold a usable display
+half and a retriable audio half in one entry without a caller having to
+ask which of the two it is looking at.
