@@ -538,6 +538,24 @@ YAML_NOT_QUOTED = (
     "the key it stopped on"
 )
 
+# What reading YAML can fail as, which is wider than `YAMLError`.
+#
+# The constructors that turn a scalar into a Python value raise the
+# ordinary exceptions when the scalar is out of range: an integer of
+# five thousand digits leaves as CPython's own `ValueError` about the
+# digit limit, an impossible date leaves as `ValueError` from
+# `datetime`, and two thousand nested lists leave as `RecursionError`
+# out of the composer. None of them is a `YAMLError`, so an arm that
+# catches the documented exception alone lets all three past as a
+# traceback carrying the source.
+#
+# Shared with `config/cli.py` for the reason the locator below is: this
+# is one statement about what one parser does, and a boot file is read
+# by the same `yaml.safe_load` a fragment is. It sat in `cli` alone
+# while the boot path caught `YAMLError`, which is exactly the drift
+# one home prevents.
+UNPARSEABLE = (yaml.YAMLError, ValueError, ArithmeticError, RecursionError)
+
 
 def stopped_at(exc: BaseException) -> str:
     """Where the parser stopped, when it says: two integers off the
@@ -585,13 +603,16 @@ def _check_config_file(path: Path, source: str) -> None:
     data: object = None
     try:
         data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+    except UNPARSEABLE as exc:
         # The locator and nothing else off the exception, and raised
         # after the handler: a parser exception retains the buffer it
         # was parsing, so leaving it as the context would attach the
         # whole file to a refusal about one line of it, and its own
         # `problem` names the tag or the key it stopped on, which for a
         # file holding credentials is the one thing it may not repeat.
+        # The whole family rather than `YAMLError`, so a scalar the
+        # constructors refuse is this sentence rather than a traceback;
+        # those carry no mark, so the locator is empty for them.
         problem = f"invalid YAML in {source}{stopped_at(exc)}. {YAML_NOT_QUOTED}"
     if problem is not None:
         raise ConfigError(problem)
