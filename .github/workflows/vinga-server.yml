@@ -585,9 +585,10 @@ jobs:
           # And the head of the packaged domain chain, which is one
           # revision: the chain was re-baselined against Postgres, and a
           # wheel carrying anything else is one whose databases this
-          # commit's code cannot read.
-          if domain_revisions != {"3001_postgres_domain"}:
-              sys.exit(f"the wheel's domain chain is at {sorted(domain_revisions)}, not ['3001_postgres_domain']")
+          # commit's code cannot read. A new migration moves this line,
+          # deliberately, exactly as the other two chains' heads below.
+          if domain_revisions != {"3002_drop_max_tokens_secrets"}:
+              sys.exit(f"the wheel's domain chain is at {sorted(domain_revisions)}, not ['3002_drop_max_tokens_secrets']")
           print(f"migrated a fresh database from {installed.parent}")
 
           # The conversation store, from the same installed artifact and
