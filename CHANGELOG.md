@@ -14,9 +14,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   minute for a server to build a new world, and both used to leave an
   operator watching an empty screen for the length of it. Each now
   draws one line on stderr while it waits, carrying a fixed phrase and
-  the elapsed whole seconds, rewritten in place once a second and
-  erased on the way out so that the answer or the refusal after it
-  lands in an empty line. It is the interactive affordance the CLI
+  the elapsed whole seconds, rewritten in place once a second and taken
+  back off on the way out so that the answer or the refusal after it
+  lands in an empty line. A terminal that has stopped accepting output
+  is the one case where it does not: the line is given up rather than
+  waited on, because a command whose request has been answered has to
+  be able to say so. It is the interactive affordance the CLI
   guide's determinism practice licenses, and it is bounded by that
   licence: the terminal is asked once on the way in, so a pipe, a
   redirect and a log file get exactly the bytes they got before, proven

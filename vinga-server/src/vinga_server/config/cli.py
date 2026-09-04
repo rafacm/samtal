@@ -331,6 +331,21 @@ PROGRESS_CADENCE_S = 1.0
 # which is the opposite of the thing being built.
 PROGRESS_CADENCE_RULE = "the progress line's cadence has to be more than zero seconds"
 
+# How long the way out waits for a redraw that is already inside the
+# stream before it gives up on taking the line off the screen.
+#
+# It exists because a terminal can stop accepting writes and never start
+# again, which is what flow control on one is, and the write that orders
+# the two threads is then the write the command would be stuck behind.
+# A command whose request has been answered must still be able to say
+# so, so the wait is bounded and the erase is what is given up.
+#
+# A second is orders of magnitude above what a live stream takes and is
+# a delay nobody will read as a hang, which is the whole of how it was
+# chosen. Giving up costs the erase and never the ordering:
+# `_ProgressLine.finish` says why.
+PROGRESS_ERASE_WAIT_S = 1.0
+
 # Said when the API answered something this client cannot read as an
 # answer. The body is deliberately not quoted: what a proxy, a gateway
 # or a captive portal returns is not this API's sanitized output, and
@@ -1493,27 +1508,41 @@ def _reached(args: Invocation) -> Reached:
 
 
 class _ProgressLine:
-    """The one line a long wait draws, and the rule that keeps a redraw
-    from landing on top of the answer.
+    """The one line a long wait draws, and the two rules it is written
+    to, which cannot both be absolutes.
 
     Two threads write it: the command's own, which draws it once and
-    erases it at the end, and the writer, which redraws it while the
-    request is in flight. Ordering them is not decoration, it is the
-    whole claim the affordance makes. A redraw that landed after the
-    erase would sit on top of whatever printed next, which for a failed
-    import is the one sentence the command has to say.
+    finishes it at the end, and the writer, which redraws it while the
+    request is in flight.
 
-    The lock is held across the write itself rather than around the
-    bookkeeping, which is what makes the ordering a guarantee: a redraw
-    already inside `write` finishes before the erase can start, so the
-    erase is always the last thing written. `finished` is the other
-    half: it is set under that same lock, and every redraw reads it
-    under the lock, so nothing lands afterwards however long the writer
-    was held up.
+    **No redraw may land after the line is finished**, because it would
+    sit on top of whatever printed next, which for a refused import is
+    the one sentence the command has to say. **And the command may never
+    wait without a bound to say so**, because a wait an operator sits
+    through after the server has already answered is the very ambiguity
+    the unbounded read timeout exists to prevent, arrived at from the
+    other side.
 
-    A timed wait was what this replaced and it cannot come back. A bound
-    on waiting for the writer is a window, and a window here is a redraw
-    printed over a refusal. There is no bounded wait anywhere below.
+    Those two are in tension on a stream that can stop accepting writes
+    for ever, which a terminal under flow control really does. Holding
+    the lock across the write is what orders the two threads, and it is
+    therefore also what a wedged write would hold the command behind. So
+    the second rule wins and the first is kept as far as it can be:
+
+    - `finished` is set BEFORE anything else, and it is read inside the
+      lock, so no redraw that has not already begun can ever write
+      again. That half is absolute.
+    - The erase then waits for the lock under a bound. Getting it means
+      a redraw in flight has finished, so the erase is the last thing
+      written and the line comes off. Not getting it means one write is
+      wedged inside the stream, and the erase is abandoned rather than
+      raced: the command returns, and if that terminal ever recovers the
+      wedged redraw lands, with nothing after it that this line wrote.
+
+    What the operator is left with in that case is the line still on the
+    screen and the command's own next sentence printed after it rather
+    than under it. That is the named degradation, and it is on a
+    terminal that had already stopped accepting output.
     """
 
     def __init__(self) -> None:
@@ -1523,10 +1552,15 @@ class _ProgressLine:
         # on the screen; too wide writes spaces past the end of the
         # line, which on a narrow terminal is a second line of them.
         self.width = 0
-        self.finished = False
+        self.finished = threading.Event()
 
     def draw(self, seconds: int) -> None:
         """Draw the line where it already is, unless the wait is over.
+
+        The `finished` read is inside the lock and the write is inside
+        it too, which is what makes the ordering hold: a redraw that
+        acquires the lock after the wait ended sees that it did and
+        writes nothing.
 
         A carriage return and no newline, so the terminal rewrites the
         one line rather than scrolling: what an operator watches is a
@@ -1534,21 +1568,33 @@ class _ProgressLine:
         which the determinism practice rejects outright.
         """
         with self.lock:
-            if self.finished:
+            if self.finished.is_set():
                 return
             line = f"{PROGRESS_PHASE}: {seconds}s"
             self.width = len(line)
             _to_stderr(f"\r{line}")
 
-    def erase(self) -> None:
-        """Take the line back off the screen for good, leaving the
-        cursor where it started, so whatever prints next prints into an
-        empty line and no redraw can follow it."""
-        with self.lock:
-            if self.finished:
-                return
-            self.finished = True
+    def finish(self, wait_s: float) -> None:
+        """End the wait: no more redraws, and the line off the screen if
+        the stream will take it within `wait_s`.
+
+        The flag first and the lock second, and that order is the whole
+        design. Setting it first means no redraw can start after this
+        point whatever happens next, so abandoning the wait below costs
+        the erase and never the ordering.
+
+        Nothing here catches anything. A `KeyboardInterrupt` while the
+        lock is being waited for is the operator asking for the command
+        to stop, and it leaves as itself; the flag is already set, so it
+        leaves no redraw behind it either.
+        """
+        self.finished.set()
+        if not self.lock.acquire(timeout=wait_s):
+            return
+        try:
             _to_stderr(f"\r{' ' * self.width}\r")
+        finally:
+            self.lock.release()
 
 
 @contextlib.contextmanager
@@ -1556,6 +1602,7 @@ def narrated(
     narrates: bool,
     cadence_s: float | None = None,
     clock: Callable[[], float] | None = None,
+    erase_wait_s: float | None = None,
 ) -> Iterator[None]:
     """One line on stderr for as long as a long wait lasts, at a
     terminal and nowhere else.
@@ -1574,29 +1621,43 @@ def narrated(
     thread: there is no writer to be scheduled, no clock to be read, and
     no path by which a byte could reach a redirected stream.
 
-    Two seams, both for tests and both read as None rather than as false
+    Three seams, all for tests and all read as None rather than as false
     values, because absent and zero are two different answers.
     `cadence_s` is how often the line is redrawn, so that a test can
     drive several redraws without waiting seconds for them; `clock` is
     where elapsed time comes from, so that a test can assert the number
-    on the line moves rather than that something was drawn three times.
-    The clock's default is monotonic, because what is displayed is a
-    duration and a wall clock stepping backwards mid-import would show
-    one that ran backwards with it.
+    on the line moves rather than that something was drawn three times;
+    `erase_wait_s` is how long the way out waits for a redraw that is
+    inside the stream, so that a test can drive both sides of that bound
+    without sitting through the real one. The clock's default is
+    monotonic, because what is displayed is a duration and a wall clock
+    stepping backwards mid-import would show one that ran backwards with
+    it.
 
     A cadence at or below zero is refused where it is read: an event
     waited on for zero seconds answers at once, so a loop asked for it
     would spin a core and rewrite the terminal as fast as the stream
     took it. No command line reaches that number, so the refusal is a
-    programmer's rather than one of this grammar's sentences.
+    programmer's rather than one of this grammar's sentences. Zero is a
+    coherent answer for the other bound and is not refused: it means do
+    not wait at all for a wedged write, which is a thing a caller may
+    honestly want.
 
     The first line is drawn here rather than by the writer, so that a
     wait shorter than one cadence still says what it is waiting for and
-    still erases what it said. Everything after it is the thread's, and
-    the thread is a daemon that stops on an event: an interpreter
-    shutting down mid-wait is not held open by a line it was drawing,
-    and the wait itself is bounded by the request's own timeout rather
-    than by anything here.
+    still takes back what it said. That is the one place this can block
+    on a terminal that has stopped accepting output, and it is left
+    where it is deliberately: nothing has happened yet when it does, so
+    there is no completed work going unreported, and it is the same
+    block any command already has at its first write to such a stream.
+    What must not happen is a command whose request has been answered
+    unable to say so, and that is `finish`'s bound.
+
+    Everything after the first line is the thread's, and the thread is a
+    daemon that stops on the line's own event: an interpreter shutting
+    down mid-wait is not held open by a line it was drawing, and the
+    wait itself is bounded by the request's own timeout rather than by
+    anything here.
 
     **A writer that cannot be started changes nothing about the
     command.** An interpreter out of thread stacks raises from `start`,
@@ -1613,26 +1674,28 @@ def narrated(
     cadence = PROGRESS_CADENCE_S if cadence_s is None else cadence_s
     if cadence <= 0:
         raise ValueError(PROGRESS_CADENCE_RULE)
+    erase_wait = PROGRESS_ERASE_WAIT_S if erase_wait_s is None else erase_wait_s
     now = time.monotonic if clock is None else clock
     started = now()
     line = _ProgressLine()
     line.draw(0)
-    stop = threading.Event()
 
-    def redraw_until_stopped() -> None:
-        # `wait` returns True the moment the event is set, so the thread
-        # leaves on the answer rather than on the next tick.
-        while not stop.wait(cadence):
+    def redraw_until_finished() -> None:
+        # One event for both halves of "the wait is over", because they
+        # are one fact: it stops the loop here and it stops a redraw
+        # writing there. `wait` returns True the moment it is set, so
+        # the thread leaves on the answer rather than on the next tick.
+        while not line.finished.wait(cadence):
             line.draw(int(now() - started))
 
     try:
-        writer = threading.Thread(target=redraw_until_stopped, daemon=True)
+        writer = threading.Thread(target=redraw_until_finished, daemon=True)
         writer.start()
     except RuntimeError:
         # An interpreter that will not give out another thread, which is
         # the one thing here that can fail loudly. Everything else on
         # this path is a write, and a write that fails says nothing.
-        line.erase()
+        line.finish(erase_wait)
         yield
         return
     try:
@@ -1643,13 +1706,10 @@ def narrated(
         # a sentence nobody can read, and the refusal is the one thing
         # this command still has to say.
         #
-        # The writer is not waited for and does not need to be. `erase`
-        # takes the lock every redraw takes and holds it across its own
-        # write, so a redraw in flight lands before it and a redraw
-        # after it lands not at all. A join would add a bound, and a
-        # bound is the window this design exists to close.
-        stop.set()
-        line.erase()
+        # The writer is not joined, and `finish` is where the two rules
+        # it has to keep are reconciled: no redraw after this point, and
+        # no unbounded wait to get there.
+        line.finish(erase_wait)
 
 
 def _stderr_at_a_terminal() -> bool:
