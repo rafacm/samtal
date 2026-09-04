@@ -2351,6 +2351,7 @@ This index is the other half: what exists, and when it fires.
 | `provider_failed` | an ASR, LLM or TTS call fails; a round whose retry also stalled carries `FirstTokenTimeout` |
 | `tool_call` | a tool returns |
 | `tool_arguments_coerced` | a call went out with argument types this server corrected, because the model quoted a value its tool declares as a number or a boolean: how many were converted, and never which or to what |
+| `sentence_withheld` | a sentence of a reply was shaped like a call to a tool this session offered, so it was dropped rather than spoken: how long it was and which tool it was shaped like, never a byte of it |
 | `barge_in` | speech cuts a reply short |
 | `barge_in_suppressed` | an interruption is dropped and the reply lives |
 | `barge_in_merged` | an interruption merges with the utterance the reply was transcribing |
