@@ -151,16 +151,25 @@ Run from `vinga-server/`, against a development Postgres on 5432.
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy` (the events package, as CI runs it):
   `Success: no issues found in 5 source files`
-- `uv run pytest tests/unit -q`: `5318 passed, 19 skipped`
+- `uv run pytest tests/unit -q`: `5318 passed, 19 skipped in 546.92s`
 - `uv run pytest tests/unit -q -n auto --dist loadfile`, which is how CI
-  runs the lane: `5318 passed, 19 skipped in 90.49s`
-- `uv run pytest tests/integration -q`: `238 passed in 357.15s`
+  runs the lane: `5318 passed, 19 skipped in 79.47s`
+- `uv run pytest tests/integration -q`: `238 passed in 344.79s`
 - `python3 scripts/check_doc_links.py .` from the repository root:
-  `checked 180 files, 0 failures`
+  `checked 181 files, 0 failures`
 
 The session split pins were run against the unwired pipeline as well,
 to check they fail without it: the wire pin and the `"true"` permanence
 case both fail there, which is what makes them evidence.
+
+One lane was not green and the failure is recorded rather than hidden.
+`test_a_corrected_call_says_so_and_names_the_board_nothing` failed once
+in a serial run and passed on its own: it asserted the coerced value was
+absent from the sentence with a substring search for `"40"`, and a
+session id is 32 hex characters, so it holds `"40"` about one run in
+nine. The case now asserts the whole sentence past the session id and
+the payload's key set, which says the same thing by exhaustion and
+cannot depend on a minted id (`cb43c4bc`).
 
 `tests/unit/command-spellings.txt` was regenerated with
 `uv run python -m tests.unit.test_command_spellings` after the document
