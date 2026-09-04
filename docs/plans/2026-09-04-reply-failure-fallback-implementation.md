@@ -414,3 +414,83 @@ Three notes, none of which changes the section's story above.
   statement inside an `except`, so a cancellation landing in it leaves
   with an empty chain behind it. The docstring says so where a reader
   of the failure arm's nested block would look for it.
+
+### M2 PR review round
+
+PR [#391](https://github.com/rafacm/vinga/pull/391). Backend codex
+(codex-cli 0.153.0), model `gpt-5.6-sol`, read-only sandbox,
+2026-09-04, against `0cf480a0`, runtime 6m54s. Two findings, one P1 and
+one P2, each fixed in a commit of its own.
+
+The P1 is worth naming for what it says about where a bound lives.
+**The guard's stated bound was about formatting and the hole was about
+punctuation.** The milestone wrote down what it does not catch, a
+pretty-printed call chopped at its newlines, and that sentence read as
+if a compact call were safe. It was not: the splitter cuts at every
+sentence ending followed by whitespace, and a JSON string is exactly
+where a model puts a sentence. So the accepted bound covered one shape
+and the contract was broken by another that looked like it was inside
+the same excuse.
+
+1. **P1: a compact call containing sentence punctuation bypasses the
+   guard.** `text.py` cuts at every sentence-ending character followed
+   by whitespace, punctuation inside a JSON string included, so
+   `{"name":"remember","arguments":{"text":"SECRET. Store it"}}` reaches
+   the guard as two fragments. Neither decodes, so both are spoken,
+   displayed, kept in the history and stored. That is a single-line
+   compact call rather than the accepted multiline bound, and it breaks
+   the no-leak contract. Fix: preserve quoted JSON strings across
+   sentence-boundary detection, or buffer a candidate compact object
+   until it closes, bounded so an ordinary `{` or an unterminated string
+   cannot hold live speech indefinitely, with the bound stated beside
+   the existing one and an end-to-end sentinel test.
+
+   *Resolution* (`6cd5f30c`): accepted in full, by the second arm with
+   the first folded into it. The punctuation rule stands down while a
+   brace is open, and braces are counted with a quoting walk so a `}`
+   inside a value does not end the span early, which is both arms in one
+   rule and the smallest one that hands the guard a whole object.
+   Nothing about it knows what a tool is: an open brace is a span worth
+   keeping together, which is a fact about text. Three bounds rather
+   than the one the finding asks for, because a sentence held there is a
+   sentence not yet being synthesized: a newline still cuts whatever is
+   open, which is what leaves the pretty-printed call as the fragments
+   the guard documents; `flush` releases everything at the end of the
+   stream; and `MAX_HELD_FOR_A_BRACE` caps the span, so an unmatched
+   brace in prose costs a bounded delay. Every decision stays local to
+   the character it is made at, which is what keeps a delta per word and
+   the whole string at once giving the same sentences, so every existing
+   pin in `test_text.py` is untouched and green, the newline rule and
+   that property among them. The sentinel case asserts the same six
+   surfaces the whole-sentence case does and reports three spoken
+   sentences against the unfixed splitter.
+
+2. **P2: a concurrent tool refresh can misattribute the withheld
+   sentence.** The guard matches against the reply-local snapshot and
+   then answers a bare name, and `_report_withheld` reclassified that
+   name against the live device and MCP registries, which can have
+   moved: a board republishes its tools when a discovery finishes, and
+   an apply replaces MCP ownership atomically. So a sentence matched
+   against the old snapshot could be reported as `unknown` or attributed
+   to a new entry. Fix: classify each offered tool when the snapshot is
+   taken, pass that sanitized reply-local provenance through the report
+   callback, and use `unknown` only for genuinely ambiguous
+   argument-only matches, with device-refresh and MCP-reload regression
+   cases.
+
+   *Resolution* (`ce11713a`): accepted in full. `_offered_origins`
+   classifies the snapshot on the line after it is taken, derived from
+   it rather than gathered beside it so the two cannot disagree about
+   which tools this reply has, and the frozen `_Origin` it answers holds
+   the namespace and the configured entry and nothing a far side wrote.
+   `unknown` goes back to meaning the one thing that is genuinely
+   unknown. The two regression cases put the change in the one window
+   that can cause the misattribution, when the model is asked to stream,
+   which is after the snapshot and before the withholding; without the
+   fix they report the board tool as `unknown` and the server tool as
+   the entry an apply had just put there.
+
+Neither finding moved a decision the plan had taken. The first widened
+what the guard actually sees, which the plan wanted all along and had
+mis-stated the limit of; the second moved when a question is asked
+without changing the answer it may give.
