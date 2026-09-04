@@ -24,7 +24,10 @@ A sentence of that reply is spoken unless it is shaped like a call to
 one of the tools the same snapshot offered, which is a model writing
 its own calls into its speech rather than an answer (#385). Such a
 sentence is dropped whole, reported as its own event, and enters
-nothing: not the leg, not the history, not the record.
+nothing: not the leg, not the history, not the record. A reply that
+ends having spoken none of its sentences and withheld some says the
+agent's fixed fallback phrase, because what the user is otherwise
+handed is exactly the silence that phrase exists to end.
 
 An utterance that ends while a reply is streaming cancels that reply and
 is answered, which is what barge-in is. An endpointer-driven cancel is
@@ -83,6 +86,7 @@ from vinga_server.events.values import (
     ABSENT,
     ConversationId,
     Count,
+    FallbackReason,
     Flag,
     Fragment,
     Identifier,
@@ -495,7 +499,9 @@ class PipelineRuntime:
 
     The runner owns two verbs and this class uses both: the reply path
     arms the latency mask at the transcription and settles it at the
-    end, and the failure arm asks it to say the agent's fixed phrase.
+    end, and two arms ask it to say the agent's fixed phrase, the one
+    that catches a terminal failure and the check at the end of a reply
+    that spoke nothing because every sentence of it was withheld.
     Neither adds state here. What the phrase needs is a read of the
     world's cache and the output handle, both of which are the runner's
     already, so a failed turn speaks without this class learning
@@ -544,11 +550,16 @@ class PipelineRuntime:
       dispatch and by `_system_prompt`. A field rather than an argument
       because those two readers are on two clocks, and one field is what
       makes them one answer.
-    - `_reply_withheld`: whether any sentence of the reply now ending
-      was dropped as a leaked tool call. Reset by `_speak_reply` and
-      written by the guard, which is a call away inside the tool loop; a
-      field rather than a return value because what it answers is about
-      the whole reply and the loop runs once per leg of it.
+    - `_reply_spoke` and `_reply_withheld`: whether any sentence of the
+      reply now ending went out, and whether any was dropped as a leaked
+      tool call. Reset and read by `_speak_reply`, which owns the
+      question the pair answers: the two together are what says a reply
+      is about to hand the user silence it never meant to. Fields rather
+      than locals because they outlive what a leg holds: `spoken` is
+      cleared at every leg boundary, so a reply that spoke through one
+      agent and was wholly withheld on the next would read as empty from
+      it, and the withholding itself happens a call away, inside the
+      tool loop.
     - `_agent`: a property over `self._events.agent` rather than a field,
       because both sides of the boundary attribute events to whoever is
       talking, so the events object is the one place it can live.
@@ -682,10 +693,11 @@ class PipelineRuntime:
         # is no honest value before then: an agent is what the policy is
         # about, and nothing asks this outside a reply.
         self._remembering: bool | None = None
-        # Whether any sentence of the reply now running was withheld,
-        # reset at the start of every reply by the method that owns the
-        # question. False before the first reply for the same reason it
-        # is reset: what it describes is one reply, and no reply has run.
+        # The two reply-wide facts the empty-reply check reads, reset at
+        # the start of every reply by the method that reads them. False
+        # before the first reply for the same reason they are reset:
+        # what they describe is one reply, and no reply has run.
+        self._reply_spoke = False
         self._reply_withheld = False
         # The language the ASR provider asked this session to reuse
         # (`AsrResult.lock_language`). Session-scoped on purpose: the
@@ -1436,7 +1448,7 @@ class PipelineRuntime:
             # auto mode is what re-arms the device's listening.
             if unanswered:
                 await self._filler.settle()
-                await self._filler.speak_fallback()
+                await self._filler.speak_fallback(FallbackReason.REPLY_FAILED)
         finally:
             # Before the closing tts stop: an unfired timer is stood
             # down, and a clip already sounding finishes rather than
@@ -1541,14 +1553,21 @@ class PipelineRuntime:
         latch counts: two agents cannot ping-pong, and a model cannot
         resume its way through a user's history inside one answer.
 
-        The reply-wide withholding fact is reset here, because the reply
-        is what it is about and a leg is not."""
+        The two reply-wide facts are reset and read here, and they are
+        here rather than derived from `spoken` because `spoken` is
+        cleared at every leg: a reply where an earlier agent spoke and
+        the final leg was wholly withheld would read as empty from it,
+        and the user would be told the reply said nothing when they had
+        just heard most of it."""
         switches_left = 1
         self._llm_round = 0
+        self._reply_spoke = False
         self._reply_withheld = False
         while True:
             transition = await self._tool_loop(spoken, switches_left)
             if transition is None:
+                self._reply_spoke = self._reply_spoke or bool(spoken)
+                await self._nothing_sayable()
                 return
             if transition.recap is not None:
                 # Before the leg closes and before anything moves: the
@@ -1576,6 +1595,9 @@ class PipelineRuntime:
                         sentences=Count(len(spoken)),
                     )
                 )
+                # Before the clear, which is the whole reason the fact
+                # is kept here at all.
+                self._reply_spoke = True
                 spoken.clear()
             # Closed whether or not this agent spoke: a leg that only
             # asked for the move still spent tokens, and the leg is the
@@ -1606,6 +1628,45 @@ class PipelineRuntime:
             # short by a barge-in still records what the user heard of
             # it on the thread it was said on.
             self._turn = self._seeded_turn()
+
+    async def _nothing_sayable(self) -> None:
+        """The reply is over. If it spoke nothing and withheld
+        something, say the agent's fixed phrase instead of handing the
+        user the silence #384 exists to end.
+
+        Both halves of the condition matter. A reply that spoke nothing
+        and withheld nothing is an empty answer from the model, which
+        this has never had anything to say about; a reply that withheld
+        a sentence and spoke the rest is the issue's own constraint,
+        that one bad sentence does not discard a good answer.
+
+        Here, at the end of the reply, rather than by raising from the
+        loop. The failure arm's log line means a reply that broke, and a
+        reply whose model wrote its calls into its speech did not break:
+        it is a fact about the model this deployment configured, and the
+        record the runner emits says exactly that.
+
+        Reached with nothing active, which the failure arm has to nest a
+        block to arrange and this gets for free: it is a statement in
+        the ordinary flow of a reply, so a cancellation landing in the
+        notice leaves with an empty chain behind it rather than carrying
+        whatever was being handled.
+
+        The settle is the failure arm's, for its two reasons and one
+        more of this site's own. A clip still sounding must not be
+        talked over and the shared encoder must not be interleaved; and
+        a reply that spoke nothing never sent a batch, so the tail wait
+        inside `_send_reply_audio` was never reached and this is the
+        first thing in the turn that would have waited for the mask at
+        all. The wait re-raises a cancellation of this reply rather than
+        swallowing it, so a barge-in confirmed while it runs takes the
+        turn instead of the notice; the `finally` in `_reply` settles
+        again, idempotently, and still owns the closing `tts stop`.
+        """
+        if self._reply_spoke or not self._reply_withheld:
+            return
+        await self._filler.settle()
+        await self._filler.speak_fallback(FallbackReason.NOTHING_SAYABLE)
 
     def _move_to(self, transition: _Transition) -> None:
         """Apply one transition at the boundary the loop ended on, and

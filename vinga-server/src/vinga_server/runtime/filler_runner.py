@@ -47,11 +47,14 @@ from vinga_server.events.catalog import (
     FillerPlayed,
     FillerSkippedForBargeIn,
     FillerSkippedForSpeech,
+    NothingSayableFallback,
     ReplyFailedFallback,
+    Variant,
 )
 from vinga_server.events.values import (
     ConversationId,
     Count,
+    FallbackReason,
     Flag,
     Identifier,
     Whole,
@@ -63,6 +66,30 @@ if TYPE_CHECKING:
     # module at import time, and keeping it out is what stops the two
     # from growing a runtime edge nothing asked for.
     from vinga_server.runtime.turntaking import TurnTaking
+
+
+def _fallback_record(
+    reason: FallbackReason, agent: str | None, conversation: str | None, audio: bool
+) -> Variant:
+    """Which of the two `reply_fallback` shapes this playback is.
+
+    A variant per reason, filler-style, because the two say different
+    sentences about the same phrase: one names a pipeline an operator
+    has to fix, the other a model that wrote its calls into its speech.
+    Selected here rather than at either caller so that the two arms ask
+    for the phrase the same way and differ in one argument.
+    """
+    if reason is FallbackReason.NOTHING_SAYABLE:
+        return NothingSayableFallback(
+            agent=Identifier(agent),
+            conversation=ConversationId(conversation),
+            audio=Flag(audio),
+        )
+    return ReplyFailedFallback(
+        agent=Identifier(agent),
+        conversation=ConversationId(conversation),
+        audio=Flag(audio),
+    )
 
 
 class FillerRunner:
@@ -366,9 +393,9 @@ class FillerRunner:
         finally:
             self._filler_sounding = False
 
-    async def speak_fallback(self) -> None:
-        """Say the active agent's fixed failure phrase, on the display
-        and, where a clip was cached, out loud.
+    async def speak_fallback(self, reason: FallbackReason) -> None:
+        """Say the active agent's fixed phrase, on the display and,
+        where a clip was cached, out loud.
 
         Here rather than in the reply body because this class already
         holds all three things it takes: the output handle, the
@@ -385,6 +412,14 @@ class FillerRunner:
         said, so nothing here touches the reply's spoken sentences, the
         conversation history or the stored turn: what says it happened
         is the record below.
+
+        `reason` is why the turn had nothing else to say, and it is the
+        caller's because only the caller knows: the failure arm has an
+        exception in hand, and the empty-reply check has a reply that
+        finished having spoken nothing. What it chooses is the sentence
+        the record renders, and nothing else here; both reasons say the
+        same phrase the same way, which is the point of there being one
+        phrase.
 
         Nothing at all where the agent has no phrase, which is an agent
         whose section is off and a world built before anything was
@@ -453,10 +488,11 @@ class FillerRunner:
         finally:
             if shown:
                 self._events.emit(
-                    lambda: ReplyFailedFallback(
-                        agent=Identifier(self._events.agent),
-                        conversation=ConversationId(self._events.conversation),
-                        audio=Flag(played),
+                    lambda: _fallback_record(
+                        reason,
+                        self._events.agent,
+                        self._events.conversation,
+                        played,
                     )
                 )
         # Reported out here rather than in the arm, for the reason the
