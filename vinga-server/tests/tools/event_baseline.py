@@ -1008,32 +1008,49 @@ async def drive_filler_played(_: Path) -> None:
     await drive_reply(session, UTTERANCE)
 
 
-async def drive_reply_fallback(_: Path) -> None:
-    """A reply that fails terminally on a world that cached a phrase for
-    it, so the failure arm says it.
-
-    One driver for two records. The phrase is cached at a sample rate
-    nothing can resample from, which is the bug class the runner's own
-    arm exists for: the typed record below is emitted before any of the
-    audio work, and the resample that follows it raises, which is the
-    untyped playback line the closed set in `test_event_baseline.py`
-    names. A device that had gone away would produce neither, since that
-    is swallowed by contract.
-    """
-    config = masked_config()
+async def failed_reply_saying(fallbacks: dict[str, Any]) -> None:
+    """One reply that fails terminally on a world holding these phrases,
+    so the failure arm says the one belonging to the agent talking."""
     session = session_for(
-        config,
+        masked_config(),
         POET_MAC,
         {"poet": ScriptedLlm(["One sentence."])},
-        fallbacks={
-            "poet": FallbackClip(
-                phrase="Something broke.", clip=b"\x00\x00" * 160, sample_rate=0
-            )
-        },
+        fallbacks=fallbacks,
         stages={"tts": cast(Any, Unreachable("tts", ConnectionRefusedError("no route")))},
     )
     session.websocket = cast(Any, RecordingSocket())
     await drive_reply(session, UTTERANCE)
+
+
+async def drive_reply_fallback(_: Path) -> None:
+    """The phrase said and heard: a cached clip that resamples, encodes
+    and sends, which is what makes the record's `audio` true."""
+    config = masked_config()
+    built = await build_agent_fillers(config, built_world(config).agents)
+    await failed_reply_saying(dict(built.fallbacks))
+
+
+async def drive_reply_fallback_shown_only(_: Path) -> None:
+    """The same phrase reaching the display and not the speaker, which
+    is the other value of the same field and the path that also writes
+    the untyped playback line the closed set in `test_event_baseline.py`
+    names.
+
+    The clip is cached at a sample rate nothing can resample from, which
+    is the bug class the runner's arm exists for: the display send has
+    already landed when the resample raises, so the record says the
+    phrase was seen and not heard, and the failure is reported beside
+    it by class name. A device that had gone away would produce neither
+    record, since that is swallowed by contract and leaves no turn to
+    say the phrase went out on.
+    """
+    await failed_reply_saying(
+        {
+            "poet": FallbackClip(
+                phrase="Something broke.", clip=b"\x00\x00" * 160, sample_rate=0
+            )
+        }
+    )
 
 
 EDGE = "vinga_server.device.session"
@@ -1110,6 +1127,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
     Driver(
         (FILLER, "FillerRunner.speak_fallback", 1),
         drive_reply_fallback,
+        "reply_fallback",
+    ),
+    Driver(
+        (FILLER, "FillerRunner.speak_fallback", 2),
+        drive_reply_fallback_shown_only,
         "reply_fallback",
     ),
 )
