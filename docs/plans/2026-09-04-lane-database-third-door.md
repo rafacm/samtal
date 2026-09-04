@@ -178,3 +178,66 @@ doors).
   store's secrets rule has one home in `models.py`.
   Documentation footprint: `CHANGELOG.md` and the dated pointer;
   nothing generated is touched.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-04; the reviewer ran about 9 minutes. Verdict:
+ready after the P1/P2 amendments.
+
+1. **P1: `packaged_database` can leave an xdist worker pointing at
+   `vinga`.** The consuming test overrides `VINGA_DB_NAME` through
+   `monkeypatch`; if the packaged fixture finalizes first, the
+   later monkeypatch rollback restores the value it observed
+   during the span, and under `--dist loadfile` the poisoned
+   worker keeps executing while the lane pin may run elsewhere;
+   `clean_store` cannot detect it because it connects to
+   `LANE_DATABASE` explicitly. Specify an ordering-safe packaged
+   span (test overrides rolled back before lane restoration), add
+   same-process assertions after every rollback over both the env
+   name and a payload composition, and do not rely on fixture
+   teardown order.
+
+2. **P2: setting `VINGA_DB_NAME=vinga` does not restore the
+   shipped-default condition.** The existing fixture removes the
+   variable so the package default is what answers; a helper that
+   always sets the name would let the default test pass through an
+   override even with the model default broken. The helper must
+   represent env-name presence separately: absent during the
+   packaged span, `LANE_DATABASE` during the lane span, both
+   transitions rebuilding the full cascade.
+
+3. **P2: the call-site census misses a partial payload in the
+   integration lane.** `_restricted_app` in
+   `test_provisioning.py` builds
+   `server={"database": {"name": ..., "user": ...}}`, whose
+   omitted `host`/`port` travel the stale-schema path, masked by
+   CI values coinciding. Include all partial mappings in the
+   census, add a regression case where explicit fields are partial
+   and the omitted ones must inherit the lane instance values, and
+   include the integration lane in verification.
+
+4. **P2: the pins verify only `name` while the helper owns four
+   inlined defaults.** Stale host, port and user equal shipped
+   values on the normal configuration and stay invisible. Drive
+   the helper once with four distinctive sentinel values and
+   assert the complete tuple through `DatabaseConfig`,
+   `ServerConfig`, `FileConfig` and `Config`, then verify complete
+   restoration.
+
+5. **P2: `BaseModel.__subclasses__()` cannot support a
+   whole-package completeness guarantee.** It enumerates loaded
+   classes, not package modules, so a future embedder in an
+   unimported module is invisible, and no ordered rebuild manifest
+   is defined to compare against. Define the discovery boundary
+   explicitly (every model class declared in `config.models`,
+   recursive annotation traversal through containers and unions)
+   and compare that non-empty derived set against one module-level
+   ordered rebuild tuple the helper uses.
+
+6. **P2: the row-count test remains structurally capable of
+   becoming vacuous.** Rereading is not a pin. Build the
+   configuration once, assert its resolved database is the lane
+   database, pass that same configuration to `create_app`, query
+   through that exact `config.server.database`, and assert
+   `current_database()` before the row count.
