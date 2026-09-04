@@ -572,6 +572,57 @@ def test_a_scalar_the_parser_cannot_build_is_refused_not_raised(
     assert caught.value.__context__ is None
 
 
+@pytest.mark.parametrize(
+    "spoil",
+    [
+        pytest.param(lambda path: path.unlink(), id="deleted"),
+        pytest.param(
+            lambda path: path.write_text(
+                f"server:\n  host: '{PARSER_SENTINEL}\n", encoding="utf-8"
+            ),
+            id="turned-malformed",
+        ),
+        pytest.param(lambda path: path.write_bytes(b"\x80\x81"), id="turned-to-bytes"),
+    ],
+)
+def test_the_file_is_read_once_so_a_file_that_changes_cannot_win(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spoil
+) -> None:
+    """What the boundary parsed is what the server boots on.
+
+    The file used to be opened twice, once by this loader and once by
+    the settings source behind it, and the second read answered to
+    nobody: a file deleted in between booted the defaults in silence,
+    and one that had turned malformed or into bytes left as the parser's
+    own exception, path and offending line included, past every sentence
+    this module writes.
+
+    The file is spoiled the instant the first parse returns, which is
+    the window that used to exist, so anything reading it a second time
+    meets the spoiled file and nothing else can. One parse is asserted
+    as well as the value, because a second read of an unchanged file
+    would pass on the value alone.
+    """
+    path = planted_path(tmp_path)
+    path.write_text("server:\n  port: 9123\n", encoding="utf-8")
+
+    parses = 0
+    parse = yaml.safe_load
+
+    def parse_then_spoil(*args: object, **kwargs: object) -> object:
+        nonlocal parses
+        parses += 1
+        parsed = parse(*args, **kwargs)
+        spoil(path)
+        return parsed
+
+    monkeypatch.setattr(yaml, "safe_load", parse_then_spoil)
+
+    # The value the first read saw, and no exception of any kind.
+    assert load_file_config(path).server.port == 9123
+    assert parses == 1
+
+
 def test_both_yaml_readers_catch_one_family(tmp_path: Path) -> None:
     """The CLI's fragment boundary and the boot path read the same
     parser, so what either of them treats as unparseable is one tuple:

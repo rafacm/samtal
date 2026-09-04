@@ -35,7 +35,7 @@ from vinga_server.config.models import (
     DatabaseConfig,
     FieldProblem,
     FileConfig,
-    yaml_file_var,
+    yaml_data_var,
 )
 
 CONFIG_ENV_VAR = "VINGA_CONFIG"
@@ -394,10 +394,14 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
 
     _check_moved_environment()
     _check_database_environment()
-    if path is not None:
-        _check_config_file(path, source)
+    # The file is read once, here, and what the settings machinery is
+    # given is what this read parsed. Handing it the path instead meant
+    # a second open behind this boundary, which answered a file that had
+    # changed underneath by booting the defaults or by raising the
+    # parser's own exception past every sentence above (#291).
+    data = _check_config_file(path, source) if path is not None else {}
 
-    token = yaml_file_var.set(path)
+    token = yaml_data_var.set(data)
     problem: str | None = None
     try:
         return _with_database_environment(FileConfig())
@@ -420,7 +424,7 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         # chain that carried the value behind it.
         problem = f"invalid config in {source}: {exc}"
     finally:
-        yaml_file_var.reset(token)
+        yaml_data_var.reset(token)
     raise ConfigError(problem)
 
 
@@ -593,10 +597,18 @@ def _config_text(path: Path, source: str) -> str:
     raise ConfigError(problem)
 
 
-def _check_config_file(path: Path, source: str) -> None:
-    """Pre-flight check with stable, helpful messages: the pydantic-settings
-    YAML source silently skips a missing file, and its parse errors do not
-    reliably name line and column."""
+def _check_config_file(path: Path, source: str) -> dict[str, object]:
+    """The file half's YAML, read once, parsed once and checked, or the
+    fixed sentence for a file that cannot give one.
+
+    What it returns is what the settings machinery is then built from,
+    which is the point of doing the work here: the pydantic-settings
+    YAML source skips a missing file in silence, does not name an
+    encoding, and answers a file it cannot parse with the parser's own
+    exception, path and offending line included. Nothing behind this
+    opens the file again, so none of that can happen to a file that
+    changes between two reads.
+    """
     text = _config_text(path, source)
 
     problem: str | None = None
@@ -625,8 +637,14 @@ def _check_config_file(path: Path, source: str) -> None:
             f"server, got {type(data).__name__}"
         )
 
-    if isinstance(data, dict):
-        _check_moved_keys(source, data)
+    if not isinstance(data, dict):
+        # A file holding nothing at all, which is a legitimate config
+        # file: `safe_load` answers None for it, and what the settings
+        # sources want is a mapping saying nothing.
+        return {}
+
+    _check_moved_keys(source, data)
+    return data
 
 
 def _check_moved_keys(source: str, data: dict) -> None:
