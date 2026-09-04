@@ -310,6 +310,28 @@ def _tool_fragment(classified: ToolInvocation) -> Fragment:
     )
 
 
+def _tool_arguments_coerced(
+    classified: ToolInvocation, agent: str, conversation: str, coerced: int
+) -> Variant:
+    """The `tool_arguments_coerced` event for one corrected call.
+
+    The naming policy is `_tool_called`'s, read from the same two
+    constants for the same reason: a builtin's name is this server's own
+    word, an MCP call is named by the entry an operator configured, and
+    a device tool or an invented name is named by nothing. One reading
+    of it rather than a second, so the two events about one call cannot
+    come to disagree about what may be printed.
+    """
+    return assembly.tool_arguments_coerced(
+        agent,
+        conversation,
+        classified.source,
+        classified.name if classified.source == BUILTIN else None,
+        classified.entry if classified.source == MCP else None,
+        coerced,
+    )
+
+
 def _tool_called(
     classified: ToolInvocation,
     agent: str,
@@ -1651,7 +1673,10 @@ class PipelineRuntime:
             # So this is the one point every execution path shares, and
             # the one point where the record's values and the far side's
             # can part company.
-            executing = [self._for_execution(call, schemas) for call in calls]
+            executing = [
+                self._for_execution(call, slot, schemas)
+                for call, slot in zip(calls, slots, strict=True)
+            ]
             results, switch_to = await self._run_tools(executing, slots, switches_left)
             if switch_to is not None:
                 break
@@ -1683,7 +1708,7 @@ class PipelineRuntime:
         return tools
 
     def _for_execution(
-        self, call: ToolCall, schemas: Mapping[str, dict[str, Any]]
+        self, call: ToolCall, slot: int, schemas: Mapping[str, dict[str, Any]]
     ) -> ToolCall:
         """One call as the far side receives it: the model's own, with
         every argument whose string form converts losslessly to the type
@@ -1701,10 +1726,25 @@ class PipelineRuntime:
         The original object where nothing converted, so a reply that
         needed none of this allocates none of it, and `is` still holds
         across the boundary for everything the model got right.
+
+        The event is emitted here and only where something converted,
+        because this is a decision vinga owns and the record cannot
+        stand in for it: the record's `arguments` is null under text-off
+        and it retains no schema, so an original string beside a success
+        does not say a coercion happened. `slot` is where this call was
+        reserved, and the classification is read back from there rather
+        than taken again, exactly as the dispatch reads it.
         """
         arguments = with_lossless_coercions(call.arguments, schemas.get(call.name, {}))
-        if not _coercions(call.arguments, arguments):
+        coerced = _coercions(call.arguments, arguments)
+        if not coerced:
             return call
+        classified = self._turn.reserved(slot)
+        self._events.emit(
+            lambda: _tool_arguments_coerced(
+                classified, self._agent, self._conversation, coerced
+            )
+        )
         return replace(call, arguments=arguments)
 
     async def _run_tools(

@@ -27,6 +27,12 @@ the one sentence that is not an event has `pipeline.py`'s
 `_tool_fragment` for its single named home. What lives here is the
 rendering, and the grammar bounding each shape of it.
 
+`tool_arguments_coerced` is the one event whose sentence may render any
+of the three shapes, because it is one variant for all four namespaces:
+what makes its answer the same answer is that it takes the two names
+from the same decision `tool_call` takes them from, and carries them in
+its payload as well as in its sentence.
+
 Plain values in, one variant out, and nothing injectable. The module
 imports the catalog and the value vocabulary and no subsystem, which is
 what lets it be called from anywhere an event is emitted.
@@ -41,6 +47,7 @@ from vinga_server.events.catalog import (
     LlmRound,
     McpToolCall,
     ProviderFailed,
+    ToolArgumentsCoerced,
     UnnamedToolCall,
     Variant,
 )
@@ -72,6 +79,7 @@ __all__ = [
     "llm_rounded",
     "mcp_tool_called",
     "provider_failure",
+    "tool_arguments_coerced",
     "tool_fragment",
     "unnamed_tool_called",
 ]
@@ -241,6 +249,35 @@ def unnamed_tool_called(
         named=Nothing(""),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),
+    )
+
+
+def tool_arguments_coerced(
+    agent: str,
+    conversation: str,
+    source: str,
+    tool: str | None,
+    entry: str | None,
+    coerced: int,
+) -> Variant:
+    """The `tool_arguments_coerced` event for one corrected call.
+
+    Takes the two names as the caller's decision already resolved them,
+    exactly as `tool_fragment` does and for the same reason: which of a
+    call's names may be printed is read from the classifier's own source
+    constants, which live beside the classifier. What this owns is that
+    the fragment and the fields agree, since one variant carries all
+    four namespaces and a builtin named in the sentence but not in the
+    payload would be two answers to one question.
+    """
+    return ToolArgumentsCoerced(
+        agent=Identifier(agent),
+        conversation=ConversationId(conversation),
+        source=ToolSource(source),
+        coerced=Count(coerced),
+        named=tool_fragment(tool, entry),
+        tool=Identifier(tool) if tool is not None else ABSENT,
+        entry=Identifier(entry) if entry is not None else ABSENT,
     )
 
 

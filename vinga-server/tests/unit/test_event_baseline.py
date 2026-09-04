@@ -98,12 +98,13 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     container says so when its endpoint is this machine (#340), and
     eighty-four since the memory store's write path gained an event of
     its own (#314), eighty-five since memory gained a cleanup that
-    acts for no agent at all (#83), and eighty-six since a handshake
+    acts for no agent at all (#83), eighty-six since a handshake
     refused by a shutdown stopped being reported as a full server
-    (#318)."""
+    (#318), and eighty-seven since a call whose argument types this
+    server corrected says so (#383)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 86
+    assert len(set(claimed)) == len(claimed) == 87
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -518,6 +519,21 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._store_recap #1": (
         ("MilestoneRecorded", ("conversation", "device", "event", "session")),
+    ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._for_execution #1": (
+        (
+            "ToolArgumentsCoerced",
+            (
+                "agent",
+                "coerced",
+                "conversation",
+                "device",
+                "event",
+                "session",
+                "source",
+                "tool",
+            ),
+        ),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._run_one #1": (
         (

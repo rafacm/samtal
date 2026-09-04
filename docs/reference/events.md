@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 61 events in 87 variants. What was
+This document is that surface written down: 62 events in 88 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -223,6 +223,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `llm_round` | `vinga_server.session` | INFO | 1 |
 | `provider_failed` | `vinga_server.session` | WARNING | 1 |
 | `tool_call` | `vinga_server.session` | INFO | 3 |
+| `tool_arguments_coerced` | `vinga_server.session` | INFO | 1 |
 | `barge_in` | `vinga_server.session` | INFO | 1 |
 | `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
 | `barge_in_merged` | `vinga_server.session` | INFO | 1 |
@@ -964,6 +965,42 @@ session %s: %s tool%s took %.2f s%s
 | `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
+
+### `tool_arguments_coerced`
+
+A call went out with argument types this server corrected: a value whose
+string form converts to the declared type exactly is converted once, at the
+dispatch (#383). How many, and never which or to what.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+How many arguments were converted and never which or to what: a property name
+is the far side's own word and a value is what the model wrote, and neither
+belongs on a retained surface. What the record keeps is the arguments as the
+model sent them, which is where the two can be compared.
+
+```text
+session %s: %s tool%s was called with %d argument(s) whose types the schema declares otherwise, converted for the call
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `source` (`TOKEN`) | no | one of: `builtin`, `device`, `mcp`, `unknown` |  |
+| 3 | `named` (`COMPOSED`) | no |  | One of the three shapes of the `tool_call` naming policy, and any of them, because one variant carries all four sources: a builtin's own name quoted, the configured MCP entry a call reached, or nothing at all. |
+| 4 | `coerced` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `source` | `TOKEN` | yes | no | one of: `builtin`, `device`, `mcp`, `unknown` | Which namespace the corrected call reached into. |
+| `coerced` | `COUNT` | yes | no |  | How many of the call's arguments were converted, which is one or more: the event is emitted only where the copy differs from what the model sent. |
+| `tool` | `IDENTIFIER` | no | no |  | Present for a builtin, the only tool names this server authors. |
+| `entry` | `IDENTIFIER` | no | no |  | Present for an MCP call: the configured entry, never the far side's tool name. |
 
 ### `barge_in`
 
