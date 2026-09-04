@@ -18,6 +18,14 @@ the only thing that mints a token is a check-in reply. A case that
 started from an already servable agent would pass with that step missing,
 which is why the starting state is part of the assertion and why the case
 below removes the step and watches the handshake fail.
+
+**One case starts from the opposite deployment on purpose.** Device
+authentication off with a default agent set is what #369 was reported
+from: the board is admitted at its first check-in and handed an empty
+token, because there is no credential to hand it, and the reply is
+otherwise byte for byte the one a board nobody will admit receives. That
+case gets its own server, since every other case here needs
+authentication on to have any bite at all.
 """
 
 import threading
@@ -61,19 +69,38 @@ REPLY = f"You said {HEARD}."
 SOMEBODY_ELSE = "aa:bb:cc:dd:ee:99"
 
 
-def deployment() -> Config:
+def deployment(**overrides: object) -> Config:
     """Mock providers, one agent, and nothing bound to anybody."""
     return Config(
-        providers={
-            "llm": {"mock": {"type": "mock", "reply": "You said {text}."}},
-            "asr": {"mock": {"type": "mock", "text": HEARD}},
-            "tts": {"mock": {"type": "mock"}},
-            "vad": {"mock": {"type": "mock"}},
-        },
-        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
-        agents={AGENT: {"prompt": "You are an assistant."}},
-        devices={SOMEBODY_ELSE: [AGENT]},
+        **(
+            {
+                "providers": {
+                    "llm": {"mock": {"type": "mock", "reply": "You said {text}."}},
+                    "asr": {"mock": {"type": "mock", "text": HEARD}},
+                    "tts": {"mock": {"type": "mock"}},
+                    "vad": {"mock": {"type": "mock"}},
+                },
+                "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+                "agents": {AGENT: {"prompt": "You are an assistant."}},
+                "devices": {SOMEBODY_ELSE: [AGENT]},
+            }
+            | overrides
+        )
     )
+
+
+def open_deployment() -> Config:
+    """The deployment #369 was reported from: device authentication off
+    for a trial on a trusted network, and a default agent covering every
+    board that arrives.
+
+    The two together are what makes the reply ambiguous on the wire. The
+    default agent means this board resolves to something to talk to, so
+    it is admitted and is offered no code; the auth setting means there
+    is no credential to hand it, so the token beside that admission is
+    the same empty string a board nothing resolves is turned away with.
+    """
+    return deployment(default_agent=AGENT, server={"auth": {"enabled": False}})
 
 
 @pytest.fixture
@@ -90,6 +117,24 @@ def live(monkeypatch: pytest.MonkeyPatch) -> Iterator[Live]:
     monkeypatch.setenv(API_SECRET_ENV, SECRET)
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     with served(booted(deployment())) as running:
+        monkeypatch.setenv(cli.API_URL_ENV, running.api_url)
+        yield running
+
+
+@pytest.fixture
+def open_live(monkeypatch: pytest.MonkeyPatch) -> Iterator[Live]:
+    """The same server, on the deployment that issues no device tokens.
+
+    A fixture of its own rather than a parameter on the one above,
+    because every other case in this file needs authentication ON: what
+    they are about is a token opening a socket and a doctored one being
+    refused, and both lose their bite on a deployment that asks for
+    none.
+    """
+    monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+    monkeypatch.setenv(API_SECRET_ENV, SECRET)
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    with served(booted(open_deployment())) as running:
         monkeypatch.setenv(cli.API_URL_ENV, running.api_url)
         yield running
 
@@ -126,6 +171,36 @@ def _recording(
 
 def ran(live: Live, *arguments: str) -> int:
     return cli.main(["simulator", "run", f"{live.origin}{OTA_PATH}", *arguments])
+
+
+def test_a_deployment_that_issues_no_tokens_holds_the_whole_conversation(
+    open_live: Live, checked_in: list[board.CheckIn], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The issue's own reproduction, as a test.
+
+    Device authentication off, a default agent set, and `simulator run`
+    with no `--claim` at all: one check-in, admitted with an empty token
+    because there is no credential to be had, and a whole conversation
+    on it. Before #369 this deployment answered a reply byte for byte
+    identical to the one a board nobody claimed gets, and the command
+    refused to open a socket the server would have accepted.
+
+    Held to going red by the reading alone: without the word in the
+    reply, the single check-in below is `Unwelcome` and the command
+    leaves with `CANNOT_CONVERSE` before anything is opened.
+    """
+    assert ran(open_live) == 0
+
+    [only] = checked_in
+    assert isinstance(only, board.Admitted)
+    assert only.token == "", "the deployment issued a credential, so this is the auth-on case"
+
+    said = capsys.readouterr()
+    assert f"heard: {HEARD}" in said.out
+    assert f"said: {REPLY}" in said.out
+    assert f"the conversation reached: {conversation.CLOSED}" in said.out
+    assert conversation.CLOSE_NAMES[1000] in said.out
+    assert "out of order:" not in said.err
 
 
 def test_an_unclaimed_board_is_claimed_and_then_holds_a_conversation(
