@@ -91,6 +91,13 @@ services:
       start_period: 5s
 
   vinga:
+    # One service, and never a `deploy.replicas`: one replica is the
+    # supported topology. Activation codes, the loaded configuration
+    # generation and session admission are state in this one process,
+    # and `Running in a container` in the server README says what a
+    # second replica would break. CI boots this file as committed, so
+    # this shape is the topology being exercised rather than asserted.
+    #
     # Behind a profile, so `docker compose up -d --wait` keeps meaning
     # the database alone and nothing about the development loop moves.
     # The profile is also what makes the refusal below possible:
