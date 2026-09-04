@@ -264,3 +264,11 @@ Run from `vinga-server/`, with the development Postgres up:
 No device checkpoint, and none is owed: nothing on the wire changed in
 this milestone. The field it reads was shipped by M1, whose own record
 carries the compatibility argument.
+
+### M2 PR review round
+
+PR [#388](https://github.com/rafacm/vinga/pull/388). Backend codex
+(codex-cli 0.153.0), model `gpt-5.6-sol`, read-only sandbox,
+2026-09-04, against `15c60ad2`, runtime 4m15s, posted by the
+self-posting script. No findings; verdict mergeable as is. Nothing
+to resolve.
