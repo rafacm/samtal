@@ -276,3 +276,112 @@ the reviewer's own framing: keeping the words without the audio is what
 the display half needs, and there is no way to hold a usable display
 half and a retriable audio half in one entry without a caller having to
 ask which of the two it is looking at.
+
+## M2: the sentence guard
+
+Built as the plan describes, its review round's amendments included.
+The deviations below are the places where the plan left a choice open
+or where the code disagreed with the plan's reading of it; everything
+not listed here is the plan's own shape.
+
+### Deviations and decisions
+
+**The session cases got their own file.** The plan puts them in
+`test_session_tools.py`. They are not about the tool loop: they are
+about which sentences survive it, what replaces a reply that said
+nothing, and which surfaces a withheld sentence may not reach, and the
+last of those drags in a store, a socket that keeps order and a planted
+secret. `tests/unit/test_session_withheld.py` is the new domain concept
+getting its own module rather than a thousandth line in a file about
+something else, which is the design guide's own rule. The guard's own
+suite is `tests/unit/test_speech_guard.py` where the plan puts it, and
+each file's docstring names the other.
+
+**`nothing_sayable` added no emit path, and rides the numbering M1's
+review round left behind.** The second reason is the same emit site
+asked with the other argument. That site already carries two driver
+identities, since finding 3 of the M1 round split the notice's own
+paths into one heard and one only shown, so what an identity under one
+method names is a path through a site rather than a line of source, and
+`nothing_sayable` is the third: `FillerRunner.speak_fallback #3`, a
+reply whose whole answer is a leaked call. The other new identity is
+`PipelineRuntime._report_withheld #1`, whose driver runs three replies
+for the three `sentence_withheld` shapes, exactly as `_run_one #1` runs
+three for `tool_call`'s. The count is 92.
+
+**The reason reaches the runner as an argument.** The plan says the
+empty-reply check plays "the same fallback (its event carrying the
+other reason)" and does not say how. `speak_fallback` now takes a
+`FallbackReason`, and a module-level `_fallback_record` selects the
+variant from it, filler-style. The alternative, a second method on the
+runner, would have duplicated the whole playback recipe to change one
+word in a record.
+
+**The unnamed variant carries `source`, and an ambiguous match rides it
+as `unknown`.** The plan says an argument-only match resolving to no
+single tool rides the unnamed variant and does not say what its
+`source` then reads. `unknown`, with the declaration's own `NOTE`
+saying why: which namespace it came from is exactly what could not be
+decided, which is the same answer `unknown` already gives for a name
+nobody publishes. A device tool identified unambiguously still reports
+`device` and names nothing, as it does on `tool_call`.
+
+**The report callback takes a character count, not the sentence.** The
+plan asks for the guard and its emission behind one helper. What
+crosses back is `(tool | None, characters)`, so the emit closure in
+`pipeline.py` never captures the withheld text at all. That is the
+no-leak claim made structural rather than remembered: there is no
+variable holding the bytes at the point where a payload is built.
+
+**Two floors the plan did not state.** An empty object matches nothing,
+because every schema trivially contains no keys and `{}` in a sentence
+is punctuation; and a tool that declares no `properties` matches
+nothing by arguments, because a non-empty key set cannot fall inside an
+empty vocabulary. Both are cases in the guard's matrix.
+
+**The reply-wide facts are fields, and the inventory says why.** The
+plan calls them "two per-reply facts owned by `_speak_reply` and listed
+in the runtime docstring's state inventory". `_reply_spoke` could have
+been a local, since `_speak_reply` reads `spoken` at both points it
+changes; `_reply_withheld` could not, because the withholding happens a
+call away inside `_tool_loop`. One of each would have been two shapes
+for one pair, so both are fields, reset per reply by the method that
+owns the question, and both are in the inventory with the leg-clearing
+reason spelled out.
+
+**`system-overview.md` needed the amendment its conditional allowed
+for.** Step 8's heading is "Each sentence is spoken as soon as it
+exists", which does claim every sentence is spoken, so the step now
+names the one kind that is not.
+
+**`catalog.py`'s `__all__` regained the M1 names.** `REPLY_FALLBACK`
+and `ReplyFailedFallback` were never added to it, while every other
+declaration and variant is there. The four new names went in, and so
+did those two, since a list that is the export surface everywhere else
+is a list with a hole in it otherwise. Nothing imports through
+`import *`, so this changes no behavior.
+
+### Bounds
+
+The stated bound is in three places and says the same thing in each:
+`runtime/speech.py`'s module docstring, which is where an implementer
+meets it; the server README's own section, which is where an operator
+does; and the changelog entry. A pretty-printed call is cut at its
+newlines into fragments no decoder can read, and buffering to close
+that would stall live speech on every ordinary `{`. The event is the
+residue's visibility.
+
+### Verification
+
+From `vinga-server/`:
+
+- `uv run ruff check .` clean.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5393 passed,
+  19 skipped.
+- `uv run pytest tests/integration -q`: see the PR's verification list.
+- `python3 scripts/check_doc_links.py .` from the repository root: 185
+  files, 0 failures.
+
+`docs/reference/events.md` was regenerated through
+`uv run vinga-server events reference`, and the command-spellings
+manifest through `uv run python -m tests.unit.test_command_spellings`.
