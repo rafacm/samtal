@@ -10,7 +10,9 @@ time in whole seconds.
 
 It is stateless on purpose. The server keeps no token table, so a
 restart does not lock out every device holding an NVS-persisted token,
-and two replicas sharing the secret accept each other's tokens. Nothing
+and any process sharing the secret accepts another's tokens. That is a
+property of the scheme rather than topology support: one replica is the
+supported topology (#316). Nothing
 here is a session identifier: the token says which device this is, and
 the session is what the websocket makes of it.
 

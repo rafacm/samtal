@@ -1903,8 +1903,11 @@ retrying and picking up a fresh token at its next OTA check.
 
 The token is upstream's scheme, `sig.ts`, where `sig` is HMAC-SHA256 over
 `client_id|device_id|ts`. It is stateless: a restart does not lock out
-every device holding a persisted token, and two replicas sharing a secret
-accept each other's tokens.
+every device holding a persisted token. Statelessness also means any
+process sharing the secret accepts another's tokens, but that is a
+property of the scheme rather than support for a second replica; the
+supported topology is one server process (see
+[Running in a container](#running-in-a-container)).
 
 The secret comes from the environment, never from the config file:
 
@@ -2734,6 +2737,17 @@ the server and its database together, and the project README's
 two commands; that file is the trial and development story rather than
 the deployment story, and this section is the one home for what a
 deployment has to decide.
+
+**Run one replica.** Everything a running server serves from is state
+in its process: the pending activation codes new devices show, the
+configuration generation an apply swaps in, and the `max_sessions`
+count the door enforces. A second replica against the same database
+would mint activation codes the first cannot claim, keep serving its
+boot-time configuration after an apply lands on the other, and enforce
+a separate session cap of its own. The two probes exist so an
+orchestrator can manage this one replica's lifecycle (a rollout, a
+restart, a drain), not so a balancer can spread devices across
+several.
 
 The default image carries both local engines, so one seeded database
 serves a conversation. The database itself is the deployment's to
