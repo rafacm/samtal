@@ -55,8 +55,9 @@ tests beside the five that were there:
   `ServerConfig`, `FileConfig`, `Config` and `config_with_agent`, each
   on an empty `database` mapping.
 - `test_a_partial_database_payload_inherits_this_lane_s_instance`: the
-  shape `_restricted_app` builds in the integration lane, asserting the
-  omitted `host` and `port` are the lane instance's.
+  shape `_restricted_app` builds in the integration lane, driven under
+  sentinel defaults so that the omitted fields have a value nothing
+  ships to coincide with (the review round below is why).
 - `test_all_four_connection_facts_travel_the_cascade_and_come_back`:
   the helper driven once with four sentinel values, the complete
   `(host, port, name, user)` tuple asserted through all four models,
@@ -176,8 +177,57 @@ files and would otherwise have swept a file git could not see.
 
 The pin was verified red before it was verified green: with the
 conftest's rebuild loop cut back to `DATABASE_REBUILD_ORDER[:1]`, which
-is exactly the pre-change behavior, the new file reports
+is exactly the pre-change behavior, the new file reported
 `2 failed, 8 passed, 1 error` (the payload-door test, the four-sentinel
 test, and the packaged span's finalizer refusing to leave the worker
-pointed at `vinga`). The bytecode trap in `AGENTS.md` does not apply to
-that cycle: the lane writes no bytecode and clears the caches it finds.
+pointed at `vinga`). The partial-payload case was NOT among them, which
+is the review round's finding below; after its fix the same cycle
+reports `3 failed, 7 passed, 1 error` and that case is one of the
+three. The bytecode trap in `AGENTS.md` does not apply to that cycle:
+the lane writes no bytecode and clears the caches it finds.
+
+### PR review round
+
+External review of the branch as pushed to PR #395, at `f7c9f6ce`
+against `origin/main`: backend codex (codex-cli 0.153.0), model
+`gpt-5.6-sol`, 2026-09-04, runtime 7m23s. One finding, a P2. Confirmed
+against this session's own recorded red-before-green run before being
+fixed.
+
+1. **P2: the partial-payload regression case passes with the bug
+   restored.** `test_a_partial_database_payload_inherits_this_lane_s_instance`
+   supplied the lane's existing `name` and `user` and asserted only the
+   omitted `host` and `port`, whose lane values equal the stale packaged
+   ones on CI and on a checkout alike, because the lane's instance IS
+   the compose instance. So the case passed against a broken cascade,
+   and would have passed against a payload discarded whole; the
+   red-before-green run recorded above bit on the empty-payload and
+   four-sentinel cases only, which is the confirmation. Fix: drive the
+   condition helper with four non-shipped sentinel values, compose the
+   actual partial `config_with_agent` shape with explicit `name` and
+   `user` that differ from those sentinels, assert the complete
+   `(host, port, name, user)` tuple (the stated fields as stated, the
+   omitted ones as the sentinels), restore the lane condition in a
+   `finally`, and prove the case now fails with the rebuild loop cut to
+   its first element.
+
+   *Resolution* (`2d9e953b`): accepted in full and fixed exactly as
+   described. `RESTRICTED_NAME` and `RESTRICTED_USER` sit beside
+   `SENTINEL_CONNECTION` with a comment saying why they are a third set
+   of values rather than the lane's: "the explicit fields were honored"
+   and "the omitted fields were inherited" have to be two assertions
+   that one accident cannot satisfy. The `SENTINEL_CONNECTION` block
+   moved above the case so both sentinel-driven tests read against it.
+   Re-verified red: with the rebuild loop cut back to
+   `DATABASE_REBUILD_ORDER[:1]`, `tests/unit/test_lane_database.py`
+   reports `3 failed, 7 passed, 1 error` and the partial-payload case is
+   named among the failures, where before the fix it was not.
+
+Re-verified after the fix, on the rebased branch (the unit lane has
+grown since the figures above, which were taken before the rebase):
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit/test_lane_database.py tests/unit/test_config.py -q`:
+  `155 passed in 5.50s`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: `5419 passed,
+  19 skipped in 81.66s (0:01:21)`
