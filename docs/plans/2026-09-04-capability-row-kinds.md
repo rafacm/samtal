@@ -142,3 +142,45 @@ knowing how message rows are worded.
   beyond the one declared fact. Documentation footprint: none
   generated (no rendered byte changes, asserted by the existing
   freshness pins); `CHANGELOG.md` and the dated pointer only.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-04, against commit `f14766cb`; the reviewer ran
+about 6 minutes. Verdict: ready after the P1/P2 amendments.
+
+1. **P1: the census manifest cannot remain untouched.** The
+   manifest records physical line positions across every tracked
+   file, `CHANGELOG.md` entries and the 2026-08-25 implementation
+   doc included, so the milestone's own CHANGELOG entry and dated
+   pointer move recorded locations even though
+   `docs/reference/cli.md` stays byte-identical. Say so, add the
+   regeneration to the footprint, and verify with the generator
+   module before the unit lane.
+
+2. **P2: the freedom pin does not work with the helpers as
+   shaped.** `every_row_renders_on_the_side_it_declares` renders
+   `capabilities.epilog(WIDTH)`, which reads the canonical
+   `rows()` rather than the supplied tuple, so an appended local
+   row fails the rendering assertion by being absent from the
+   page. Scope the regression to
+   `every_declared_message_is_classified`, which directly proves
+   the issue's fix, rather than implying the augmented tuple
+   exercises all five assertions.
+
+3. **P2: `Literal` does not enforce the closed set here.** Only
+   the events package is type-checked; dataclasses do not validate
+   annotations at runtime, so a misspelled kind could render
+   normally while the message pin ignores it. Add a runtime or
+   unit-test invariant that every canonical row's kind is one of
+   the two declared values, a bite case for an invalid kind, and
+   an assertion that the constants agree with the `Literal`
+   members rather than being a second unchecked encoding.
+
+4. **P2: the read-side design still parses wording, contrary to
+   the plan's claims.** Filtering by kind prevents prose
+   misclassification, but the direction extraction is still string
+   parsing. Narrow the claim: classification moves entirely to
+   `kind`, while the read-side case deliberately keeps inspecting
+   the `named_message`-owned spelling; do not add a direction
+   field, which would widen `Capability` beyond the issue.
