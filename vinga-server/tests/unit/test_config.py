@@ -1,3 +1,4 @@
+import errno
 import os
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from vinga_server.config.loader import (
     CONFIG_NOT_FOUND,
     CONFIG_NOT_READABLE,
     CONFIG_NOT_TEXT,
+    CONFIG_UNREADABLE,
     YAML_NOT_QUOTED,
 )
 from vinga_server.config.models import (
@@ -434,24 +436,33 @@ def planted_path(tmp_path: Path) -> Path:
     return tmp_path / f"{PARSER_SENTINEL}.yaml"
 
 
-def absent(tmp_path: Path) -> Path:
+def absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return planted_path(tmp_path)
 
 
-def a_directory(tmp_path: Path) -> Path:
+def under_a_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    # A path whose parent is a regular file, which is the other way a
+    # path names nothing: the read fails as `NotADirectoryError`, which
+    # is not a `FileNotFoundError` and needs its own row in the table.
+    parent = planted_path(tmp_path)
+    parent.write_text("server:\n", encoding="utf-8")
+    return parent / "config.yaml"
+
+
+def a_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = planted_path(tmp_path)
     path.mkdir()
     return path
 
 
-def unreadable(tmp_path: Path) -> Path:
+def unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = planted_path(tmp_path)
     path.write_text("server:\n  port: 9000\n", encoding="utf-8")
     path.chmod(0o000)
     return path
 
 
-def not_text(tmp_path: Path) -> Path:
+def not_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = planted_path(tmp_path)
     # Not UTF-8 in any position, so the read succeeds and the decoding
     # is what fails: the exception that leaves holds the bytes, which is
@@ -460,8 +471,33 @@ def not_text(tmp_path: Path) -> Path:
     return path
 
 
+def a_failing_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A read that fails as neither of the four above.
+
+    The table's last row is every other `OSError`: a disk that answers
+    EIO, a stale network mount, a file that is gone between the open and
+    the read. None of them can be provoked from a test directory, and
+    all of them arrive here carrying the path in `filename` and the
+    system's wording in `strerror`, which is what the row exists to
+    answer, so the failure is injected at the one call it would come
+    out of.
+    """
+    path = planted_path(tmp_path)
+    path.write_text("server:\n  port: 9000\n", encoding="utf-8")
+    read_text = Path.read_text
+
+    def failing(self: Path, *args: object, **kwargs: object) -> str:
+        if self == path:
+            raise OSError(errno.EIO, "Input/output error", str(path))
+        return read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", failing)
+    return path
+
+
 UNREADABLE_FILES = [
     pytest.param(absent, CONFIG_NOT_FOUND, id="missing"),
+    pytest.param(under_a_file, CONFIG_NOT_FOUND, id="under-a-file"),
     pytest.param(a_directory, CONFIG_NOT_READABLE, id="a-directory"),
     pytest.param(
         unreadable,
@@ -473,18 +509,25 @@ UNREADABLE_FILES = [
         ),
     ),
     pytest.param(not_text, CONFIG_NOT_TEXT, id="not-text"),
+    pytest.param(a_failing_device, CONFIG_UNREADABLE, id="a-failing-read"),
 ]
 
-# The operating system's own words for these three, which the library
-# hands over as `strerror` and which a refusal here does not pass on: a
+# The operating system's own words for these, which the library hands
+# over as `strerror` and which a refusal here does not pass on: a
 # message this code did not write is a message it cannot promise carries
 # no value, and each of these is written from the path it was given.
-OS_WORDINGS = ("No such file", "Permission denied", "Is a directory", "Not a directory")
+OS_WORDINGS = (
+    "No such file",
+    "Permission denied",
+    "Is a directory",
+    "Not a directory",
+    "Input/output error",
+)
 
 
 @pytest.mark.parametrize(("make", "sentence"), UNREADABLE_FILES)
 def test_a_file_that_will_not_read_is_refused_in_one_fixed_sentence(
-    tmp_path: Path, make, sentence: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make, sentence: str
 ) -> None:
     """The whole refusal, and nothing of the file or the path behind it.
 
@@ -493,7 +536,7 @@ def test_a_file_that_will_not_read_is_refused_in_one_fixed_sentence(
     bytes it could not decode, so a refusal raised inside the handler
     would carry both for anything walking `__context__` to find.
     """
-    path = make(tmp_path)
+    path = make(tmp_path, monkeypatch)
 
     with pytest.raises(ConfigError) as caught:
         load_file_config(path)
