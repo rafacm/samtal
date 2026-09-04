@@ -1,0 +1,184 @@
+# Exempt max_tokens from the secret-key heuristic
+
+Plan for [#277](https://github.com/rafacm/vinga/issues/277).
+Implementation notes land in the companion
+`2026-09-04-max-tokens-exemption-implementation.md`, one section
+per milestone, appended in the change that ticks the milestone
+here.
+
+## Goal
+
+`secret_option_fragment` matches the fragment `token` anywhere in
+an option key, so `max_tokens` is refused as an inline secret on
+every surface, for every provider type, and always has been: the
+`anthropic` and `openai_compatible` builders read an option no
+fragment could ever install, the default has silently always won,
+and the generic refusal even advises writing `max_tokens_env`,
+which nothing would read. Meanwhile every operator-facing
+reference documents the field as writable with no caveat. This
+plan adds a bounded exact-name exemption at the heuristic's one
+home, making the field writable, shown rather than masked, and no
+longer a nonsense secret slot, with a regression suite proving the
+loosening admits exactly the exempted name and nothing else.
+
+## The issue's decisions, restated
+
+- The fix is a design decision on the shared heuristic, not a
+  patch at one site; the issue names the three candidates.
+- Whichever wins, the write path, the unchanged-value masking
+  predicate (`is_secret_option` drives both) and the docs move
+  together.
+- A planted-credential regression suite must show the loosening
+  admits exactly the exempted names and nothing else.
+
+## Where the facts already live
+
+The rule has one home and six readers. `_SECRET_KEY_FRAGMENTS`
+feeds `secret_option_fragment` (`config/models.py:1056`), which
+feeds `is_secret_option`, whose own docstring states the
+three-readers rule: the inline-value refusal
+(`check_no_inline_secrets`, reached by
+`ProviderConfig._reject_inline_secrets` on every construction
+through every door), the secret-slot check
+(`store.py:1955`, which today accepts `max_tokens` as a slot), and
+the display mask (the provider descriptor's
+`secret_key=is_secret_option` at `entities.py:401`, driving both
+`views.entity_body` and the unchanged-value marks in
+`store._prepare`, whose comment states that what a read hides and
+what a write restores are one rule); plus two direct record-path
+calls (`views.py:362`, `views.py:375`). The MCP entries and URL
+parameters use the deliberately wider
+`_UNDECLARED_SECRET_KEY_FRAGMENTS` through `mcp_secret_fragment`
+and `is_url_credential_parameter` (#279). The typed field lives at
+`provider_options.py:736` (`StrictInt`, default 1024, restating
+the builders' `DEFAULT_MAX_TOKENS`); the #88 M3 implementation doc
+records the full analysis and deliberately changed nothing else.
+
+## Open questions, resolved
+
+**Option (a), the exact-name exemption, and here is the census
+that buries option (b).** Word-boundary matching cannot be applied
+to the shared rule: `\b` treats `_` as a word character, so
+`\btoken\b` fails to match `session_token`, `auth_token`,
+`access_token`, `API_ACCESS_TOKEN` and `client_secret`, which is
+most of the real secret names in use; a token-split comparison
+(split on non-alphanumerics, compare parts) keeps those but stops
+matching `Authorization` against `auth`, which the wider tuple
+must keep matching for #279, so the two tuples would stop being
+"one tuple and not two" as `models.py:58-65` requires. And the
+census shows the whole benefit of (b) is one name: `max_tokens` is
+the only provider-option key in the entire codebase containing a
+fragment as a substring but not as a word (enumerated across every
+untyped builder read and every typed model field). Option (c)
+renames a vendor's own vocabulary and rewrites three generated
+references for no schema gain. So: a one-entry exact-name tuple,
+`_SECRET_KEY_EXEMPT_NAMES = ("max_tokens",)`, declared beside
+`_SECRET_KEY_FRAGMENTS` with the comment saying what earns a name
+a place there (it contains a fragment, it is a declared option a
+builder reads, and it is not a credential).
+
+**The exemption lives inside `secret_option_fragment`, so every
+reader agrees by construction.** The compare is on the lowered
+name, before the fragment scan. Because all six consumers derive
+from this one function, the write refusal, the slot check, the
+display mask, the unchanged-value marks and the record path move
+together automatically, which is the issue's move-together
+requirement satisfied by locality rather than by coordination.
+Placing the exemption anywhere narrower would wedge the round
+trip: writable but masked means the resubmitted mask becomes a
+keep-marker with nothing stored, which `_keep` refuses.
+
+**The wider tuple is untouched.** `mcp_secret_fragment`,
+`_UNDECLARED_SECRET_KEY_FRAGMENTS` and
+`is_url_credential_parameter` keep their reach: an MCP `env` or
+`headers` key or a URL parameter has no declared reader, so
+nothing earns an exemption there, and the #279 sweep in
+`test_config_bodies.py` stays byte-green.
+
+**Three behavior changes, each named and pinned.** Writable:
+`max_tokens` installs from the file, the API and the CLI, and the
+typed `StrictInt` keeps refusing `"1024"`, a bool and a float
+exactly as the parity rows pin. Shown: the value renders unmasked
+in every display and export, which is correct because it is a
+reply-length cap, not a credential. Not a slot:
+`provider secret set <stage> <entry> max_tokens` now refuses with
+the existing not-a-slot sentence, where before it accepted a slot
+no read or build would ever consult; there is no migration
+concern in any direction, because the write refusal predates every
+store, so no deployment can hold a stored `max_tokens` value or a
+`max_tokens` secret row.
+
+**The fragments document the field again.** The
+`openai_compatible` example fragment regains the commented
+`# max_tokens: 1024` line the M3 round had to remove, and the
+uncommenting test (`test_every_documented_option_of_a_typed_type_installs`)
+becomes the standing proof the key installs; whether the
+`anthropic` fragment (an open-doors type with no options model)
+documents it too is decided by its own test regime during
+implementation and recorded either way.
+
+## Module layout
+
+No new module. `config/models.py` deepens at the rule's one home;
+nothing else learns anything.
+
+## Tests
+
+- **The regression suite, extending the existing
+  `SECRET_LIKE_OPTIONS` table in `tests/unit/test_config.py`**:
+  `max_tokens: 1024` installs and survives into `.options` on
+  every surface the suite drives; the near-miss names stay
+  refused with their matched fragment (`max_token`, `tokens`,
+  `token`, `session_token`, `auth_token`, `client_secret`,
+  `api_key`, `password`), proving the loosening admits exactly the
+  exempted name; `max_tokens_env` keeps its env-reference
+  validation.
+- **Display and round trip**: `max_tokens` renders unmasked in
+  `entity_body` and the record path (`provider_record`), exports
+  as its value, and re-imports; the mask-under-a-non-secret-key
+  control in `test_config_round_trip.py` already covers the
+  literal-asterisks case and stays untouched.
+- **The slot check**: `provider secret set` on `max_tokens`
+  refuses with the not-a-slot sentence (a new pin, since the old
+  acceptance was never pinned), and `api_key` keeps working as the
+  slot example.
+- **The wider rule**: the committed-fixture sweep and the #279
+  URL cases stay green untouched; one case plants `MAX_TOKENS` as
+  an MCP `env` key and asserts it is still refused there, pinning
+  that the exemption did not leak into the wider tuple.
+- **The problem taxonomy**: the API answers a written
+  `max_tokens` as a declared typed option (the `/beam_size`-style
+  pointer shape in `test_config_api_problems.py`), not as an
+  inline secret.
+- **Docs coupling**: the uncommenting test carries the fragment
+  line; the generated references regenerate only if a description
+  changes, which this plan does not do.
+
+## Risks
+
+- **Loosening a security rule.** Bounded by construction: an
+  exact lowercase name compare, one entry, at one site, with the
+  suite asserting the near-misses still refuse and the MCP case
+  proving containment. The no-leak sentinel style already in the
+  suite (values never echoed in refusals) is unchanged.
+- **A second exemption reader drifting.** There is none to drift:
+  the exemption is inside the function every consumer calls, and
+  the plan adds no other copy.
+- **Generated-reference churn.** None expected (the `max_tokens`
+  rows already exist in `domain-config.md`, `cli.md` and the
+  OpenAPI document); the freshness pins catch any surprise.
+
+## Milestones
+
+- [ ] **M1: the exemption, its suite, and the fragment line.**
+  `_SECRET_KEY_EXEMPT_NAMES` inside `secret_option_fragment` with
+  the earning-a-place comment; the regression suite, display,
+  round-trip, slot, MCP-containment and taxonomy pins above; the
+  `openai_compatible` fragment's `# max_tokens: 1024` line (and
+  the `anthropic` decision recorded); a CHANGELOG entry naming
+  the field writable and the slot acceptance withdrawn; the
+  implementation-doc section. Design footprint: deepens the
+  heuristic at its one home; no new module, no second copy of the
+  rule anywhere. Documentation footprint: the example fragment(s)
+  and `CHANGELOG.md`; generated references expected byte-stable
+  and asserted so by their freshness pins.
