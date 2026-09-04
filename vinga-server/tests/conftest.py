@@ -713,34 +713,96 @@ def spare_database() -> Iterator[str]:
         drop_database(name)
 
 
+class _PackagedDatabase:
+    """The shipped condition, and every environment edit made inside it.
+
+    A span owns its edits so that one finalizer can undo them in an
+    order it decides. `monkeypatch` beside the fixture cannot: fixture
+    and monkeypatch finalizers belong to different owners and have no
+    ordering contract between them, so a test that set `VINGA_DB_NAME`
+    through `monkeypatch` could have its rollback run AFTER this
+    fixture's restoration, putting the value it observed during the span
+    back over the lane's own. Under `--dist loadfile` that leaves a
+    worker pointed at `vinga` while it goes on running whole files, and
+    the lane pin that would catch it may be running somewhere else.
+    """
+
+    def __init__(self) -> None:
+        self._restore: dict[str, str | None] = {}
+
+    def override(self, **facts: str) -> None:
+        """One or more of the four connection facts named in the
+        environment for the rest of this span, the way a deployment
+        names them beside its password.
+
+        The variable a field is named by is read from the loader's own
+        table rather than spelled again here: a second spelling of that
+        mapping is one spelling with a bug pending.
+        """
+        from vinga_server.config.loader import DATABASE_ENV_NAMES
+
+        for field, value in facts.items():
+            variable = DATABASE_ENV_NAMES[field]
+            self._restore.setdefault(variable, os.environ.get(variable))
+            os.environ[variable] = value
+
+    def _undo(self) -> None:
+        for variable, before in self._restore.items():
+            if before is None:
+                os.environ.pop(variable, None)
+            else:
+                os.environ[variable] = before
+        self._restore.clear()
+
+
 @pytest.fixture
-def packaged_database() -> Iterator[Any]:
+def packaged_database() -> Iterator[_PackagedDatabase]:
     """The shipped defaults back, for a test about what a deployment
     gets rather than about what this lane runs on.
 
-    Both doors, the way `_database_default` sets both: the model's
-    defaults go back to what the package ships, and the name this lane
-    put in the environment is taken away, so a settings composition that
-    reads the environment answers the shipped default too. Restoring one
-    and not the other would make this fixture true through a
-    `DatabaseConfig()` and false through a `load_file_config()`, which is
-    the shape of the leak it sits next to.
+    Every door, the way `_database_condition` sets every door: the
+    model's defaults go back to what the package ships, they are
+    inlined into the three embedding models too, and the name this lane
+    put in the environment is taken AWAY rather than set to `vinga`, so
+    a settings composition that reads the environment answers out of the
+    package's own default. Restoring one door and not another would make
+    this fixture true through a `DatabaseConfig()` and false through a
+    `load_file_config()` or a `Config(server={"database": {}})`, which is
+    the shape of both leaks it sits next to.
 
     Autouse fixtures are set up before the ones a test asks for by name,
     so this runs second and has something to put back, and the teardown
     order is the mirror of that.
-    """
-    from vinga_server.config.models import DatabaseConfig
 
-    shipped = {"host": "127.0.0.1", "port": 5432, "name": "vinga", "user": "vinga"}
-    os.environ.pop(DB_NAME_ENV, None)
-    for field, value in shipped.items():
-        DatabaseConfig.model_fields[field].default = value
-    DatabaseConfig.model_rebuild(force=True)
+    The finalizer ends by asserting, in this process, that the lane's own
+    name is back in the environment and that a payload composition
+    resolves to the lane database. A restoration that half worked is
+    otherwise silent here and loud somewhere else: it would poison this
+    worker for every file after this one, and the failures would name a
+    default agent or a provider rather than a database.
+    """
+    span = _PackagedDatabase()
+    _database_condition(**PACKAGED_CONNECTION, environment_name=None)
     try:
-        yield DatabaseConfig()
+        yield span
     finally:
+        # The test's own overrides first, then the lane condition over
+        # whatever they left, so the last writer of every one of these
+        # variables is this finalizer.
+        span._undo()
         _database_default(LANE_DATABASE)
+        assert os.environ[DB_NAME_ENV] == LANE_DATABASE, (
+            f"the packaged span left {DB_NAME_ENV} naming "
+            f"{os.environ.get(DB_NAME_ENV)!r}, so every settings composition made "
+            f"the way a deployment makes one is now pointed outside this lane"
+        )
+        _, server_config, _, _ = DATABASE_REBUILD_ORDER
+        resolved = server_config(**{"database": {}}).database.name
+        assert resolved == LANE_DATABASE, (
+            f"the packaged span left a payload composition resolving to "
+            f"{resolved!r}, so this worker would go on booting outside the "
+            f"database the truncation clears"
+        )
 
 
 _THROWAWAY = itertools.count()

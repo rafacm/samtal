@@ -271,7 +271,7 @@ def test_config_path_from_environment(
 
 
 def test_the_database_connection_defaults_and_is_overridable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packaged_database
+    tmp_path: Path, packaged_database
 ) -> None:
     """The CLI reads these keys through the same settings machinery the
     server does, so a deployment names its database once.
@@ -280,6 +280,12 @@ def test_the_database_connection_defaults_and_is_overridable(
     other test is moved onto the database this run provisioned, and this
     is the one that asks what a deployment is shipped pointing at, which
     is the compose service's own defaults.
+
+    The environment half is set through the fixture rather than through
+    `monkeypatch` beside it, because the two finalizers have no ordering
+    contract: a monkeypatch rollback that ran after the fixture's would
+    put `vinga_other` back over the lane's own name and leave this
+    worker booting outside the database the truncation clears.
     """
     shipped = load_file_config().server.database
     assert (shipped.host, shipped.port, shipped.name, shipped.user) == (
@@ -304,10 +310,9 @@ def test_the_database_connection_defaults_and_is_overridable(
 
     # The short names beat the file, which is what a deployment sets
     # beside its password.
-    monkeypatch.setenv("VINGA_DB_HOST", "127.0.0.2")
-    monkeypatch.setenv("VINGA_DB_PORT", "5433")
-    monkeypatch.setenv("VINGA_DB_NAME", "vinga_other")
-    monkeypatch.setenv("VINGA_DB_USER", "vinga_other_user")
+    packaged_database.override(
+        host="127.0.0.2", port="5433", name="vinga_other", user="vinga_other_user"
+    )
     overridden = load_file_config(path).server.database
     assert (overridden.host, overridden.port, overridden.name, overridden.user) == (
         "127.0.0.2",
