@@ -29,12 +29,18 @@ def test_reply_carries_the_websocket_url_the_device_needs() -> None:
     with client_for() as client:
         response = post_system_info(client)
     assert response.status_code == 200
-    websocket = response.json()["websocket"]
+    body = response.json()
+    websocket = body["websocket"]
     assert websocket["url"] == "ws://testserver/xiaozhi/v1/"
     assert websocket["version"] == 1
     # A bare Config() binds no device to any agent, so this one gets no
     # token; the token cases are in test_ota_tokens.py.
     assert websocket["token"] == ""
+    # And, top-level beside it, the word for why it is empty, which is
+    # the reading an empty token alone cannot carry (#369). It is not a
+    # member of `websocket`: the firmware writes every one of those into
+    # NVS, and this must leave a stock board's NVS exactly as it was.
+    assert body["access"] == "denied"
 
 
 def test_configured_websocket_url_wins_over_the_request_address() -> None:

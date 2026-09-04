@@ -5,7 +5,12 @@ here would be circular. What bounds it is who gets a token. A device the
 configuration resolves to no agent would be turned away at the websocket
 anyway, so it gets nothing to try with, and the `devices` map plus
 `default_agent` is therefore the allowlist.
+
+And, since two of the three answers are the same empty string, the word
+the reply carries for which of them it is.
 """
+
+from typing import Any
 
 import pytest
 
@@ -30,7 +35,9 @@ def bound_config(**overrides: object) -> Config:
     )
 
 
-def issued_token(config: Config, device_id: str = DEVICE_MAC) -> str:
+def checked_in(config: Config, device_id: str = DEVICE_MAC) -> dict[str, Any]:
+    """The whole reply, because the token and the word for it are one
+    answer and the cases below read both."""
     with entered_client(config) as client:
         response = client.post(
             OTA_PATH,
@@ -38,7 +45,11 @@ def issued_token(config: Config, device_id: str = DEVICE_MAC) -> str:
             headers={"Device-Id": device_id, "Client-Id": DEVICE_UUID},
         )
     assert response.status_code == 200
-    return response.json()["websocket"]["token"]
+    return response.json()
+
+
+def issued_token(config: Config, device_id: str = DEVICE_MAC) -> str:
+    return checked_in(config, device_id)["websocket"]["token"]
 
 
 def test_a_bound_device_gets_a_token_this_server_verifies() -> None:
@@ -100,6 +111,54 @@ def test_disabled_auth_still_sends_an_empty_token(
             headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
         )
     assert body.json()["websocket"]["token"] == ""
+
+
+# Why the token is what it is, said in the reply itself (#369)
+#
+# The empty string a deployment that issues no tokens sends and the
+# empty string a board nothing resolves gets are the same bytes, and the
+# server is the only side that knows which it just decided.
+
+
+def test_a_credential_is_answered_with_the_word_for_a_credential() -> None:
+    body = checked_in(bound_config())
+    assert body["access"] == "token"
+    assert body["websocket"]["token"] != ""
+
+
+def test_disabled_auth_says_the_deployment_issues_no_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reading the empty token above could not carry: this board is
+    admitted and there is simply no credential to hand it.
+
+    The token half is the pin above's; it is asserted here as well
+    because the pair is what must never disagree.
+    """
+    monkeypatch.delenv("VINGA_AUTH_SECRET", raising=False)
+    body = checked_in(bound_config(server={"auth": {"enabled": False}}))
+    assert body["access"] == "open"
+    assert body["websocket"]["token"] == ""
+
+
+@pytest.mark.parametrize("auth_enabled", [True, False])
+def test_a_device_with_no_agent_is_denied_under_either_auth_setting(
+    monkeypatch: pytest.MonkeyPatch, auth_enabled: bool
+) -> None:
+    """Being unresolved is the stronger of the two facts: turning device
+    authentication off does not give a board an agent to reach, so it is
+    turned away under either setting."""
+    if not auth_enabled:
+        monkeypatch.delenv("VINGA_AUTH_SECRET", raising=False)
+    config = Config(
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        devices={"11:22:33:44:55:66": ["assistant"]},
+        server={"auth": {"enabled": auth_enabled}},
+    )
+    body = checked_in(config)
+    assert body["access"] == "denied"
+    assert body["websocket"]["token"] == ""
 
 
 def test_the_token_is_never_logged(caplog: pytest.LogCaptureFixture) -> None:
