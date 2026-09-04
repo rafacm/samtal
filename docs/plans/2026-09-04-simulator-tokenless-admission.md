@@ -68,9 +68,15 @@ amend, not a decision to overturn.
 **The reply gains a closed field saying what the empty token
 means.** The distinction the simulator needs (admitted without a
 credential, versus not admitted) exists only server-side, so the
-server states it: the `websocket` object gains `access`, a literal
-from a closed set chosen where `token_for` already classifies,
-because the field explains the token beside it.
+server states it: the reply body gains a top-level `access` field,
+a literal from a closed set chosen where `token_for` already
+classifies. Top-level and not inside `websocket`, because the two
+boundaries differ in what stock firmware does with them: unknown
+top-level fields are ignored (the `server` block's own comment
+says so, and is the precedent), while the firmware writes every
+member of `websocket` into NVS, so a key added there would become
+a stray NVS entry on every stock board rather than an invisible
+extension.
 
 - `"token"`: admitted, and the non-empty `token` beside it is the
   credential.
@@ -83,10 +89,10 @@ because the field explains the token beside it.
 the two facts it already reads (`device_auth is None`, the
 resolution), so the token and its explanation cannot disagree. The
 addition is additive on the protocol surface the compatibility
-promise governs: stock firmware ignores unknown keys in the reply
-(the existing comment at the emission site says so), the
-simulator's own `_Reply` model is `extra="ignore"`, and nothing
-existing moves or changes meaning. This is also the direction #386
+promise governs: an unknown top-level key is the boundary stock
+firmware demonstrably ignores, the simulator's own `_Reply` model
+is `extra="ignore"`, and nothing existing moves or changes
+meaning. This is also the direction #386
 argues for independently: the server states the state, and the
 client phrases what to do about it in its own grammar.
 
@@ -164,10 +170,11 @@ simulator's `read()` applies it, and no third place re-derives it.
   off and resolved answers `"open"` with the empty token the
   existing pin already demands (that pin stays byte-identical);
   unresolved answers `"denied"` under both auth settings. The
-  `test_ota.py` exact-equality pin on the `server` block is
-  untouched by construction (the field lands under `websocket`);
-  whichever existing assertions pin the `websocket` block's keys
-  are extended rather than loosened.
+  `test_ota.py` exact-equality pin on the `server` block and the
+  `websocket` object's existing shape are both untouched by
+  construction (the field is top-level); whichever existing
+  assertions pin the body's top-level keys are extended rather
+  than loosened.
 - **Simulator reading** (`tests/unit/test_simulator_board.py`): an
   `"open"` reply classifies `Admitted` with an empty token and a
   resolved websocket target; a `"denied"` reply classifies
@@ -210,9 +217,11 @@ simulator's `read()` applies it, and no third place re-derives it.
   exactly as today, with the two post-ceremony and three-causes
   sentences now naming that possibility. Neither pairing gets
   worse; the matched pair gets correct.
-- **The firmware.** The field is additive inside an object whose
-  unknown keys stock firmware ignores; the compatibility floor is
-  untouched, and the plan says so where the field is emitted.
+- **The firmware.** The field is an additive top-level key, the
+  one boundary stock firmware demonstrably ignores; it stays out
+  of `websocket`, whose members the firmware persists to NVS. The
+  compatibility floor is untouched, and the plan says so where the
+  field is emitted.
 - **Doc and census staleness.** Help-text and capability wording
   changes stale `docs/reference/cli.md` (regenerated through the
   generator) and possibly the command-spellings manifest
@@ -228,8 +237,8 @@ simulator's `read()` applies it, and no third place re-derives it.
 ## Milestones
 
 - [ ] **M1: the reply says why the token is empty.**
-  `token_for` deepened to answer (token, access); the `websocket`
-  object gains the closed `access` field; the server-half tests
+  `token_for` deepened to answer (token, access); the reply body
+  gains the closed top-level `access` field; the server-half tests
   above; the protocol addition recorded in `docs/xiaozhi-notes.md`
   beside the existing reply-shape notes; a CHANGELOG entry. Design
   footprint: deepens `token_for`, whose callers stop having to
@@ -270,6 +279,14 @@ read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
    put the discriminator in a top-level field the firmware truly
    ignores, or acknowledge the new NVS entry and require a device
    checkpoint before calling M1 releasable.
+
+   *Resolution*: accepted in full; the field moves to the top
+   level of the reply body. The open-questions section now argues
+   the boundary explicitly (top-level keys ignored, `websocket`
+   members persisted to NVS), the firmware risk names it, the
+   milestone and test text follow, and the `websocket` object's
+   shape is untouched by construction, so no device checkpoint is
+   needed.
 
 2. **P2: the contradiction matrix omits activation plus
    `access="open"`.** The existing precedence processes
