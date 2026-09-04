@@ -128,14 +128,18 @@ boot, single reads, listings and a full export verified over a
 database seeded with such a row beside a sibling secret that must
 survive, and the withdrawal named in the CHANGELOG.
 
-**The fragments document the field again.** The
+**Both LLM fragments document the field, decided here.** The
 `openai_compatible` example fragment regains the commented
-`# max_tokens: 1024` line the M3 round had to remove, and the
-uncommenting test (`test_every_documented_option_of_a_typed_type_installs`)
-becomes the standing proof the key installs; whether the
-`anthropic` fragment (an open-doors type with no options model)
-documents it too is decided by its own test regime during
-implementation and recorded either way.
+`# max_tokens: 1024` line the M3 round had to remove, with the
+generic uncommenting test
+(`test_every_documented_option_of_a_typed_type_installs`) as the
+standing proof it installs. The `anthropic` fragment documents the
+same line: its builder reads the option identically, and there is
+no product reason for the asymmetry; since the generic test covers
+only typed types and anthropic declares no options model, a
+targeted anthropic uncommenting-install case is added beside the
+generic one so the documented line is held to installing the same
+way.
 
 ## Module layout
 
@@ -184,6 +188,13 @@ nothing else learns anything.
   `max_tokens` as a declared typed option (the `/beam_size`-style
   pointer shape in `test_config_api_problems.py`), not as an
   inline secret.
+- **The value reaches the builders**, which is the defect's own
+  shape (the default always won): factory-level tests build both
+  the `anthropic` and `openai_compatible` providers from
+  configurations carrying a non-default `max_tokens` and assert
+  the built provider holds it, and one case continues through the
+  request seam and asserts the outgoing request carries the
+  configured value.
 - **Docs coupling**: the uncommenting test carries the fragment
   line; the generated references regenerate only if a description
   changes, which this plan does not do.
@@ -294,8 +305,16 @@ amendments.
    both builders with a non-default value, one continuing through
    the request seam to the outgoing `max_tokens`.
 
+   *Resolution*: accepted in full; the test section gains the
+   factory-level cases for both builders with a non-default value
+   and the request-seam assertion.
+
 6. **P2: the anthropic documentation decision is improperly
    deferred.** The generic uncommenting test covers only typed
    types, so untyped anthropic is excluded from it; decide now:
    document `# max_tokens: 1024` in both LLM fragments and add a
    targeted anthropic uncommenting-install test.
+
+   *Resolution*: accepted in full; both fragments document the
+   line, decided in the plan, with the targeted anthropic
+   uncommenting-install case beside the generic test.
