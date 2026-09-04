@@ -356,11 +356,17 @@ Existing assets carry the shapes; nothing they pin is restated.
   regenerate through their generators; the UNTYPED set grows by
   exactly the one named playback-failure template and nothing
   else, asserted by the set's own both-directions test.
-- **Message order**: the successful-turn ordering pin
+- **Message order, pinned before reshaped**: first, a new pin on
+  today's behavior that no existing test states, that filler
+  playback sends no `sentence_start` (asserting the absence of the
+  sentence message around a fired clip); it lands green before the
+  fallback work so the deliberate difference is a diff against a
+  pin, not an unstated contrast. The successful-turn ordering pin
   (`test_one_turn_has_the_control_message_order_the_firmware_expects`)
-  stays untouched; a failure-turn ordering case pins
-  `stt`, `tts start`, `tts sentence_start`, `tts stop` for the
-  fallback turn.
+  stays untouched; a failure-turn ordering case then pins the full
+  sequence `stt`, `tts start`, the fallback `sentence_start`, one
+  or more audio frames, then `tts stop`, frames asserted in
+  position rather than filtered away.
 - **Config surface**: the new section through
   `test_config_examples`, docgen, round-trip and the OpenAPI pin,
   regenerated through the generators.
@@ -584,6 +590,11 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
     messages. Add the explicit filler pin first, and assert the
     full failure order: `stt`, `tts start`, the fallback
     `sentence_start`, one or more frames, then `tts stop`.
+
+    *Resolution*: accepted in full; the explicit filler
+    no-`sentence_start` pin lands green first, and the
+    failure-order case asserts the full sequence with the frames
+    in position.
 
 12. **P2: default-on boot synthesis creates an unbounded
     upgrade-time operation.** Startup awaits the whole cache build
