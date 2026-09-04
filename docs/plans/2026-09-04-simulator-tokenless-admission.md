@@ -140,14 +140,21 @@ refuses an absent credential the same as an empty one).
   its wording is kept, reread against the new behavior during
   implementation, and adjusted only if it still sends anyone in a
   circle.
-- The `check-in` three-causes tail becomes a named constant beside
-  its siblings, and its causes become accurate by subtraction: with
-  the field in the reply, the auth-off deployment never reaches the
-  `Unwelcome` arm, so the three configurations it names are once
-  again the complete list for the replies that do. Against an older
-  server that sends no field, the tail gains the fourth reading the
-  issue asked for: the deployment may simply not issue tokens, and
-  a server built before the reply could say so looks exactly like
+- The `check-in` tail becomes a named constant beside its
+  siblings, and its cause list becomes complete rather than merely
+  shorter: with the field in the reply, the auth-off deployment
+  never reaches the `Unwelcome` arm, and the causes that remain
+  are enumerated from the decision sites that produce an
+  empty-token, no-activation reply rather than from the old
+  sentence. That enumeration adds two the old sentence missed: the
+  binding view being non-authoritative suppresses activation while
+  resolving nothing (`onboarding/unbound.py`, recorded in
+  `docs/xiaozhi-notes.md`), and the unloaded-agent cause covers a
+  `default_agent` naming an unloaded agent as well as a device
+  binding, so its wording broadens. Against an older server that
+  sends no field, the tail gains the further reading the issue
+  asked for: the deployment may simply not issue tokens, and a
+  server built before the reply could say so looks exactly like
   this. `check-in` on an `"open"` admission says the deployment
   issues no tokens, so the operator learns auth is off from the
   report rather than from the absence of a failure.
@@ -194,8 +201,9 @@ simulator's `read()` applies it, and no third place re-derives it.
   keeps its `unwelcome()` half by making that fixture an explicit
   `"denied"` (or leaving it field-less), and a new case beside it
   proves `run` proceeds past classification on an `"open"` body.
-- **Messages** (`test_simulator_board.py`): the three-causes tail
-  as a constant, with the fourth (older-server) reading asserted;
+- **Messages** (`test_simulator_board.py`): the tail as a
+  constant, with the older-server reading, the binding-view cause
+  and the broadened unloaded-agent wording each asserted;
   `check-in` on an `"open"` body reporting admission and that the
   deployment issues no tokens; the reworded `CANNOT_CONVERSE`
   asserted where it still fires.
@@ -323,6 +331,12 @@ read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
    unloaded agent. Enumerate binding-view failure as its own
    cause, broaden the unloaded cause, and assert both messages in
    tests.
+
+   *Resolution*: accepted in full. The tail's causes are now
+   enumerated from the decision sites that produce an empty-token,
+   no-activation reply, adding the non-authoritative binding view
+   as its own cause and broadening the unloaded-agent cause to
+   name `default_agent`, with both asserted in the message tests.
 
 4. **P2: omitting the empty Authorization header contradicts the
    simulator's settled fidelity contract and is unnecessary.** The
