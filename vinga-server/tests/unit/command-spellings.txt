@@ -1447,7 +1447,7 @@ vinga-server/tests/unit/test_config_cli_respelling.py:156  historical  vinga imp
 vinga-server/tests/unit/test_config_cli_respelling.py:158  historical  vinga import
 vinga-server/tests/unit/test_config_cli_respelling.py:160  historical  vinga apply
 vinga-server/tests/unit/test_config_cli_summary.py:1  respell  vinga list
-vinga-server/tests/unit/test_config_cli_summary.py:29  respell  vinga list
+vinga-server/tests/unit/test_config_cli_summary.py:44  respell  vinga list
 vinga-server/tests/unit/test_config_docgen.py:320  respell  vinga-server config reference
 vinga-server/tests/unit/test_config_docgen.py:490  respell  vinga apply
 vinga-server/tests/unit/test_config_docgen.py:701  respell  vinga-server config cli-reference

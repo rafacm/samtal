@@ -311,6 +311,13 @@ def document(**sections: object) -> dict[str, object]:
         pytest.param(document(devices=ANSWERED), id="devices-is-not-a-mapping"),
         pytest.param(document(default_agent={"leak": ANSWERED}), id="default-agent-is-an-object"),
         pytest.param(document(default_agent=4), id="default-agent-is-a-number"),
+        # A section the counts do not print at all. Since #351 the
+        # document is read as its shapes once, by the step the tree
+        # reads it with, so what is refused is a document this client
+        # cannot read rather than the half of one a given command walks
+        # into. Which is the honest reading: the sentence is about the
+        # answer, not about the line.
+        pytest.param(document(agent_defaults=[ANSWERED]), id="agent-defaults-is-a-list"),
         pytest.param({"config": {}, "secrets": []}, id="every-section-absent"),
     ],
 )
