@@ -16,7 +16,12 @@ from vinga_server.config.loader import (
     CONFIG_NOT_TEXT,
     YAML_NOT_QUOTED,
 )
-from vinga_server.config.models import DOMAIN_KEYS, NOT_A_MAC, normalize_mac
+from vinga_server.config.models import (
+    DOMAIN_KEYS,
+    NOT_A_MAC,
+    UNRECOGNIZED_KEY_REFUSED,
+    normalize_mac,
+)
 from vinga_server.conversations.store import RETENTION_DAYS_DEFAULT
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -721,10 +726,62 @@ def test_non_mapping_top_level_is_rejected(tmp_path: Path) -> None:
         load_file_config(path)
 
 
-def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
-    path = write_config(tmp_path, "serverr:\n  port: 9000\n")
-    with pytest.raises(ConfigError, match="serverr"):
+def test_unknown_top_level_key_is_rejected_without_naming_the_key(
+    tmp_path: Path,
+) -> None:
+    """A key the operator typed is refused by the rule's name, not by
+    its own.
+
+    The file half's refusals go through the same walk the API's do: a
+    location segment this repository declared may be printed, and a
+    segment somebody wrote may not, because a key is as good a place to
+    paste a credential as a value is and a boot refusal is printed into
+    a log. The misspelled section is the case that proves it, since the
+    only thing there is to say about it is that it is not one of ours.
+    """
+    path = write_config(tmp_path, f"{PARSER_SENTINEL}:\n  port: 9000\n")
+
+    with pytest.raises(ConfigError) as caught:
         load_file_config(path)
+
+    refusal = str(caught.value)
+    assert refusal == (
+        f"invalid config in {CONFIG_FROM_FLAG}:\n  - {UNRECOGNIZED_KEY_REFUSED}"
+    )
+    assert PARSER_SENTINEL not in refusal
+
+
+@pytest.mark.parametrize(
+    ("key", "phrase"),
+    [
+        ("log_level", "is not a logging level"),
+        ("ota_path", "is not a usable OTA path"),
+    ],
+)
+def test_a_value_a_server_key_refuses_is_not_quoted_back(
+    tmp_path: Path, key: str, phrase: str
+) -> None:
+    """The two validators that used to open with the rejected value in
+    quotes.
+
+    What a validator is handed is whatever was written under the key,
+    and these two keys sit in a file beside the auth secret and the
+    database password: a refusal that echoes its input is one typo away
+    from echoing the wrong key's. The OTA path had already made the
+    argument for its own second refusal, which never quoted the value
+    because an operator hides that endpoint behind a random segment;
+    the first one quoted it anyway.
+    """
+    path = write_config(tmp_path, f"server:\n  {key}: {PARSER_SENTINEL}\n")
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(path)
+
+    refusal = str(caught.value)
+    assert f"server.{key}: {phrase}" in refusal
+    assert PARSER_SENTINEL not in refusal
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 # What a leftover section of each moved key looks like in a file, and

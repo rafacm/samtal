@@ -676,9 +676,16 @@ class ServerConfig(BaseModel):
     def _check_log_level(cls, value: str) -> str:
         level = value.strip().upper()
         if level not in _LOG_LEVELS:
+            # Value-free, like the reserved-path refusals below and for
+            # the same reason: what a validator is handed is whatever
+            # was written under the key, and a refusal that echoes its
+            # input is one typo away from echoing the wrong key's (#289,
+            # #291). The five levels are this repository's own words and
+            # are what a reader needs.
             raise ValueError(
-                f'"{value}" is not a logging level; expected one of: '
+                "is not a logging level; expected one of: "
                 + ", ".join(_LOG_LEVELS)
+                + ". What was set is not quoted back"
             )
         return level
 
@@ -690,13 +697,16 @@ class ServerConfig(BaseModel):
         path = value.strip()
         if not path.startswith("/") or not path.endswith("/"):
             raise ValueError(
-                f'"{value}" is not a usable OTA path; it must start and end with '
-                f'"/", for example /xiaozhi/ota/ or /xiaozhi/ota/8f3a9c2b.../'
+                'is not a usable OTA path; it must start and end with "/", for '
+                "example /xiaozhi/ota/ or /xiaozhi/ota/8f3a9c2b.../. What was set is "
+                "not quoted back"
             )
-        # Never quoting the value here, unlike the refusal above: an
-        # operator who exposes the server publicly hides the OTA
-        # endpoint behind a long random segment, and that segment is
-        # the closest thing this key has to a secret.
+        # Never quoting the value, here or above: an operator who
+        # exposes the server publicly hides the OTA endpoint behind a
+        # long random segment, and that segment is the closest thing
+        # this key has to a secret. The refusal above used to quote it,
+        # which is exactly the case a rule with an exception in it does
+        # not cover: a path typed one slash wrong is still that path.
         if path.startswith(f"{API_MOUNT_PATH}/"):
             raise ValueError(
                 f"{API_MOUNT_PATH}/ is reserved for the configuration API, so the OTA "

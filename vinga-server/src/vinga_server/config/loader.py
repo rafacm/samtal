@@ -35,6 +35,7 @@ from vinga_server.config.models import (
     DatabaseConfig,
     FieldProblem,
     FileConfig,
+    validation_problems,
     yaml_data_var,
 )
 
@@ -403,6 +404,7 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
 
     token = yaml_data_var.set(data)
     problem: str | None = None
+    problems: tuple[FieldProblem, ...] = ()
     try:
         return _with_database_environment(FileConfig())
     except ValidationError as exc:
@@ -413,7 +415,16 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         # being handled as its __context__ and would take that quote
         # with it. A key that names an environment variable is where
         # that matters: what lands in it wrongly is the secret itself.
-        problem = _format_validation_error(exc, source)
+        # Through the shared policy rather than a renderer of this
+        # module's own, which is what a boot refusal about the file half
+        # used to have: `safe_location` walks every location segment
+        # against the model, so a key the operator typed rather than one
+        # this repository declared is answered by name of the rule and
+        # not by name (#291). A misspelled section is exactly that case,
+        # and a key is as good a place to paste a credential as a value.
+        problem, problems = validation_problems(
+            f"invalid config in {source}:", FileConfig, exc
+        )
     except SettingsError as exc:
         # The same care, for the same reason. This is what a malformed
         # VINGA_ override of a structured key raises, and the parser
@@ -425,7 +436,7 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         problem = f"invalid config in {source}: {exc}"
     finally:
         yaml_data_var.reset(token)
-    raise ConfigError(problem)
+    raise ConfigError(problem, problems)
 
 
 def compose_config(
@@ -855,6 +866,23 @@ def _check_retired_environment() -> None:
 
 
 def _format_validation_error(exc: ValidationError, source: str) -> str:
+    """One failed validation of the DOMAIN half, as the boot path
+    reports it.
+
+    The file half is rendered by `models.validation_problems` instead,
+    which is the shared policy: every location segment is walked against
+    the model, so a segment the operator wrote rather than this
+    repository declared reaches neither the sentence nor the pointers.
+    This half is deliberately not on it yet, and the reason is a
+    question rather than an oversight (#291). Its locations name stored
+    entities, `agents.<name>.llm` and `devices.<mac>`, which are mapping
+    keys and which that walk therefore truncates to `agents` and
+    `devices`; and the store's own refusals over the same entities print
+    those names in full, deliberately and under test. Converging this
+    half would make a boot refusal say less about a stored world than
+    the write that stored it does, which is a decision about the store's
+    surface and not about this loader's.
+    """
     lines = [f"invalid config in {source}:"]
     for error in exc.errors():
         location = ".".join(str(part) for part in error["loc"])
