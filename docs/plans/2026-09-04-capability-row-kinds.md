@@ -92,10 +92,17 @@ byte-identity is what the existing
 `test_the_epilog_is_what_the_help_page_carries` and the docgen
 freshness pin already assert.
 
-**The new freedom gets its own pin.** A regression case adds a
+**The new freedom gets its own pin, scoped to the assertion that
+had the trap.** A regression case hands
+`every_declared_message_is_classified` a table augmented with a
 prose row whose `what` begins `reading ` (the exact shape the trap
-forbade), declared `PROSE`, and asserts every table assertion stays
-green, so the constraint's removal is proven rather than claimed.
+forbade), declared `PROSE`, and asserts it stays green, which
+directly proves the issue's fix. The rendering helper is
+deliberately out of the case's reach: `epilog()` reads the
+canonical `rows()` rather than a supplied tuple, so an appended
+local row is absent from the page by construction, and patching
+the module's public table to include a synthetic row would test
+the patch rather than the freedom.
 
 **The old record gets a dated pointer, not a rewrite.** The #299
 round's trap note in the 2026-08-25 implementation doc stays as
@@ -116,7 +123,7 @@ knowing how message rows are worded.
   cases keep going red for the same reasons, now through the
   declared field).
 - The freedom pin above: a `reading `-prefixed prose row passes
-  every assertion.
+  the both-ways completeness assertion, the one that had the trap.
 - The existing five assertion helpers, milestone cases and bite
   cases stay green with their construction sites updated; the
   states-row pin from the #369 round is untouched.
@@ -181,6 +188,10 @@ about 6 minutes. Verdict: ready after the P1/P2 amendments.
    `every_declared_message_is_classified`, which directly proves
    the issue's fix, rather than implying the augmented tuple
    exercises all five assertions.
+
+   *Resolution*: accepted in full; the pin is scoped to the
+   both-ways assertion, with the reason the rendering helper is
+   out of reach stated in the plan.
 
 3. **P2: `Literal` does not enforce the closed set here.** Only
    the events package is type-checked; dataclasses do not validate
