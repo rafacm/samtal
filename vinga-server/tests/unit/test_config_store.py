@@ -13,15 +13,17 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 
 from tests.support.stores import planted, stored_row, stored_rows
 from vinga_server.config import ConfigError
-from vinga_server.config.loader import StorageError, UnknownEntityError
+from vinga_server.config.loader import StorageError, UnknownEntityError, compose_config
 from vinga_server.config.models import (
     NOT_A_MAC,
     PROVIDER_STAGES,
     DatabaseConfig,
+    FileConfig,
+    domain_fields,
     mcp_entry_fragment,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
@@ -857,21 +859,46 @@ def test_an_ordinary_mcp_url_and_an_entry_with_none_are_accepted(store: ConfigSt
     assert store.read_mcp_server("home").entry.url is None
 
 
-def test_the_mcp_url_rule_is_write_time_only() -> None:
-    """The provider rule's precedent, and it holds for the same reason:
-    the check runs inside a write and nowhere else, so a row written
-    before this rule still boots, still reads and is still deletable."""
-    from vinga_server.config import Config
+def test_the_mcp_url_rule_is_write_time_only(store: ConfigStore) -> None:
+    """The provider rule's precedent, held against a row rather than
+    against a model built in Python.
 
-    config = Config(
-        mcp_servers={
-            "weather": {
-                "transport": "streamable_http",
-                "url": f"https://user:{SECRET}@host/mcp",
-            }
-        }
+    A deployment that wrote such a URL before this rule existed has a
+    row, and what it needs is a server that starts on it and a way to
+    take the credential out. So the row is planted the way that
+    deployment left it, and then everything an operator would do with it
+    is done: the repository reads it back, the boot composition accepts
+    it, the write path replaces it with a clean address, and the delete
+    takes it away.
+
+    This is the pin that says the check never migrates to `inside_read`.
+    Moved there, the load below would raise and a deployment would meet
+    a server that refuses to start over a value it could no longer edit,
+    which is the outcome the rule was written write-time-only to avoid.
+    """
+    written = json.dumps(
+        {"transport": "streamable_http", "url": f"https://user:{SECRET}@host/mcp"}
     )
-    assert config.mcp_servers["weather"].url.endswith("@host/mcp")
+    planted(store, insert(schema.mcp_servers).values(name="weather", body=written))
+
+    snapshot = store.load()
+
+    assert snapshot.domain.mcp_servers["weather"].url.endswith("@host/mcp")
+    # And the same row through the composition a server really boots on,
+    # which is where a rule moved to the read half would refuse.
+    booted = compose_config(FileConfig(), domain_fields(snapshot.domain), "the test's database")
+    assert booted.mcp_servers["weather"].url.endswith("@host/mcp")
+
+    # The way out, which is the reason the rule is write-time only.
+    store.set_mcp_server(
+        "weather", {"transport": "streamable_http", "url": "https://weather.example/mcp"}
+    )
+    assert store.read_mcp_server("weather").entry.url == "https://weather.example/mcp"
+
+    # And the other way out, which goes by identity and reads nothing.
+    planted(store, insert(schema.mcp_servers).values(name="stale", body=written))
+    store.delete_mcp_server("stale")
+    assert "stale" not in store.load().domain.mcp_servers
 
 
 def test_a_name_that_only_needs_encoding_is_accepted(store: ConfigStore) -> None:
