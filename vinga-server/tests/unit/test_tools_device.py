@@ -10,13 +10,7 @@ import asyncio
 
 import pytest
 
-from tests.support.device_tools import STATUS, FakeDevice
-
-VOLUME = {
-    "name": "self.audio_speaker.set_volume",
-    "description": "Set the speaker volume",
-    "inputSchema": {"type": "object", "properties": {"volume": {"type": "integer"}}},
-}
+from tests.support.device_tools import STATUS, VOLUME, FakeDevice
 
 
 async def test_the_handshake_lists_the_devices_tools_under_safe_names() -> None:

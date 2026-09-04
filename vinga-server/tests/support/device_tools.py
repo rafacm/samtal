@@ -60,3 +60,13 @@ class FakeDevice:
 
 
 STATUS = {"name": "self.get_device_status", "description": "The board's state"}
+
+# The board tool with a typed argument, which is what a suite about
+# argument types needs and what the client suite already listed. One
+# schema rather than two: a copy beside the session suite would be a
+# second declaration of the same tool, free to drift from this one.
+VOLUME = {
+    "name": "self.audio_speaker.set_volume",
+    "description": "Set the speaker volume",
+    "inputSchema": {"type": "object", "properties": {"volume": {"type": "integer"}}},
+}
