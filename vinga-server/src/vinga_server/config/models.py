@@ -64,6 +64,26 @@ _SECRET_KEY_FRAGMENTS = ("secret", "token", "password", "api_key", "apikey", "cr
 # marks one in a query parameter as well.
 _UNDECLARED_SECRET_KEY_FRAGMENTS = (*_SECRET_KEY_FRAGMENTS, "auth")
 
+# The names the narrow scan above must not reach, and the whole of what
+# earns one a place here: it contains a fragment as a substring, it is a
+# declared option a builder reads, and it is not a credential. All three,
+# because the first without the second is a key nobody consumes and the
+# second without the third is a credential with a reader.
+#
+# One entry, and the census that found it says why there is not a
+# second: `max_tokens` is the only provider-option key in this codebase
+# containing a fragment as a substring but not as a word. It is the cap
+# on one reply's length, read by the `anthropic` and `openai_compatible`
+# builders, and the fragment scan refused it on every surface, so the
+# option could never be installed and the builders' default silently
+# always won (#277).
+#
+# The wider tuple is deliberately not narrowed by this. An MCP server's
+# env or headers key and a URL's query parameter are named by somebody
+# else, so no name there is a declared option a builder reads, and the
+# second condition above can never hold.
+_SECRET_KEY_EXEMPT_NAMES = ("max_tokens",)
+
 # An environment reference in an MCP server's env or headers: the whole
 # value is $NAME, which is resolved from the server's own environment at
 # boot. A value that must begin with a literal $ is not supported.
@@ -1061,7 +1081,24 @@ def secret_option_fragment(name: str) -> str | None:
     wrong with a key it may not print: the fragments are this
     repository's own six words, so naming the one that matched tells an
     operator which key to look at without publishing what they called
-    it."""
+    it.
+
+    The exemption is here, inside the one function every consumer of the
+    rule calls, so the write refusal, the slot check, the display mask,
+    the unchanged-value marks and the record path agree by construction
+    rather than by five sites being kept in step. Anywhere narrower
+    would wedge the round trip: writable but masked means a resubmitted
+    mask becomes a keep marker with nothing stored behind it, which
+    `store._keep` refuses.
+
+    The compare is exact and case-sensitive, on the name as it was
+    written and before the lowering below. Option names are
+    case-sensitive everywhere they are declared and read, so `MAX_TOKENS`
+    and `Max_Tokens` are spellings nothing declares, and exempting them
+    would hand the open-doors type a passthrough field this never meant
+    to admit."""
+    if name in _SECRET_KEY_EXEMPT_NAMES:
+        return None
     lowered = name.lower()
     return next((fragment for fragment in _SECRET_KEY_FRAGMENTS if fragment in lowered), None)
 
