@@ -36,7 +36,6 @@ is holding anything.
 """
 
 import asyncio
-import contextlib
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -293,35 +292,79 @@ class FillerRunner:
                 "session %s: filler playback failed: %s", self.session_id, failed
             )
 
+    async def _waited_out(self, task: asyncio.Task[None]) -> None:
+        """Wait out one clip task, telling its cancellation apart from a
+        cancellation of the caller.
+
+        Both arrive at this await as a `CancelledError` and they mean
+        opposite things. The clip's own is the thing being waited for
+        and is over when it lands: swallowing it is the whole point of
+        waiting. The caller's is a barge-in or an abort taking the turn
+        away, and swallowing that is how a reply goes on running after
+        the user has interrupted it. Worse in the failure arm, which
+        waits here before it speaks: the confirmation ladder pauses the
+        outgoing frames before it cancels and resumes them only after
+        the cancel has been awaited (`runtime/turntaking.py`), so a
+        swallowed cancellation walks straight into a paced send that
+        cannot complete until the thing waiting on it returns
+        (`device/pacing.py`).
+
+        Told apart by counting cancellation requests against this task
+        rather than by inspecting the clip's: a cancel delivered to a
+        task awaiting another one cancels that other one too, so which
+        of the two ended up cancelled says nothing about who asked. The
+        count taken before the await is what a new request is measured
+        against, which is also what keeps a reply that was ALREADY
+        cancelled from re-raising here: its `finally` has a closing
+        `tts stop` still to send, and that is not this method's to take
+        away.
+        """
+        current = asyncio.current_task()
+        requested = 0 if current is None else current.cancelling()
+        try:
+            await task
+        except asyncio.CancelledError:
+            if current is not None and current.cancelling() > requested:
+                raise
+
     async def tail(self) -> None:
         """The reply's own audio is ready: an unfired timer loses (the
         silence it was going to mask is over), and a clip already
         sounding is waited out, so the first real sentence queues
         behind its tail rather than interleaving with it or cutting it
-        mid-word."""
+        mid-word.
+
+        A cancellation of the reply arriving during the wait goes on
+        rather than being swallowed, for the reason `_waited_out`
+        gives."""
         task = self._filler_task
         if task is None or task.done():
             return
         if not self._filler_sounding:
             task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        await self._waited_out(task)
 
     async def settle(self) -> None:
         """End-of-reply cleanup, whatever path ended it: stand down an
         unfired timer, wait out a clip still sounding (a reply that
         failed silently still finishes its "let me see" before the
         closing tts stop), and see a cancellation through so nothing
-        of this turn's filler outlives the turn."""
+        of this turn's filler outlives the turn.
+
+        The clip's own cancellation is what is seen through. A
+        cancellation of the caller that arrives during the wait is a
+        different fact and goes on, for the reason `_waited_out`
+        gives."""
         task = self._filler_task
         self._filler_task = None
         if task is None:
             return
         if not self._filler_sounding:
             task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-        self._filler_sounding = False
+        try:
+            await self._waited_out(task)
+        finally:
+            self._filler_sounding = False
 
     async def speak_fallback(self) -> None:
         """Say the active agent's fixed failure phrase, on the display

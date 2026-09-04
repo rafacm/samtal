@@ -413,12 +413,21 @@ def realtime_session(
     asr,
     vad: Any = None,
     scripts: dict[str, Any] | None = None,
-) -> tuple[session_module.DeviceSession, RecordingSocket]:
+    fillers: dict[str, Any] | None = None,
+    fallbacks: dict[str, Any] | None = None,
+    socket: Any = None,
+) -> tuple[session_module.DeviceSession, Any]:
     """A session mid-conversation on a realtime device, its ASR swapped
     for the test's, and its endpointing and its model too where the test
     says so. All three are stages of the agent's providers, so all three
-    are handed in where a deployment's own are."""
-    socket = RecordingSocket()
+    are handed in where a deployment's own are.
+
+    `fillers` and `fallbacks` are the cached speech that world holds,
+    passed the way `device_session` takes them; absent is a world
+    nothing was synthesized for, which is what a suite about the gates
+    alone wants. `socket` is the device, defaulting to one that counts
+    what went out."""
+    heard = socket if socket is not None else RecordingSocket()
     stages: dict[str, Any] = {"asr": asr}
     if vad is not None:
         stages["vad"] = vad
@@ -426,10 +435,12 @@ def realtime_session(
         config,
         DEVICE_MAC,
         agent_providers(config, scripts, stages),
-        websocket=socket,
+        websocket=heard,
+        fillers=fillers,
+        fallbacks=fallbacks,
     )
     listening_in_realtime(session)
-    return session, socket
+    return session, heard
 
 
 def call(name: str, **arguments: Any) -> ToolCall:
