@@ -4,32 +4,44 @@ told.
 One POST, and a closed reading of the answer. The POST is the check-in
 every board makes on every boot: two headers the handler reads, and a
 system-info body it takes a firmware version and a board type out of.
-The answer is where the whole device-side half turns, and the reply does
-not say what happened in one field, so this reads it into four states
-and the grammar branches on them.
+The answer is where the whole device-side half turns, and it is read
+into four states the grammar branches on.
 
 The fourth state is the one that costs people an evening. A board whose
 MAC is not bound still gets `200 OK`, with an empty `websocket.token`
 and no `activation` section, so a board that provisions perfectly and
 then never speaks is that, not a network fault. `Unwelcome` names it and
-says the two configurations that produce it, rather than reporting a
+says the configurations that produce it, rather than reporting a
 success.
 
-Two facts about the reading are load-bearing enough to say out loud
+An empty token used to be the whole of what the reply said about that,
+and it is the same empty string a deployment that issues no tokens at
+all sends to a board it admits (#369). So the reply carries a word for
+it, `access`, and this reads it: `open` is admitted with nothing to
+present, `denied` is turned away, `token` is the credential beside it.
+A reply that carries no word, or one this client does not know, is read
+by yesterday's rule, the token alone, which is what keeps a new
+simulator against an old image behaving exactly as it did.
+
+Three facts about the reading are load-bearing enough to say out loud
 here. `activation is not None` is the seam, written that way and never
 as truthiness, because `activation={}` is an object that is falsy and is
-not an absent key. And a reply that contradicts itself is refused rather
+not an absent key. A reply that contradicts itself is refused rather
 than resolved: an `activation` beside a non-empty token is a shape no
 vinga-server produces, and guessing which half to believe is how a
-client teaches itself to accept what the server never promised.
+client teaches itself to accept what the server never promised. And the
+word for the token contradicts what stands beside it in exactly the
+combinations no decision site can emit, each of them refused the same
+way.
 
 Nothing the far side wrote reaches a sentence. Every refusal below is a
 fixed constant; the only far-side values printed at all are the
 activation code, the message and the challenge, which are the artifact
 this command exists to show, and each is bounded and made printable
-first. The device token and the websocket URL are carried and never
-printed: the token is a credential nobody typed, and the URL decides
-where that credential would be sent.
+first. The device token, the websocket URL and the word for the token
+are carried and never printed: the token is a credential nobody typed,
+the URL decides where that credential would be sent, and the word is
+far-side bytes like any other.
 """
 
 from dataclasses import dataclass
@@ -152,6 +164,14 @@ CONTRADICTORY_REPLY = (
     f"which is a reply no vinga-server produces. Guessing which half to believe is how a "
     f"client teaches itself to accept a shape the server never promised, so it is refused "
     f"instead."
+)
+
+CONTRADICTORY_ACCESS = (
+    f"{SUPPLIED_ENDPOINT} said in one field how the device token beside it is to be read, "
+    f"and the rest of the reply says otherwise: a credential named where there is none, or "
+    f"none named where there is one, or a board admitted while it is being claimed. No "
+    f"vinga-server decides those, and the word is not repeated back, being whatever that "
+    f"address returned."
 )
 
 UNUSABLE_WEBSOCKET = (
@@ -326,6 +346,23 @@ class _Firmware(BaseModel):
     url: str = ""
 
 
+# The three words a reply may carry for how to read the token beside
+# it, and the set this client recognizes.
+#
+# Spelled here rather than imported from `ota/reply.py`: this half is the
+# client, and what it may reach is the published protocol rather than the
+# module that writes it (`tests/unit/test_cli_import_weight.py`). A
+# generated client would carry the same three strings for the same
+# reason.
+ACCESS_TOKEN = "token"
+
+ACCESS_OPEN = "open"
+
+ACCESS_DENIED = "denied"
+
+KNOWN_ACCESS = frozenset({ACCESS_TOKEN, ACCESS_OPEN, ACCESS_DENIED})
+
+
 class _Reply(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -337,6 +374,15 @@ class _Reply(BaseModel):
     # that offered nothing, which is a state this reads rather than a
     # shape it refuses.
     firmware: _Firmware = Field(default_factory=_Firmware)
+    # A strict optional string rather than a `Literal` over the three
+    # words, deliberately. The producer is typed to the closed set,
+    # because a value outside it there is a bug; here an unknown word is
+    # a server this client does not know, and a `Literal` would make it a
+    # MALFORMED reply rather than an absent field, which is the harsher
+    # of the two readings and the wrong one for a client. What the set
+    # holds is decided at `read()` instead. Absent is an older server,
+    # which is a reply this client has always been able to read.
+    access: str | None = None
 
 
 # The four states, and nothing else a check-in can end as
@@ -394,6 +440,16 @@ class Admitted:
     to leak by accident, and the URL is far-side text that decides where
     that credential would be sent. Both are what M2's `run` opens a
     socket with; what a verdict names is the stand-in.
+
+    The token is empty on a deployment that issues none, which the reply
+    says in as many words (`access: open`, #369). That is a state this
+    absorbs rather than a fifth one beside it: everything this board does
+    next is the same, the websocket target is resolved by the same rules
+    and the conversation is held the same way, and a deployment with
+    device authentication off asks the handshake for no credential. So
+    the emptiness of this field is the one thing that tells the two
+    admissions apart, and the grammar reads it here rather than reading
+    the reply again.
     """
 
     token: str
@@ -406,13 +462,17 @@ class Admitted:
 class Unwelcome:
     """It checked in and it may not speak.
 
-    A state rather than a boolean's false half, because it is the one the
-    reply says nothing about at all: it is `200 OK` with an empty token
-    and no activation section, which is what onboarding being off looks
-    like, and equally what a MAC bound to an agent this server has not
-    loaded looks like, and equally what a refused offer looks like. The
-    grammar's sentence names all three, because the reply names none of
-    them.
+    A state rather than a boolean's false half, because it is the one a
+    reply can reach two ways. A server that says so says so: `200 OK`
+    with `access: denied`, which is the deployment stating that nothing
+    resolves this board. A server too old to say it (#369) sends the
+    same `200 OK` with an empty token and no activation section, and
+    that is what onboarding being off looks like, and equally what a MAC
+    or a `default_agent` naming an agent this server has not loaded
+    looks like, and equally what a refused offer looks like, and equally
+    what an admitted board on a deployment issuing no tokens looks like.
+    The grammar's sentence names all of them, because such a reply names
+    none of them.
     """
 
     firmware: Firmware
@@ -466,11 +526,18 @@ def read(answered: httpx.Response, endpoint: Endpoint) -> CheckIn:
     Five steps, in this order, so two readers cannot disagree about a
     contradictory reply. Transport and status first. Then the schema,
     which anything failing leaves as `Refused` rather than as a state.
-    Then contradiction, refused rather than resolved. Then
-    `activation is not None`, written that way and not as truthiness.
-    Then the token, which decides `Admitted` against `Unwelcome`; a token
-    that is not a string at all failed the schema two steps ago rather
-    than being an empty one here.
+    Then contradiction, refused rather than resolved, both the shape that
+    has always been one and the words the reply's own `access` cannot
+    stand beside. Then `activation is not None`, written that way and not
+    as truthiness. Then admission, which the word decides where the reply
+    carries one this client knows and the token decides where it does
+    not; a token that is not a string at all failed the schema two steps
+    ago rather than being an empty one here.
+
+    The word is recognized before either contradiction is checked and
+    admission is read from what recognition left, so an unknown word is
+    one fact, "this reply carries no word I know", from the first
+    question to the last.
     """
     if not answered.is_success:
         return Refused(bad_status(answered.status_code))
@@ -482,8 +549,11 @@ def read(answered: httpx.Response, endpoint: Endpoint) -> CheckIn:
         return Refused(MALFORMED_REPLY)
     if reply.websocket.version not in SUPPORTED_VERSIONS:
         return Refused(UNKNOWN_PROTOCOL_VERSION)
+    access = reply.access if reply.access in KNOWN_ACCESS else None
     if reply.activation is not None and reply.websocket.token:
         return Refused(CONTRADICTORY_REPLY)
+    if _contradicted(access, reply):
+        return Refused(CONTRADICTORY_ACCESS)
     # Read once, for whichever state this ends in: every reply carries
     # the block, whatever it says about admitting the board.
     firmware = Firmware.of(reply.firmware)
@@ -495,7 +565,7 @@ def read(answered: httpx.Response, endpoint: Endpoint) -> CheckIn:
             timeout_ms=reply.activation.timeout_ms,
             firmware=firmware,
         )
-    if not reply.websocket.token:
+    if not _admitted(access, reply):
         return Unwelcome(firmware=firmware)
     # The scheme is read off the response rather than off the string an
     # operator typed, because that is what the request went out over and
@@ -509,6 +579,49 @@ def read(answered: httpx.Response, endpoint: Endpoint) -> CheckIn:
         protocol_version=reply.websocket.version,
         firmware=firmware,
     )
+
+
+def _contradicted(access: str | None, reply: _Reply) -> bool:
+    """Whether the word for the token disagrees with what stands beside
+    it, which is the whole matrix rather than the rows somebody thought
+    of.
+
+    Three combinations, and no server decision site can emit any of them:
+    a credential named where the token is empty; no credential named
+    where a token stands; and a board admitted while it is being claimed,
+    since a board showing a code is by definition not yet admitted. So
+    activation is compatible with `denied` and with an absent word, and
+    with nothing else.
+
+    An unrecognized word arrives here as None and contradicts nothing:
+    it is read as an older server throughout, and a client that refused
+    a reply for carrying a word it had not heard of would be refusing
+    compatibility itself.
+    """
+    if access is None:
+        return False
+    if access == ACCESS_TOKEN and not reply.websocket.token:
+        return True
+    if access in (ACCESS_OPEN, ACCESS_DENIED) and reply.websocket.token:
+        return True
+    return access in (ACCESS_OPEN, ACCESS_TOKEN) and reply.activation is not None
+
+
+def _admitted(access: str | None, reply: _Reply) -> bool:
+    """Whether this board may speak, by the word where there is one and
+    by the token where there is not.
+
+    The fallback is not a lesser reading, it is yesterday's: a server
+    that says nothing about why a token is empty is a server whose empty
+    token means what it has always meant here. That keeps a new
+    simulator against an old image behaving exactly as it did, and it is
+    conservative rather than open-ended: a future admission mode that
+    sent an empty token under a word this client does not know would
+    read `Unwelcome`, which is the safe half of being wrong.
+    """
+    if access is None:
+        return bool(reply.websocket.token)
+    return access in (ACCESS_TOKEN, ACCESS_OPEN)
 
 
 def _payload(answered: httpx.Response) -> dict[str, object] | None:
@@ -629,13 +742,18 @@ def polled(endpoint: Endpoint, identity: Identity, hint: Any) -> Poll:
 
 
 __all__ = [
+    "ACCESS_DENIED",
+    "ACCESS_OPEN",
+    "ACCESS_TOKEN",
     "ACTIVATION_CEILING_S",
     "BOARD_TYPE",
     "CLIENT_ID_NAMESPACE",
+    "CONTRADICTORY_ACCESS",
     "CONTRADICTORY_REPLY",
     "DEFAULT_MAC",
     "FIRMWARE_VERSION",
     "GIVEN_URL",
+    "KNOWN_ACCESS",
     "MALFORMED_REPLY",
     "NOT_A_REPLY",
     "POLL_ATTEMPTS",
