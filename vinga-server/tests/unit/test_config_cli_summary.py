@@ -27,6 +27,7 @@ on its way to the terminal.
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.support.config_cli import chain, logged, runner
 from tests.support.events import both_formats
@@ -499,7 +500,7 @@ def test_an_unknown_secret_kind_leaves_nothing_on_the_chain() -> None:
 
 @pytest.mark.parametrize("body", BAD_SECTIONS)
 def test_an_export_prints_back_a_section_it_never_walks_into(
-    body: object,
+    body: dict[str, object],
     run,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -518,6 +519,13 @@ def test_an_export_prints_back_a_section_it_never_walks_into(
     Which is why the sentinel is on stdout here and only here: it is the
     answer being printed back, which is the whole job. It is still
     nowhere else, and no traceback is raised over it.
+
+    Asserted as the whole document rather than as its first line. What
+    is claimed is that the malformed section survives the gate and comes
+    back out, and a rendering that printed the header and stopped would
+    satisfy anything less. The expectation is dumped here rather than
+    read off the renderer, so the two are independent: `_yaml`'s own
+    options are part of what this holds.
     """
     answering(monkeypatch, body)
     capsys.readouterr()
@@ -526,7 +534,9 @@ def test_an_export_prints_back_a_section_it_never_walks_into(
         assert run("export") == 0
 
     printed = capsys.readouterr()
-    assert printed.out.startswith(cli.EXPORT_HEADER)
+    assert printed.out == cli.EXPORT_HEADER + yaml.safe_dump(
+        body["config"], sort_keys=False, allow_unicode=True, default_flow_style=False
+    )
     assert printed.err == ""
     for surface in (printed.err, logged(caplog), both_formats(caplog)):
         assert ANSWERED not in surface
