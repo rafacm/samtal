@@ -70,7 +70,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   through, `--config` or `VINGA_CONFIG`, which is what its reader goes
   and changes. A config file of bytes rather than text was not caught
   at all and left as a traceback retaining what it could not decode;
-  that arm is closed too.
+  that arm is closed too, as are the three failures that are not
+  `YAMLError` at all (a scalar the constructors refuse, an impossible
+  date, a document nested past the stack), which the `-f` write already
+  answered and the boot path did not.
+- **A config file is read once, and what it parsed is what the server
+  boots on** (#291). It used to be opened twice, once by the loader and
+  once by the settings machinery behind it, and the second read answered
+  to nobody: a file deleted between the two booted the defaults in
+  silence, one that had turned malformed or into bytes left as the
+  parser's own exception with the path and the offending line in it,
+  and that read named no encoding while the first named UTF-8.
+- **A value a server key refuses is not quoted back** (#291). The
+  `log_level` and `ota_path` refusals opened with the rejected value in
+  quotes, in a file that sits beside the auth secret and the database
+  password; they now name the rule and the accepted spellings and say
+  the value is not repeated, which is what the same key's
+  reserved-prefix refusals already did. A misspelled section is answered
+  the same way: the file half's validation refusals go through the walk
+  the API and the store already use, so a key an operator typed is
+  answered by the rule's name rather than printed back into the boot
+  log.
 
 ## 2026-09-03
 
