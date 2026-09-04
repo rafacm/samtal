@@ -20,6 +20,12 @@ ends in speech. History stays text-only: the structured tool turns exist
 in a working copy inside one reply, and what survives is what was
 actually said aloud.
 
+A sentence of that reply is spoken unless it is shaped like a call to
+one of the tools the same snapshot offered, which is a model writing
+its own calls into its speech rather than an answer (#385). Such a
+sentence is dropped whole, reported as its own event, and enters
+nothing: not the leg, not the history, not the record.
+
 An utterance that ends while a reply is streaming cancels that reply and
 is answered, which is what barge-in is. An endpointer-driven cancel is
 gated: a reply is only cancelled on evidence of user speech (enough
@@ -103,8 +109,8 @@ from vinga_server.providers import (
 )
 from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
-from vinga_server.runtime.speech import _Synthesis, speak_after
-from vinga_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
+from vinga_server.runtime.speech import _Synthesis, speak_after, withhold_tool_shaped
+from vinga_server.runtime.turns import BUILTIN, MCP, UNKNOWN, TurnUnderway, tool_source
 from vinga_server.runtime.turntaking import TurnTaking
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
@@ -372,6 +378,31 @@ def _tool_called(
     )
 
 
+def _sentence_withheld(
+    source: str,
+    entry: str | None,
+    name: str | None,
+    agent: str,
+    conversation: str,
+    characters: int,
+) -> Variant:
+    """Which of the three `sentence_withheld` shapes describes this
+    withholding.
+
+    `_tool_called`'s own selection, read off the same two constants, so
+    the two records about one tool cannot come to disagree about which
+    names this surface may print. A sentence that named no single tool
+    arrives here classified `unknown` with no name, which is the shape
+    that names nothing, and is where an argument-only leak fitting
+    several offered tools lands.
+    """
+    if source == BUILTIN and name is not None:
+        return assembly.builtin_sentence_withheld(agent, conversation, name, characters)
+    if source == MCP and entry is not None:
+        return assembly.mcp_sentence_withheld(agent, conversation, entry, characters)
+    return assembly.unnamed_sentence_withheld(agent, conversation, source, characters)
+
+
 class FirstTokenTimeout(TimeoutError):
     """The LLM produced nothing within the first-token watchdog window,
     twice in a row. The class name is what the `provider_failed` event
@@ -513,6 +544,11 @@ class PipelineRuntime:
       dispatch and by `_system_prompt`. A field rather than an argument
       because those two readers are on two clocks, and one field is what
       makes them one answer.
+    - `_reply_withheld`: whether any sentence of the reply now ending
+      was dropped as a leaked tool call. Reset by `_speak_reply` and
+      written by the guard, which is a call away inside the tool loop; a
+      field rather than a return value because what it answers is about
+      the whole reply and the loop runs once per leg of it.
     - `_agent`: a property over `self._events.agent` rather than a field,
       because both sides of the boundary attribute events to whoever is
       talking, so the events object is the one place it can live.
@@ -646,6 +682,11 @@ class PipelineRuntime:
         # is no honest value before then: an agent is what the policy is
         # about, and nothing asks this outside a reply.
         self._remembering: bool | None = None
+        # Whether any sentence of the reply now running was withheld,
+        # reset at the start of every reply by the method that owns the
+        # question. False before the first reply for the same reason it
+        # is reset: what it describes is one reply, and no reply has run.
+        self._reply_withheld = False
         # The language the ASR provider asked this session to reuse
         # (`AsrResult.lock_language`). Session-scoped on purpose: the
         # provider is shared between sessions and holds no per-session
@@ -1498,9 +1539,13 @@ class PipelineRuntime:
 
         At most one move per reply, whichever kind, which is what the
         latch counts: two agents cannot ping-pong, and a model cannot
-        resume its way through a user's history inside one answer."""
+        resume its way through a user's history inside one answer.
+
+        The reply-wide withholding fact is reset here, because the reply
+        is what it is about and a leg is not."""
         switches_left = 1
         self._llm_round = 0
+        self._reply_withheld = False
         while True:
             transition = await self._tool_loop(spoken, switches_left)
             if transition is None:
@@ -1686,6 +1731,8 @@ class PipelineRuntime:
                             if first_token_at is None and text.strip():
                                 first_token_at = loop.time()
                             for sentence in splitter.push(text):
+                                if self._withheld(sentence, tools):
+                                    continue
                                 speaking = await self._speak_after(
                                     speaking, sentence, providers.tts, resampler, leg, spoken
                                 )
@@ -1703,7 +1750,7 @@ class PipelineRuntime:
                 slots = self._reserve_tools(calls)
                 self._llm_round_done(providers.llm, working, began, first_token_at, usage)
                 tail = splitter.flush()
-                if tail is not None:
+                if tail is not None and not self._withheld(tail, tools):
                     speaking = await self._speak_after(
                         speaking, tail, providers.tts, resampler, leg, spoken
                     )
@@ -2465,6 +2512,50 @@ class PipelineRuntime:
             self._conversation,
         )
         return prompt.with_scopes(self._know_how, scopes).text
+
+    def _withheld(self, sentence: str, tools: Sequence[ToolDef]) -> bool:
+        """Whether this sentence is a leaked tool call, in which case it
+        has already been reported and nothing else happens to it.
+
+        The one way into the guard, and both of the loop's sentence
+        sites come through here: the rule and the record are one
+        decision, and a second call site that only asked the predicate
+        would be a sentence dropped with nothing saying so.
+
+        Nothing about the sentence is kept. `withhold_tool_shaped` hands
+        back the tool it identified and a character count, and the
+        emission below closes over those rather than over the text, so
+        the withheld bytes reach no payload, no log line and no list
+        this reply carries (#385).
+        """
+        return withhold_tool_shaped(sentence, tools, self._report_withheld)
+
+    def _report_withheld(self, tool: str | None, characters: int) -> None:
+        """Say that a sentence was withheld, and remember for this reply
+        that one was.
+
+        The name is classified exactly as a call the model issued is,
+        through the same function and the same two lookups, so a tool
+        the model leaked into its speech is named on this record the way
+        it would have been named on its `tool_call`. A withholding that
+        resolved to no single tool is `unknown` and names nothing, which
+        is the shape a device tool takes too.
+        """
+        self._reply_withheld = True
+        source, entry = (
+            (UNKNOWN, None)
+            if tool is None
+            else tool_source(
+                tool,
+                {one.name for one in self._output.device_tools()},
+                self._mcp_servers.owner_of(tool),
+            )
+        )
+        self._events.emit(
+            lambda: _sentence_withheld(
+                source, entry, tool, self._agent, self._conversation, characters
+            )
+        )
 
     async def _speak_after(
         self,
