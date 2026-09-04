@@ -112,6 +112,48 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `vinga info` reads the same step, so it now refuses a document whose
   `agent_defaults` it cannot read, though it never prints that section:
   the sentence is about the answer, not about the line.
+- **Every rendering of the whole configuration reads it through one
+  gate** (#351, #380). `vinga list`, `info`, `show` and `export` walked
+  the masked document trusting every nested type, so an answer that put
+  a scalar or a list where a mapping belongs left the boundary as a
+  `TypeError`, a `KeyError` or an `AttributeError`: a traceback with the
+  answer inside it, on the commands an operator reaches for when
+  something is wrong. All four now read the answer once, as a mapping
+  before anything is looked up in it, then as the shapes the entity
+  registry's addressing says its sections have, so a section that is
+  malformed or missing meets the one fixed sentence a body this client
+  cannot read gets. An entry that is not a body at all is refused rather
+  than rendered, since what the tree would print of one is a key read
+  off a string. A stored location naming a kind this client has no
+  command for meets the same sentence, where `export` used to raise a
+  `KeyError` whose one argument was the value the answer supplied.
+- **Nothing an answer carries can steer the terminal these renderings
+  land on** (#351). Every value that reaches a line goes through the
+  display door: entity names, device MACs and the agents they reach, the
+  slots a stored secret fills, the type and transport a suffix names,
+  both halves of every inlined pair, and the three fields of every
+  stored location `show` writes under the document, which used to be
+  interpolated into a comment raw. A structure is named rather than
+  opened at every depth: a mapping reads as `{...}` wherever it appears,
+  including inside a list, where it used to arrive as a Python repr with
+  its keys and whatever they held. The one depth still opened is the
+  outermost list, because that is what an agent's includes and its
+  grants are.
+- **The `mcp` grants written in the object form read as structures in
+  the `vinga list` tree** (#351). They used to print as a Python repr,
+  which is the same rule change as above seen on a well-formed
+  document: an agent granting part of a server now reads
+  `mcp=[lights, {...}]`. Everything else a well-formed document renders
+  as, in all four commands, is unchanged byte for byte, which committed
+  pins hold it to.
+- **`vinga info` refuses a document whose `agent_defaults` it cannot
+  read**, though it never prints that section (#351), because the four
+  renderings share one reading of the document: the sentence is about
+  the answer, not about the line. `vinga export` is the exception and
+  says so where it is written: it dereferences neither a section nor an
+  entry, so it prints back what the server said rather than refusing to
+  hand an operator their configuration over a section it never looks
+  at.
 
 ## 2026-09-03
 
