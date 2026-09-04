@@ -1219,13 +1219,13 @@ vinga-server/src/vinga_server/config/api.py:443  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:462  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:562  respell  vinga-server config apply
 vinga-server/src/vinga_server/config/api.py:563  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:592  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:754  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:2863  respell  vinga apply
-vinga-server/src/vinga_server/config/cli.py:2997  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:3029  respell  config list
-vinga-server/src/vinga_server/config/cli.py:7489  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:7489  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:593  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:755  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:2864  respell  vinga apply
+vinga-server/src/vinga_server/config/cli.py:3074  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:3101  respell  config list
+vinga-server/src/vinga_server/config/cli.py:7624  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:7624  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:199  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:589  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:173  respell  vinga apply
@@ -1446,6 +1446,8 @@ vinga-server/tests/unit/test_config_cli_respelling.py:149  historical  vinga rel
 vinga-server/tests/unit/test_config_cli_respelling.py:156  historical  vinga import
 vinga-server/tests/unit/test_config_cli_respelling.py:158  historical  vinga import
 vinga-server/tests/unit/test_config_cli_respelling.py:160  historical  vinga apply
+vinga-server/tests/unit/test_config_cli_summary.py:1  respell  vinga list
+vinga-server/tests/unit/test_config_cli_summary.py:29  respell  vinga list
 vinga-server/tests/unit/test_config_docgen.py:320  respell  vinga-server config reference
 vinga-server/tests/unit/test_config_docgen.py:490  respell  vinga apply
 vinga-server/tests/unit/test_config_docgen.py:701  respell  vinga-server config cli-reference
