@@ -743,10 +743,22 @@ PLANTED_IDS = [case.what for case in PLANTED_KEYS]
 
 @pytest.mark.parametrize("case", PLANTED_KEYS, ids=PLANTED_IDS)
 def test_a_credential_planted_as_a_key_is_absent_from_every_surface(
-    client: TestClient, caplog: pytest.LogCaptureFixture, case: PlantedKey
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    case: PlantedKey,
 ) -> None:
     """Over HTTP: the sentence, every pointer, every message, the whole
-    body, the headers, and the log in both formats this server writes."""
+    body, the headers, the log in both formats this server writes, and
+    the two streams the process itself holds.
+
+    The streams are not a formality and are not covered by the log
+    assertions beside them: `caplog` reads records off the logging
+    machinery, and anything that reached a terminal without going
+    through it (a print left behind, a library writing to stderr, a
+    warning) is invisible there and perfectly visible to whoever is
+    watching the process.
+    """
     with caplog.at_level(logging.DEBUG):
         response = client.put(case.path, json=case.fragment)
 
@@ -764,10 +776,14 @@ def test_a_credential_planted_as_a_key_is_absent_from_every_surface(
         assert case.sentinel not in logs.JsonFormatter().format(record)
         assert case.sentinel not in text.format(record)
 
+    streams = capsys.readouterr()
+    assert case.sentinel not in streams.out
+    assert case.sentinel not in streams.err
+
 
 @pytest.mark.parametrize("case", PLANTED_KEYS, ids=PLANTED_IDS)
 def test_a_credential_planted_as_a_key_is_absent_from_the_exception(
-    store: ConfigStore, case: PlantedKey
+    store: ConfigStore, capsys: pytest.CaptureFixture[str], case: PlantedKey
 ) -> None:
     """And underneath the transport, on the exception itself.
 
@@ -777,6 +793,10 @@ def test_a_credential_planted_as_a_key_is_absent_from_the_exception(
     `problems` ride on it. The repository builds the sentence inside the
     handler and raises outside it for exactly this reason, which is what
     keeps the rejected fragment off the chain.
+
+    And the two streams, because a repository refusal is raised rather
+    than printed: what the write path puts on a terminal is nothing at
+    all, and that is worth asserting where a stray print would land.
     """
     with pytest.raises(ConfigError) as caught:
         case.write(store, case.fragment)
@@ -789,6 +809,10 @@ def test_a_credential_planted_as_a_key_is_absent_from_the_exception(
     for carried in refusal.problems:
         assert case.sentinel not in carried.path
         assert case.sentinel not in carried.message
+
+    streams = capsys.readouterr()
+    assert case.sentinel not in streams.out
+    assert case.sentinel not in streams.err
 
 
 # What the CLI prints for one
@@ -852,11 +876,13 @@ def test_the_cli_prints_a_typed_options_refusal_without_the_value(
         )
         == 1
     )
-    printed = capsys.readouterr().err.rstrip("\n")
+    streams = capsys.readouterr()
+    printed = streams.err.rstrip("\n")
 
     assert printed == str(caught.value)
     assert "beam_size" in printed
-    assert SENTINEL not in printed
+    assert SENTINEL not in streams.out
+    assert SENTINEL not in streams.err
 
 
 def test_the_cli_prints_a_url_credential_refusal_without_the_key(
@@ -901,10 +927,12 @@ def test_the_cli_prints_a_url_credential_refusal_without_the_key(
         )
         == 1
     )
-    printed = capsys.readouterr().err.rstrip("\n")
+    streams = capsys.readouterr()
+    printed = streams.err.rstrip("\n")
 
     assert printed == str(caught.value)
-    assert URL_KEY_SENTINEL not in printed
+    assert URL_KEY_SENTINEL not in streams.out
+    assert URL_KEY_SENTINEL not in streams.err
     # What is left is what an operator needs: the entry, the rule, and
     # what to do instead.
     assert "providers.llm.local" in printed
@@ -964,10 +992,15 @@ def test_the_cli_prints_an_mcp_url_credential_refusal_without_the_value(
         )
         == 1
     )
-    printed = capsys.readouterr().err.rstrip("\n")
+    streams = capsys.readouterr()
+    printed = streams.err.rstrip("\n")
 
     assert printed == str(caught.value)
-    assert URL_KEY_SENTINEL not in printed
+    # Both streams, and not only the one the refusal is written to: a
+    # command that answered correctly on stderr and echoed what it was
+    # given on stdout would have published the credential anyway.
+    assert URL_KEY_SENTINEL not in streams.out
+    assert URL_KEY_SENTINEL not in streams.err
     # What is left is what an operator needs: the field, the rule, and
     # what to do instead.
     assert "mcp_servers.weather.url" in printed
@@ -1003,10 +1036,12 @@ def test_the_cli_prints_the_same_refusal_for_an_imported_document(
         f"    url: {url}\n"
     )
     assert run("import", "-f", "-", stdin=document) == 1
-    printed = capsys.readouterr().err.rstrip("\n")
+    streams = capsys.readouterr()
+    printed = streams.err.rstrip("\n")
 
     assert printed == str(caught.value)
-    assert URL_KEY_SENTINEL not in printed
+    assert URL_KEY_SENTINEL not in streams.out
+    assert URL_KEY_SENTINEL not in streams.err
     assert "nothing was changed" in printed
     assert "mcp_servers.weather.url" in printed
     assert "credential as a query parameter" in printed
