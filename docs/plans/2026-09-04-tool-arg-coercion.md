@@ -169,6 +169,18 @@ through its generator, and the README event index row.
 `None` (the model streamed non-JSON) is answered before dispatch
 today and stays that way; coercion runs only on a dict.
 
+**Totality is enforced, not assumed, because an escaped
+conversion error leaks.** `_run_one` interpolates an exception's
+message into a stored tool result, and `float()`'s error message
+repeats the rejected string, which is model-authored and can be
+secret-shaped. So every conversion in the function runs inside a
+guard that answers the original value on any failure, which also
+covers Python's integer digit-conversion limit for a grammar-valid
+but enormous digit string, and the function tolerates a
+non-mapping `properties` and non-mapping property entries
+(`publish()` validates only the outer dict). The tests below
+prove it with a planted sentinel.
+
 ## Module layout
 
 - `tools/arguments.py` (new): `conformed(arguments, schema)`, pure,
@@ -197,7 +209,18 @@ today and stays that way; coercion runs only on a dict.
   underflowing exponent such as `"1e-4000"` against `number`, both
   refused), and the tolerance cases (empty schema, no
   `properties`, a property with no `type`, `type` as a list, an
-  undeclared property), plus input non-mutation.
+  undeclared property), plus input non-mutation, and the totality
+  cases: an arbitrary non-numeric string against `number`, a
+  grammar-valid digit string beyond Python's integer
+  digit-conversion limit, a non-mapping `properties`, and a
+  non-mapping property entry, each answered with the value
+  unchanged and no exception.
+- The no-leak sentinel, through the loop: a secret-shaped invalid
+  numeric value against a `number` property runs a whole scripted
+  reply, and the sentinel is asserted absent from the tool result
+  the model reads, from every log record rendered in both formats,
+  and from the emitted events; the argument itself is asserted to
+  arrive at the far side unchanged.
 - `tests/unit/test_session_tools.py` gains the through-the-loop
   case: a device tool declared with an `integer` property (the
   fixture in `tests/support/device_tools.py` grows a typed tool
@@ -321,6 +344,13 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    Require totality tests for those shapes including a
    secret-shaped invalid numeric value asserted absent from every
    exception-derived and retained surface.
+
+   *Resolution*: accepted in full. Totality is now an enforced
+   design point (every conversion inside a guard answering the
+   original on any failure, the digit-conversion limit named, the
+   non-mapping shapes tolerated), and the matrix and a
+   through-the-loop sentinel case cover exactly the listed inputs
+   across result, logs in both formats and events.
 
 5. **P2: the rejected through-loop test cannot observe a refusal
    with the current fake device.** `FakeDevice` answers success
