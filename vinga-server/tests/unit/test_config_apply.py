@@ -308,6 +308,68 @@ def test_an_unresolvable_document_is_refused_whole_and_writes_nothing(
     assert snapshot.domain.agents == {}
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://user:{SECRET}@host/mcp",
+        f"https://host/mcp?token={SECRET}",
+        f"https://host/mcp?auth={SECRET}",
+    ],
+    ids=["userinfo", "a token parameter", "an auth parameter"],
+)
+def test_an_applied_mcp_url_credential_is_refused_and_writes_nothing(
+    store: ConfigStore, url: str
+) -> None:
+    """The claim the changelog makes for this rule, held on the path it
+    is easiest to forget: a document is the second write path, and both
+    of them run a kind's `inside_write` (#279).
+
+    The good entry beside it is what makes the refusal whole rather than
+    partial. A document that landed the clean server and refused the
+    other would be a deployment half-written by a rule about the half it
+    threw away.
+    """
+    document = {
+        "mcp_servers": {
+            "home": {"transport": "stdio", "command": "uvx"},
+            "weather": {"transport": "streamable_http", "url": url},
+        }
+    }
+
+    with pytest.raises(ConfigError) as caught:
+        store.apply(document)
+
+    assert "mcp_servers.weather.url" in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+    assert SECRET not in str(caught.value.problems)
+    assert store.load().domain.mcp_servers == {}
+
+
+def test_an_applied_mcp_url_refusal_is_the_sentence_a_single_write_earns(
+    store: ConfigStore,
+) -> None:
+    """One rule, one vocabulary, whichever verb reached it: the wording
+    an operator meets from `import` is the one they would have met from
+    `mcp-server set`.
+
+    Contained rather than equal, which is the difference between this
+    and the reference refusal below it. A reference pass runs once over
+    the whole candidate and produces one sentence either way; a refusal
+    about a fragment is one of however many the document earned, so an
+    apply carries it under the header that says nothing was changed.
+    """
+    fragment = {"transport": "streamable_http", "url": f"https://user:{SECRET}@host/mcp"}
+
+    with pytest.raises(ConfigError) as applied:
+        store.apply({"mcp_servers": {"weather": fragment}})
+    with pytest.raises(ConfigError) as written:
+        store.set_mcp_server("weather", fragment)
+
+    message = str(applied.value)
+    assert message.splitlines()[0] == "the document was refused whole and nothing was changed:"
+    assert str(written.value) in message
+
+
 def test_a_reference_refusal_is_the_sentence_a_single_write_earns(
     store: ConfigStore,
 ) -> None:
@@ -715,6 +777,34 @@ VALIDATOR_LEAKS = [
         "an entry name that is not a tool prefix",
         {"mcp_servers": {f"{SECRET}.pasted": {"transport": "stdio", "command": "uvx"}}},
         "must match [A-Za-z0-9_-]+",
+    ),
+    # The other check the mcp-server kind runs around its own write, and
+    # the reason it is here: a document is the second write path, and a
+    # rule refused on one of them and not the other is a rule with a way
+    # round it (#279).
+    (
+        "an MCP url carrying a user and password",
+        {
+            "mcp_servers": {
+                "weather": {
+                    "transport": "streamable_http",
+                    "url": f"https://user:{SECRET}@host/mcp",
+                }
+            }
+        },
+        "user and password before its host",
+    ),
+    (
+        "an MCP url carrying a credential as a query parameter",
+        {
+            "mcp_servers": {
+                "weather": {
+                    "transport": "streamable_http",
+                    "url": f"https://host/mcp?auth={SECRET}",
+                }
+            }
+        },
+        "credential as a query parameter",
     ),
 ]
 

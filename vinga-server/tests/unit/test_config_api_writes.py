@@ -1376,6 +1376,33 @@ VALIDATOR_LEAKS = [
         {"mcp_servers": {f"{SECRET}.pasted": {"transport": "stdio", "command": "uvx"}}},
         "must match [A-Za-z0-9_-]+",
     ),
+    # The kind's other write-time check, over the wire on the document
+    # route: the rule is the repository's, so both write paths run it and
+    # both have to be held to it (#279).
+    (
+        "an MCP url carrying a user and password",
+        {
+            "mcp_servers": {
+                "weather": {
+                    "transport": "streamable_http",
+                    "url": f"https://user:{SECRET}@host/mcp",
+                }
+            }
+        },
+        "user and password before its host",
+    ),
+    (
+        "an MCP url carrying a credential as a query parameter",
+        {
+            "mcp_servers": {
+                "weather": {
+                    "transport": "streamable_http",
+                    "url": f"https://host/mcp?auth={SECRET}",
+                }
+            }
+        },
+        "credential as a query parameter",
+    ),
 ]
 
 
