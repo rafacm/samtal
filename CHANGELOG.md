@@ -9,6 +9,50 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **A failed reply says so, out loud and on the display** (#384, #343).
+  A reply that failed terminally was a deliberately silent turn: the
+  failure arm logged one class name and nothing reached the speaker or
+  the display, so from the couch a broken pipeline was
+  indistinguishable from a slow one, and diagnosing a cold local model
+  during the Getting Started walkthrough took an hour and a container
+  log. Every agent now has a `fallback` section holding a short fixed
+  phrase, synthesized in that agent's own voice when the world is built
+  and cached as PCM exactly the way the filler clips are, which the
+  failure arm shows on the display and plays. It is vinga's own words
+  rather than the agent's: it never enters the reply's spoken
+  sentences, the conversation history or the stored conversation, and a
+  new `reply_fallback` event carries the reason and whether the phrase
+  was heard as well as shown, never the phrase. The phrase is fixed
+  configuration and is never the failure's own message, which arrives
+  from the far side of a network. Only a terminal failure speaks: a
+  device that went away is told nothing, and a reply cancelled by a
+  barge-in stays silent because a cancellation means the user is
+  talking.
+
+  **Deployments upgrade into a speaking failure arm.** The section is on
+  by default, which is the one place it differs from the filler beside
+  it: the silent turn is at its worst during onboarding, where a
+  misconfiguration is likeliest and nobody has a log open. A deployment
+  that would rather keep the silence sets `fallback: {enabled: false}`,
+  on `agent_defaults` or per agent, and its failed turns go back to
+  being what they were, message for message. Being on by default also
+  means **the first start after this upgrade synthesizes one phrase per
+  agent** through whatever TTS provider is configured, before the server
+  begins serving: one provider call per agent, a few seconds of startup,
+  and on a metered voice a few seconds of billed synthesis. There is no
+  way to stage an opt-out before that first start, because a
+  configuration written against the previous models refuses the unknown
+  key. Synthesis is bounded per phrase, so a provider that hangs delays
+  the start by seconds rather than indefinitely, and a phrase that will
+  not synthesize degrades to the display alone with a
+  `fallback_degraded` event naming the agent; that turn still shows its
+  sentence and still closes with the `tts stop` a device waits on. After
+  the first start the cost does not recur: an agent whose `fallback`
+  section and whose voice are both unchanged keeps the clip it had
+  across a `vinga apply`, and the two kinds of cached clip are staled
+  apart, so switching the latency mask on or off never re-synthesizes a
+  failure phrase.
+
 - **The OTA reply says why a device token is empty** (#369). Two
   unrelated answers left the wire looking identical: a board this
   deployment has nothing to admit, and a board that is admitted on a

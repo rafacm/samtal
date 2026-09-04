@@ -145,8 +145,12 @@ provider and device choice:
   detected, speech detected but transcribed to nothing. Any stack
   can fail in these ways; tests that probe them are permanent.
 - The architectural invariants the fixes encode: waits on providers
-  are bounded, a failed round degrades to a silent turn, never a
-  wedged session.
+  are bounded, and a failed round degrades to a turn that ends, never
+  a wedged session. What that turn sounds like has moved: it used to
+  be silence, and a deployment that leaves the `fallback` section on
+  now hears a short fixed phrase saying the reply failed. The
+  invariant is that the turn ends and the session goes back to
+  listening; whether it says so is configuration.
 
 A stack change does not touch this layer; it is what measures the
 change.
