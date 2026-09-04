@@ -479,36 +479,91 @@ def reset_database(name: str) -> None:
     create_database(name, template=None)
 
 
-def _database_default(name: str) -> None:
-    """Point every door onto the database at one name.
+def _rebuild_order() -> tuple[type, ...]:
+    """`DatabaseConfig` and every model that embeds it, innermost first.
 
-    There are two doors and they must not be able to disagree, which is
-    why one function sets both. A `Config(...)` built in Python reads no
-    environment and takes the model's default, and most of both lanes
-    composes its configuration exactly that way; anything composed the
-    way a deployment composes it goes through the loader, which reads
-    `VINGA_DB_NAME` over that default. Setting the model alone leaves
-    the environment answering for every caller of the second kind, which
-    is what it did, and an environment that named a different database
-    was the whole of the leak.
+    THE ORDER IS THE WHOLE POINT AND IT IS NOT REORDERABLE. Pydantic
+    inlines a sub-model's schema, defaults included, into the validator
+    it compiles for every embedding model at class creation, and a
+    child's rebuild does not propagate upward. So rebuilding
+    `DatabaseConfig` alone leaves three stale copies of its defaults
+    baked into these three, and a payload that carries a `database`
+    mapping with fields missing (`Config(server={"database": {}})`)
+    fills them from the stale copy. Innermost first is what makes the
+    outer rebuilds inline the fresh schema: rebuilding `Config` before
+    `ServerConfig` would re-inline the copy that is still stale.
 
-    The model rebuild is not optional: pydantic bakes a default into the
-    validator it builds at class creation, so the field alone is not
-    where the answer comes from.
-
-    The model is imported here and not at module scope because
+    The models are imported here and not at module scope because
     everything above has to run before the first import of anything
     under test, which is what the bytecode note and the two secrets are
     about.
     """
-    from vinga_server.config.models import DatabaseConfig
+    from vinga_server.config.models import (
+        Config,
+        DatabaseConfig,
+        FileConfig,
+        ServerConfig,
+    )
 
-    os.environ[DB_NAME_ENV] = name
-    DatabaseConfig.model_fields["host"].default = DB_HOST
-    DatabaseConfig.model_fields["port"].default = DB_PORT
-    DatabaseConfig.model_fields["user"].default = DB_USER
-    DatabaseConfig.model_fields["name"].default = name
-    DatabaseConfig.model_rebuild(force=True)
+    return (DatabaseConfig, ServerConfig, FileConfig, Config)
+
+
+# The one manifest, iterated by the helper below and compared against
+# what `tests/unit/test_lane_database.py` derives from the declarations
+# in `config.models`, so a fourth embedder declared there fails the pin
+# rather than quietly needing a fourth rebuild nobody makes.
+DATABASE_REBUILD_ORDER = _rebuild_order()
+
+# What a deployment is shipped pointing at: the development instance
+# `docker compose up -d --wait` starts. The condition `packaged_database`
+# puts back for its span, and the values `config.models` declares.
+PACKAGED_CONNECTION = {"host": "127.0.0.1", "port": 5432, "name": "vinga", "user": "vinga"}
+
+
+def _database_condition(
+    *, host: str, port: int, name: str, user: str, environment_name: str | None
+) -> None:
+    """Point every door onto one connection, and say whether the
+    environment names its database at all.
+
+    There are three doors and they must not be able to disagree, which
+    is why one function sets all of them. A `Config(...)` built in
+    Python reads no environment and takes the model's default, and most
+    of both lanes composes its configuration exactly that way; anything
+    composed the way a deployment composes it goes through the loader,
+    which reads `VINGA_DB_NAME` over that default. Setting the model
+    alone leaves the environment answering for every caller of the
+    second kind, which is what it did, and an environment that named a
+    different database was the whole of the leak (#283). The third door
+    is the payload one the rebuild order above is about (#333).
+
+    `environment_name` is presence rather than a value, because absent
+    is a condition in its own right and no name can stand in for it: the
+    packaged span takes the variable away so that `load_file_config()`
+    answers out of the package's own default, and a span that set the
+    variable to `vinga` instead would let that test pass through an
+    override while the model default was still broken.
+
+    All four facts, and not just the name: pydantic inlines every field,
+    so a stale host, port or user is exactly as baked in and, on the
+    ordinary configuration, invisible for equalling the shipped value.
+    """
+    if environment_name is None:
+        os.environ.pop(DB_NAME_ENV, None)
+    else:
+        os.environ[DB_NAME_ENV] = environment_name
+    database = DATABASE_REBUILD_ORDER[0]
+    for field, value in (("host", host), ("port", port), ("name", name), ("user", user)):
+        database.model_fields[field].default = value
+    for model in DATABASE_REBUILD_ORDER:
+        model.model_rebuild(force=True)
+
+
+def _database_default(name: str) -> None:
+    """Every door onto the database this lane runs against."""
+    _database_condition(
+        host=DB_HOST, port=DB_PORT, name=name, user=DB_USER, environment_name=name
+    )
 
 
 # At import, before the first test module is collected, because a suite
