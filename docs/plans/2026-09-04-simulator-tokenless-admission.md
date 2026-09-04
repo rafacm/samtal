@@ -120,12 +120,14 @@ with an absent field (an older server) or `"denied"`, and the
 contradiction checks run before the activation classification the
 way the existing token-beside-activation check already does.
 
-**`converse()` presents no credential it does not have.** The
-websocket opener currently always sends `Authorization: Bearer
-{token}`, which with an empty token is a header asserting an empty
-credential. It skips the header when the token is empty: truthful,
-and inert against every server (auth off never reads it; auth on
-refuses an absent credential the same as an empty one).
+**`converse()` keeps the firmware's own headers, empty bearer
+included.** The 2026-08-25 plan's fidelity contract promises the
+four firmware handshake headers, and stock firmware with no stored
+token sends exactly the empty bearer the simulator sends today.
+The header is harmless under both auth modes: auth off never reads
+it, and auth on treats an empty and an absent credential
+identically. `_opened` therefore stays unchanged, and the fact is
+recorded here rather than re-derived.
 
 **The four sentences, repaired.**
 
@@ -265,9 +267,8 @@ simulator's `read()` applies it, and no third place re-derives it.
   Releasable alone: the field is additive and nothing reads it yet.
 - [ ] **M2: the simulator reads it, and the sentences stop
   contradicting each other.** `board.read()` applies the field with
-  the fallback and contradiction rules above; `converse()` skips
-  the empty-credential header; the four sentences repaired, the
-  inline tail named; the capability row updated; the simulator and
+  the fallback and contradiction rules above; the four sentences
+  repaired, the inline tail named; the capability row updated; the simulator and
   integration tests above; `docs/reference/cli.md` regenerated;
   the 2026-08-25 plan and implementation docs amended; a CHANGELOG
   entry. Design footprint: deepens `read()` (one decision site
@@ -346,6 +347,12 @@ read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
    proposed integration test would pass either way. Leave
    `_opened` unchanged and record that the empty bearer header is
    harmless under both modes.
+
+   *Resolution*: accepted in full; the header change is dropped.
+   The resolution block now records the fidelity contract, the
+   firmware's own empty-bearer behavior and the harmlessness under
+   both auth modes, and the M2 milestone no longer touches
+   `conversation.py`.
 
 5. **P2: token-specific help and capability text will remain false
    after tokenless admission works.** `CLAIM_HELP` promises the
