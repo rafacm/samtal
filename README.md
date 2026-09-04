@@ -116,7 +116,17 @@ vinga list
 
 There is nothing to export. Run it from the directory step 1 made and it reads that same `.env` itself, searching upwards from wherever it is invoked, and with anything already in your environment winning over the file; a server it is not told about is assumed to be this machine on the port the server half names, which is where step 1 put one. Name a different one with `VINGA_API_URL` or `--api-url`, remembering that plain http is allowed to a loopback address and to nothing else, since the bearer token crosses every request: a deployment anywhere else is https.
 
-[`docs/reference/cli.md`](docs/reference/cli.md) is the CLI's own page: the one-off `uvx` spelling, reaching a deployment you do not host, and every command's help.
+**Or install nothing.** The image from step 1 already carries the same CLI, built together with the server it talks to, so the pair cannot disagree about the grammar. From the same directory, a shell function makes it the same word:
+
+```bash
+vinga() { docker compose exec -T vinga vinga "$@"; }
+
+vinga list
+```
+
+The function shadows an installed `vinga` for as long as the shell defining it lives, and a file on this machine is piped in rather than named, because a path is resolved inside the container; the image door in the CLI's own page has both details and how to put the binary back.
+
+[`docs/reference/cli.md`](docs/reference/cli.md) is the CLI's own page: the one-off `uvx` spelling, the image door above, reaching a deployment you do not host, and every command's help.
 
 **3. Say what the agent is.** Which engines, which agents, which devices: this is the other half of the configuration, and it is written a line at a time. The stack these lines build is fully local and needs no account anywhere: Silero listens for the end of a phrase, faster-whisper transcribes, [Ollama](https://ollama.com) answers and Piper speaks.
 

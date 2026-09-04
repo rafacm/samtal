@@ -262,6 +262,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   hand an operator their configuration over a section it never looks
   at.
 
+### Changed
+
+- **The image door of the CLI documentation speaks compose, and the
+  front page offers it.** The CLI reference's install-nothing door used
+  a plain `docker exec` against a container named `vinga`, which is not
+  the name the quick start's compose stack gives its container, so the
+  one deployment most readers have was the one the recipe missed. The
+  door now leads with the compose spelling and its shell function
+  (`docker compose exec -T vinga vinga`, with `-T` explained beside
+  `-i`), keeps plain `docker exec` for a container run without compose,
+  and says out loud what makes this door special: the client is the
+  build the server is, so the two halves cannot disagree about the
+  grammar. Getting Started's install step now offers it as the
+  install-nothing choice beside `uv tool install`, verified end to end
+  against the published image (list, export to stdout, import from
+  stdin, apply, diff).
+
 ## 2026-09-03
 
 ### Added

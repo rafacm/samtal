@@ -199,44 +199,63 @@ uv run vinga-server config list
 That sync gives the checkout the whole server rather than the client
 half, so the same environment also serves, and every command answers.
 
-**The image already carries it**, which is the advanced door and the
-one that installs nothing anywhere. The published container image is the
-server, and it ships this CLI under the server's own entry point, so a
-shell inside a container that is already serving finds the token and the
-loopback address in its environment and there is nothing to arrange:
+**The image already carries it**, which is the door that installs
+nothing anywhere. The published container image is the server, and it
+ships this CLI, so a shell inside a container that is already serving
+finds the token and the loopback address in its environment and there
+is nothing to arrange. It is also the one door on which the two halves
+cannot come to be different builds: the client is the build the server
+is. For the compose stack the [quick
+start](../../README.md#getting-started) makes, run from the directory
+that holds the compose file:
 
 ```bash
-docker exec -i vinga vinga-server config list
+docker compose exec -T vinga vinga list
 ```
 
 A shell function makes that the shortest way to type it:
 
 ```bash
-vinga() { docker exec -i vinga vinga-server "$@"; }
+vinga() { docker compose exec -T vinga vinga "$@"; }
 
-vinga config list
+vinga list
+```
+
+For a container run without compose, the same door is plain
+`docker exec`, under whatever name the container was given:
+
+```bash
+docker exec -i my-vinga vinga list
 ```
 
 **That function shadows an installed `vinga` for as long as the shell
 defining it lives**, and every command typed in it goes to the container
-rather than to the client on the PATH. It is for a shell that
-administers a deployment from inside, so a workstation using the client
-above is not where to define it; `unset -f vinga` puts the binary back
-in a shell that already has.
+rather than to the client on the PATH. Define it where the container
+is the deployment being administered: the trial directory the quick
+start makes, or a shell inside a host that serves. A workstation
+holding the client for a deployment elsewhere is not where to define
+it; `unset -f vinga` puts the binary back in a shell that already has.
 
 Nothing about this door goes around the API. It is the same client
 making the same requests, running where the token already is, which is
-what makes it the answer for a deployment that deliberately does not
-route `/api/` outward, the way the smoke lane seeds its own container,
-and the place the two server-half commands run. What it is not is the
-ordinary way to configure a deployment: that is the workstation client,
+what makes it the answer for a trial that would rather install nothing,
+for a deployment that deliberately does not route `/api/` outward, the
+way the smoke lane seeds its own container, and the place the two
+server-half commands run. What it is not is the way to administer a
+deployment from across the network: that is the workstation client,
 and this is the door for when the token should not travel to reach one.
 
-The `-i` is load-bearing rather than habit: a secret set reads the
-credential from stdin, and `import -f -` reads a whole document from it.
-One thing does not carry over: a path is resolved inside the container,
-which has the CLI but not `examples/`, so a document that lives on your
-machine is piped in with `-f -` rather than named.
+The `-T` and the `-i` are load-bearing rather than habit, and they are
+the same fact from opposite defaults: a secret set reads the credential
+from stdin and `import -f -` reads a whole document from it, so stdin
+has to arrive as a pipe. `docker compose exec` allocates a terminal
+unless `-T` says otherwise, and a terminal is exactly what a
+redirection is not; plain `docker exec` connects stdin only when `-i`
+asks. One thing does not carry over: a path is resolved inside the
+container, which has the CLI but not `examples/`, so a document that
+lives on your machine is piped in with `-f -` rather than named, and
+`export`'s answer lands in a file through the shell
+(`vinga export > backup.yaml`).
 
 ## Versions, and the two halves disagreeing
 
