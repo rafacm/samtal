@@ -270,6 +270,24 @@ def test_the_line_is_redrawn_on_its_cadence() -> None:
     assert errors.getvalue().count(f"{cli.PROGRESS_PHASE}:") >= 3
 
 
+@pytest.mark.parametrize("cadence", [0.0, -1.0])
+def test_a_cadence_that_is_not_a_cadence_is_refused(cadence: float) -> None:
+    """Zero is the value the rule exists for: an event waited on for
+    zero seconds answers at once, so the redraw loop would spin a core
+    and rewrite the terminal as fast as the stream took it. A
+    programmer's mistake rather than an operator's, since no command
+    line reaches this number, so it is refused where it is read rather
+    than sanitized into a sentence."""
+    errors = _Stream(terminal=True)
+
+    with contextlib.redirect_stderr(errors):
+        with pytest.raises(ValueError, match="cadence"):
+            with cli.narrated(True, cadence_s=cadence):
+                pass  # pragma: no cover - the refusal is on the way in
+
+    assert errors.getvalue() == ""
+
+
 def test_a_redraw_held_inside_the_stream_cannot_land_after_the_erase() -> None:
     """The claim the erase makes, held against the case that breaks a
     timed wait for the writer.

@@ -1229,13 +1229,13 @@ vinga-server/src/vinga_server/config/api.py:443  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:462  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:562  respell  vinga-server config apply
 vinga-server/src/vinga_server/config/api.py:563  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:628  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:790  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:3194  respell  vinga apply
-vinga-server/src/vinga_server/config/cli.py:3421  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:3449  respell  config list
-vinga-server/src/vinga_server/config/cli.py:8021  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:8021  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:638  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:800  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:3210  respell  vinga apply
+vinga-server/src/vinga_server/config/cli.py:3437  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:3465  respell  config list
+vinga-server/src/vinga_server/config/cli.py:8037  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:8037  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:199  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:589  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:173  respell  vinga apply
