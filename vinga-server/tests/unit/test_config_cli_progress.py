@@ -21,6 +21,8 @@ if the terminal check were ever to stop being made.
 
 import contextlib
 import io
+import itertools
+import re
 import threading
 import time
 from collections.abc import Iterator
@@ -253,21 +255,25 @@ def test_a_read_at_a_terminal_says_nothing_about_waiting(run) -> None:
 # The mechanism, driven directly
 
 
-def test_the_line_is_redrawn_on_its_cadence() -> None:
-    """The number moves, which is the whole of what the line is for.
+def test_the_number_on_the_line_moves() -> None:
+    """The number moves, which is the whole of what the line is for. A
+    count of redraws would not say it: an implementation that printed
+    `0s` for ever would satisfy one and tell an operator nothing.
 
-    The cadence is a parameter with a default rather than a constant a
-    test reaches in and rewrites, so what is driven here is the seam a
-    caller has. The wait is bounded and the loop leaves the moment the
-    redraws have happened, so a slow machine costs nothing and a stalled
-    writer fails rather than hangs.
+    So the clock is driven as well as the cadence, through the two
+    parameters a caller has rather than by reaching into the module, and
+    what is asserted is the sequence of elapsed values. The fake clock
+    hands out one whole second per reading, so the first redraw is one
+    second in whatever the machine was doing at the time.
     """
+    ticking = _Ticking()
     errors = _Stream(terminal=True)
-    with contextlib.redirect_stderr(errors):
-        with cli.narrated(True, cadence_s=0.01):
-            _until(lambda: errors.getvalue().count(f"{cli.PROGRESS_PHASE}:") >= 3)
 
-    assert errors.getvalue().count(f"{cli.PROGRESS_PHASE}:") >= 3
+    with contextlib.redirect_stderr(errors):
+        with cli.narrated(True, cadence_s=0.001, clock=ticking):
+            _until(lambda: len(_seconds(errors.getvalue())) >= 3)
+
+    assert _seconds(errors.getvalue())[:3] == ["0s", "1s", "2s"]
 
 
 @pytest.mark.parametrize("cadence", [0.0, -1.0])
@@ -437,6 +443,20 @@ class _Holding(io.StringIO):
             return list(self.writes)
 
 
+class _Ticking:
+    """A clock that hands out one whole second per reading, so what a
+    redraw displays is decided by this test rather than by how long the
+    machine took to get there."""
+
+    def __init__(self) -> None:
+        self.readings = itertools.count()
+        self.lock = threading.Lock()
+
+    def __call__(self) -> float:
+        with self.lock:
+            return float(next(self.readings))
+
+
 class _Unstartable:
     """A thread an interpreter out of thread stacks will not start."""
 
@@ -461,7 +481,11 @@ class _NoThreads:
 
 
 @contextlib.contextmanager
-def _inert(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
+def _inert(
+    narrates: bool,
+    cadence_s: float | None = None,
+    clock: object | None = None,
+) -> Iterator[None]:
     """The narration, not there at all: what the control run of the
     determinism proof is compared against."""
     yield
@@ -480,6 +504,11 @@ def _captured(
     with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(errors):
         assert run(*argv) == code
     return printed.getvalue(), errors.getvalue()
+
+
+def _seconds(err: str) -> list[str]:
+    """Every elapsed value the line has been drawn with, in order."""
+    return re.findall(rf"{re.escape(cli.PROGRESS_PHASE)}: (\d+s)", err)
 
 
 def _after_the_line(err: str) -> str:
