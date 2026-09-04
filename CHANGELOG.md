@@ -91,6 +91,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the API and the store already use, so a key an operator typed is
   answered by the rule's name rather than printed back into the boot
   log.
+- **`vinga list` reads the whole configuration through the same gate
+  the counts do** (#351). The tree walked the masked document trusting
+  every nested type, so a section that answered a scalar or a list
+  where a mapping belongs left the boundary as a `TypeError` or a
+  `KeyError`: a traceback with the answer inside it, on the command an
+  operator reaches for when something is wrong. Both renderings of the
+  document now read it once, as the shapes the entity registry's
+  addressing says its sections have, so a section that is malformed or
+  missing meets the one fixed sentence a body this client cannot read
+  gets. An entry that is not a body at all is refused rather than
+  rendered, since what the tree would print of one is a key read off a
+  string. And every value that reaches a line goes through the display
+  door: entity names, device MACs and the agents they reach, the slots
+  a stored secret fills, the type and transport a suffix names, and
+  both halves of every inlined pair. A mapping where a word belongs
+  reads as the fact that it is one rather than as its repr, and nothing
+  an answer carries can steer the terminal the tree lands on. The
+  rendering of a well-formed document is unchanged, byte for byte.
+  `vinga info` reads the same step, so it now refuses a document whose
+  `agent_defaults` it cannot read, though it never prints that section:
+  the sentence is about the answer, not about the line.
 
 ## 2026-09-03
 
