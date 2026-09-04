@@ -10,137 +10,137 @@
 .github/workflows/vinga-server.yml:427  respell  vinga-server config cli-reference
 .github/workflows/vinga-server.yml:451  respell  vinga-server config cli-reference
 AGENTS.md:178  respell  vinga-server config schema
-CHANGELOG.md:102  historical  vinga import
-CHANGELOG.md:103  historical  vinga apply
-CHANGELOG.md:120  historical  vinga events tail
-CHANGELOG.md:141  historical  vinga simulator run
-CHANGELOG.md:232  historical  vinga list
-CHANGELOG.md:250  historical  vinga info
-CHANGELOG.md:254  historical  vinga list
-CHANGELOG.md:280  historical  vinga export
-CHANGELOG.md:297  historical  vinga list
-CHANGELOG.md:303  historical  vinga info
-CHANGELOG.md:306  historical  vinga export
-CHANGELOG.md:390  historical  vinga apply
-CHANGELOG.md:390  historical  vinga import
-CHANGELOG.md:391  historical  vinga reload
-CHANGELOG.md:392  historical  vinga apply
-CHANGELOG.md:396  historical  vinga reload
-CHANGELOG.md:397  historical  vinga apply
-CHANGELOG.md:404  historical  vinga apply
-CHANGELOG.md:404  historical  vinga diff
-CHANGELOG.md:405  historical  vinga apply
-CHANGELOG.md:414  historical  vinga-server config apply
-CHANGELOG.md:420  historical  vinga import
-CHANGELOG.md:420  historical  vinga apply
-CHANGELOG.md:431  historical  vinga reload
-CHANGELOG.md:512  historical  vinga memory list agent
-CHANGELOG.md:514  historical  vinga memory delete
-CHANGELOG.md:518  historical  vinga agent preview
-CHANGELOG.md:527  historical  vinga memory
-CHANGELOG.md:527  historical  vinga memory list agent
-CHANGELOG.md:529  historical  vinga memory list agent poet
-CHANGELOG.md:532  historical  vinga memory set agent poet
-CHANGELOG.md:533  historical  vinga memory delete
-CHANGELOG.md:674  historical  vinga session delete
-CHANGELOG.md:675  historical  vinga conversation delete
-CHANGELOG.md:766  historical  vinga events tail
-CHANGELOG.md:785  historical  vinga info
-CHANGELOG.md:794  historical  vinga ota-url
-CHANGELOG.md:824  historical  vinga provider
-CHANGELOG.md:824  historical  vinga device
-CHANGELOG.md:834  historical  vinga status
-CHANGELOG.md:834  historical  vinga mcp-server status
-CHANGELOG.md:839  historical  vinga apply
-CHANGELOG.md:840  historical  vinga reload
-CHANGELOG.md:851  historical  vinga diff
-CHANGELOG.md:851  historical  vinga reload
-CHANGELOG.md:852  historical  vinga export
-CHANGELOG.md:866  historical  vinga-server config ota-url
-CHANGELOG.md:904  historical  vinga session list
-CHANGELOG.md:905  historical  vinga session show
-CHANGELOG.md:905  historical  vinga session delete
-CHANGELOG.md:906  historical  vinga session purge
-CHANGELOG.md:928  historical  vinga conversation list
-CHANGELOG.md:929  historical  vinga conversation show
-CHANGELOG.md:930  historical  vinga conversation delete
-CHANGELOG.md:1128  historical  config ota-url
-CHANGELOG.md:1345  historical  vinga simulator run URL
-CHANGELOG.md:1365  historical  vinga simulator check-in URL
-CHANGELOG.md:1455  historical  vinga list
-CHANGELOG.md:1481  historical  vinga-server config provider set
-CHANGELOG.md:1481  historical  config set provider llm local
-CHANGELOG.md:1483  historical  bind-device
-CHANGELOG.md:1483  historical  add-device
-CHANGELOG.md:1485  historical  set-default-agent
-CHANGELOG.md:1506  historical  vinga provider set
-CHANGELOG.md:1507  historical  vinga-server config provider set llm local
-CHANGELOG.md:1565  historical  vinga agent show kids
-CHANGELOG.md:1611  historical  vinga-server config schema
-CHANGELOG.md:1645  historical  vinga-server config schema
-CHANGELOG.md:1652  historical  vinga-server config set provider
-CHANGELOG.md:1704  historical  set-secret
-CHANGELOG.md:1704  historical  clear-secret
-CHANGELOG.md:1721  historical  config export
-CHANGELOG.md:1721  historical  config apply
-CHANGELOG.md:1724  historical  set-secret
-CHANGELOG.md:1820  historical  config apply
-CHANGELOG.md:1827  historical  set-secret
-CHANGELOG.md:1851  historical  config schema
-CHANGELOG.md:1864  historical  config apply
-CHANGELOG.md:1875  historical  config apply
-CHANGELOG.md:1899  historical  vinga-server config cli-reference
-CHANGELOG.md:1909  historical  vinga-server config set
-CHANGELOG.md:1972  historical  vinga-server config apply
-CHANGELOG.md:1976  historical  config set
-CHANGELOG.md:2000  historical  vinga-server config export
-CHANGELOG.md:2001  historical  vinga-server config export
-CHANGELOG.md:2002  historical  config set
-CHANGELOG.md:2003  historical  config show
-CHANGELOG.md:2008  historical  vinga-server config set-secret
-CHANGELOG.md:2015  historical  vinga-server config set
-CHANGELOG.md:2016  historical  config set provider llm claude
-CHANGELOG.md:2026  historical  config set-secret
-CHANGELOG.md:2056  historical  vinga-server config set-secret
-CHANGELOG.md:2174  historical  config schema
-CHANGELOG.md:2406  historical  config set agent
-CHANGELOG.md:2407  historical  set-default-agent
-CHANGELOG.md:2538  historical  vinga-server config reload
-CHANGELOG.md:2657  historical  vinga-server config reload
-CHANGELOG.md:2964  historical  config show
-CHANGELOG.md:3029  historical  set-secret
-CHANGELOG.md:3933  historical  config status
-CHANGELOG.md:4037  historical  config ota-url
-CHANGELOG.md:4153  historical  config prompt
-CHANGELOG.md:4177  historical  config prompt
-CHANGELOG.md:4220  historical  config reload
-CHANGELOG.md:4221  historical  set-secret
-CHANGELOG.md:4221  historical  clear-secret
-CHANGELOG.md:4241  historical  config status
-CHANGELOG.md:4281  historical  config status
-CHANGELOG.md:4313  historical  config reload
-CHANGELOG.md:4423  historical  config ota-url
-CHANGELOG.md:4456  historical  config add-device CODE
-CHANGELOG.md:4458  historical  config pending
-CHANGELOG.md:4460  historical  add-device
-CHANGELOG.md:4461  historical  bind-device
-CHANGELOG.md:4579  historical  config list
-CHANGELOG.md:4654  historical  clear-secret
-CHANGELOG.md:4654  historical  set-secret
-CHANGELOG.md:4723  historical  config show
-CHANGELOG.md:4844  historical  config openapi
-CHANGELOG.md:4847  historical  config schema
-CHANGELOG.md:4848  historical  config reference
-CHANGELOG.md:4858  historical  config schema
-CHANGELOG.md:4859  historical  config reference
-CHANGELOG.md:4861  historical  config set
-CHANGELOG.md:4869  historical  config set
-CHANGELOG.md:4889  historical  bind-device
-CHANGELOG.md:4889  historical  set-default-agent
-CHANGELOG.md:4890  historical  clear-default-agent
-CHANGELOG.md:4890  historical  set-secret
-CHANGELOG.md:4890  historical  clear-secret
-CHANGELOG.md:4895  historical  set-secret
+CHANGELOG.md:134  historical  vinga import
+CHANGELOG.md:135  historical  vinga apply
+CHANGELOG.md:152  historical  vinga events tail
+CHANGELOG.md:173  historical  vinga simulator run
+CHANGELOG.md:264  historical  vinga list
+CHANGELOG.md:282  historical  vinga info
+CHANGELOG.md:286  historical  vinga list
+CHANGELOG.md:312  historical  vinga export
+CHANGELOG.md:329  historical  vinga list
+CHANGELOG.md:335  historical  vinga info
+CHANGELOG.md:338  historical  vinga export
+CHANGELOG.md:422  historical  vinga apply
+CHANGELOG.md:422  historical  vinga import
+CHANGELOG.md:423  historical  vinga reload
+CHANGELOG.md:424  historical  vinga apply
+CHANGELOG.md:428  historical  vinga reload
+CHANGELOG.md:429  historical  vinga apply
+CHANGELOG.md:436  historical  vinga apply
+CHANGELOG.md:436  historical  vinga diff
+CHANGELOG.md:437  historical  vinga apply
+CHANGELOG.md:446  historical  vinga-server config apply
+CHANGELOG.md:452  historical  vinga import
+CHANGELOG.md:452  historical  vinga apply
+CHANGELOG.md:463  historical  vinga reload
+CHANGELOG.md:544  historical  vinga memory list agent
+CHANGELOG.md:546  historical  vinga memory delete
+CHANGELOG.md:550  historical  vinga agent preview
+CHANGELOG.md:559  historical  vinga memory
+CHANGELOG.md:559  historical  vinga memory list agent
+CHANGELOG.md:561  historical  vinga memory list agent poet
+CHANGELOG.md:564  historical  vinga memory set agent poet
+CHANGELOG.md:565  historical  vinga memory delete
+CHANGELOG.md:706  historical  vinga session delete
+CHANGELOG.md:707  historical  vinga conversation delete
+CHANGELOG.md:798  historical  vinga events tail
+CHANGELOG.md:817  historical  vinga info
+CHANGELOG.md:826  historical  vinga ota-url
+CHANGELOG.md:856  historical  vinga provider
+CHANGELOG.md:856  historical  vinga device
+CHANGELOG.md:866  historical  vinga status
+CHANGELOG.md:866  historical  vinga mcp-server status
+CHANGELOG.md:871  historical  vinga apply
+CHANGELOG.md:872  historical  vinga reload
+CHANGELOG.md:883  historical  vinga diff
+CHANGELOG.md:883  historical  vinga reload
+CHANGELOG.md:884  historical  vinga export
+CHANGELOG.md:898  historical  vinga-server config ota-url
+CHANGELOG.md:936  historical  vinga session list
+CHANGELOG.md:937  historical  vinga session show
+CHANGELOG.md:937  historical  vinga session delete
+CHANGELOG.md:938  historical  vinga session purge
+CHANGELOG.md:960  historical  vinga conversation list
+CHANGELOG.md:961  historical  vinga conversation show
+CHANGELOG.md:962  historical  vinga conversation delete
+CHANGELOG.md:1160  historical  config ota-url
+CHANGELOG.md:1377  historical  vinga simulator run URL
+CHANGELOG.md:1397  historical  vinga simulator check-in URL
+CHANGELOG.md:1487  historical  vinga list
+CHANGELOG.md:1513  historical  vinga-server config provider set
+CHANGELOG.md:1513  historical  config set provider llm local
+CHANGELOG.md:1515  historical  bind-device
+CHANGELOG.md:1515  historical  add-device
+CHANGELOG.md:1517  historical  set-default-agent
+CHANGELOG.md:1538  historical  vinga provider set
+CHANGELOG.md:1539  historical  vinga-server config provider set llm local
+CHANGELOG.md:1597  historical  vinga agent show kids
+CHANGELOG.md:1643  historical  vinga-server config schema
+CHANGELOG.md:1677  historical  vinga-server config schema
+CHANGELOG.md:1684  historical  vinga-server config set provider
+CHANGELOG.md:1736  historical  set-secret
+CHANGELOG.md:1736  historical  clear-secret
+CHANGELOG.md:1753  historical  config export
+CHANGELOG.md:1753  historical  config apply
+CHANGELOG.md:1756  historical  set-secret
+CHANGELOG.md:1852  historical  config apply
+CHANGELOG.md:1859  historical  set-secret
+CHANGELOG.md:1883  historical  config schema
+CHANGELOG.md:1896  historical  config apply
+CHANGELOG.md:1907  historical  config apply
+CHANGELOG.md:1931  historical  vinga-server config cli-reference
+CHANGELOG.md:1941  historical  vinga-server config set
+CHANGELOG.md:2004  historical  vinga-server config apply
+CHANGELOG.md:2008  historical  config set
+CHANGELOG.md:2032  historical  vinga-server config export
+CHANGELOG.md:2033  historical  vinga-server config export
+CHANGELOG.md:2034  historical  config set
+CHANGELOG.md:2035  historical  config show
+CHANGELOG.md:2040  historical  vinga-server config set-secret
+CHANGELOG.md:2047  historical  vinga-server config set
+CHANGELOG.md:2048  historical  config set provider llm claude
+CHANGELOG.md:2058  historical  config set-secret
+CHANGELOG.md:2088  historical  vinga-server config set-secret
+CHANGELOG.md:2206  historical  config schema
+CHANGELOG.md:2438  historical  config set agent
+CHANGELOG.md:2439  historical  set-default-agent
+CHANGELOG.md:2570  historical  vinga-server config reload
+CHANGELOG.md:2689  historical  vinga-server config reload
+CHANGELOG.md:2996  historical  config show
+CHANGELOG.md:3061  historical  set-secret
+CHANGELOG.md:3965  historical  config status
+CHANGELOG.md:4069  historical  config ota-url
+CHANGELOG.md:4185  historical  config prompt
+CHANGELOG.md:4209  historical  config prompt
+CHANGELOG.md:4252  historical  config reload
+CHANGELOG.md:4253  historical  set-secret
+CHANGELOG.md:4253  historical  clear-secret
+CHANGELOG.md:4273  historical  config status
+CHANGELOG.md:4313  historical  config status
+CHANGELOG.md:4345  historical  config reload
+CHANGELOG.md:4455  historical  config ota-url
+CHANGELOG.md:4488  historical  config add-device CODE
+CHANGELOG.md:4490  historical  config pending
+CHANGELOG.md:4492  historical  add-device
+CHANGELOG.md:4493  historical  bind-device
+CHANGELOG.md:4611  historical  config list
+CHANGELOG.md:4686  historical  clear-secret
+CHANGELOG.md:4686  historical  set-secret
+CHANGELOG.md:4755  historical  config show
+CHANGELOG.md:4876  historical  config openapi
+CHANGELOG.md:4879  historical  config schema
+CHANGELOG.md:4880  historical  config reference
+CHANGELOG.md:4890  historical  config schema
+CHANGELOG.md:4891  historical  config reference
+CHANGELOG.md:4893  historical  config set
+CHANGELOG.md:4901  historical  config set
+CHANGELOG.md:4921  historical  bind-device
+CHANGELOG.md:4921  historical  set-default-agent
+CHANGELOG.md:4922  historical  clear-default-agent
+CHANGELOG.md:4922  historical  set-secret
+CHANGELOG.md:4922  historical  clear-secret
+CHANGELOG.md:4927  historical  set-secret
 README.md:48  respell  vinga simulator
 README.md:114  respell  vinga list
 README.md:124  respell  vinga list
@@ -1151,31 +1151,31 @@ vinga-server/README.md:1997  respell  vinga-server config provider set llm local
 vinga-server/README.md:2084  respell  vinga-server config agent-defaults set
 vinga-server/README.md:2142  respell  vinga-server config agent-defaults set
 vinga-server/README.md:2180  respell  vinga apply
-vinga-server/README.md:2398  respell  vinga-server config mcp-server status
-vinga-server/README.md:2421  respell  vinga events tail
-vinga-server/README.md:2424  respell  vinga events tail
-vinga-server/README.md:2425  respell  vinga events tail
-vinga-server/README.md:2426  respell  vinga events tail
-vinga-server/README.md:2679  respell  vinga session delete
-vinga-server/README.md:2679  respell  vinga session purge
-vinga-server/README.md:2680  respell  vinga conversation delete
-vinga-server/README.md:2852  respell  vinga provider set llm claude
-vinga-server/README.md:2853  respell  vinga apply
-vinga-server/README.md:2869  respell  vinga provider set llm claude
-vinga-server/README.md:3174  respell  config import
-vinga-server/README.md:3176  respell  config provider secret set
-vinga-server/README.md:3177  respell  config apply
-vinga-server/README.md:3201  respell  vinga-server config export
-vinga-server/README.md:3225  respell  config export
-vinga-server/README.md:3231  respell  config import
-vinga-server/README.md:3233  respell  config provider secret set
-vinga-server/README.md:3234  respell  config apply
-vinga-server/README.md:3323  respell  vinga-server config ota-url
-vinga-server/README.md:3335  respell  vinga info
-vinga-server/README.md:3349  respell  config ota-url
-vinga-server/README.md:3407  respell  vinga-server config device pending list
-vinga-server/README.md:3414  respell  vinga-server config device pending claim
-vinga-server/README.md:3435  respell  vinga-server config apply
+vinga-server/README.md:2442  respell  vinga-server config mcp-server status
+vinga-server/README.md:2465  respell  vinga events tail
+vinga-server/README.md:2468  respell  vinga events tail
+vinga-server/README.md:2469  respell  vinga events tail
+vinga-server/README.md:2470  respell  vinga events tail
+vinga-server/README.md:2723  respell  vinga session delete
+vinga-server/README.md:2723  respell  vinga session purge
+vinga-server/README.md:2724  respell  vinga conversation delete
+vinga-server/README.md:2896  respell  vinga provider set llm claude
+vinga-server/README.md:2897  respell  vinga apply
+vinga-server/README.md:2913  respell  vinga provider set llm claude
+vinga-server/README.md:3218  respell  config import
+vinga-server/README.md:3220  respell  config provider secret set
+vinga-server/README.md:3221  respell  config apply
+vinga-server/README.md:3245  respell  vinga-server config export
+vinga-server/README.md:3269  respell  config export
+vinga-server/README.md:3275  respell  config import
+vinga-server/README.md:3277  respell  config provider secret set
+vinga-server/README.md:3278  respell  config apply
+vinga-server/README.md:3367  respell  vinga-server config ota-url
+vinga-server/README.md:3379  respell  vinga info
+vinga-server/README.md:3393  respell  config ota-url
+vinga-server/README.md:3451  respell  vinga-server config device pending list
+vinga-server/README.md:3458  respell  vinga-server config device pending claim
+vinga-server/README.md:3479  respell  vinga-server config apply
 vinga-server/config.deploy.example.sh:47  respell  vinga-server config apply
 vinga-server/config.deploy.example.sh:54  respell  vinga-server config import
 vinga-server/config.deploy.example.yaml:63  respell  vinga-server config ota-url
