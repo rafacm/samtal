@@ -37,8 +37,9 @@ door cannot open silently.
 `DatabaseConfig` (`config/models.py:367-400`) declares four plain
 class-level defaults and reads no environment; exactly three
 models transitively embed it, `ServerConfig`, `FileConfig` and
-`Config` (enumerated by walking `BaseModel.__subclasses__()` over
-the whole package). `_database_default` (`tests/conftest.py:482`)
+`Config` (confirmed against the declarations in `config.models`;
+a `__subclasses__()` walk over imported modules agreed, but only
+the declaration-bounded derivation below can be a guarantee). `_database_default` (`tests/conftest.py:482`)
 mutates `DatabaseConfig.model_fields[...].default` and rebuilds
 `DatabaseConfig` alone; its own docstring already says pydantic
 bakes defaults into validators at class creation, it just does not
@@ -55,10 +56,17 @@ propagate upward) makes every case answer the lane name with
 `load_file_config(None)` still resolving correctly. The leaking
 callers are the `recording_config`/`quiet_config` helpers in
 `test_conversations_boot.py` and `test_app_lifespan.py` that build
-`server={"database": {}}`; three call sites in the latter already
-route around the bug by passing `DatabaseConfig().name`
-explicitly, which is the workaround this plan retires the need
-for.
+`server={"database": {}}`, and one partial payload in the
+integration lane: `_restricted_app` in `test_provisioning.py`
+builds `{"database": {"name": ..., "user": ...}}`, whose omitted
+`host` and `port` travel the same stale-schema path, masked today
+only because the shipped and lane instance values coincide on CI.
+The census therefore covers every partial `database` mapping,
+named-database variants of the unit helpers included, and the
+integration lane joins the verification. Three call sites in
+`test_app_lifespan.py` already route around the bug by passing
+`DatabaseConfig().name` explicitly, which is the workaround this
+plan retires the need for.
 
 ## Open questions, resolved
 
@@ -117,26 +125,42 @@ transitions rebuild the complete cascade.
 **The pin grows a third door and a completeness half.**
 `test_lane_database.py`'s agreement test was framed as "the
 agreement rather than either half" and enumerated two doors when
-there are three. It gains: the payload-composition door,
-`ServerConfig(**{"database": {}})`,
+there are three. It gains three halves. First, the
+payload-composition door: `ServerConfig(**{"database": {}})`,
 `FileConfig(**{"server": {"database": {}}})` and
 `config_with_agent(server={"database": {}})`, each asserting the
 resolved name carries the lane prefix (`DATABASE_PREFIX`, already
-importable beside the names the pin imports today); and a
-completeness assertion that derives, by walking model fields, the
-set of models transitively embedding `DatabaseConfig` and asserts
-it equals the set the helper rebuilds, so a fourth embedder added
-later fails the pin instead of reopening the hole silently.
+importable beside the names the pin imports today), plus a
+partial-payload case where some fields are explicit and the
+omitted ones must inherit the lane instance values. Second, all
+four facts, not one: pydantic inlines every field, and on the
+normal configuration a stale host, port or user equals the shipped
+value and stays invisible, so one case drives the helper with four
+distinctive sentinel values and asserts the complete
+`(host, port, name, user)` tuple through `DatabaseConfig`,
+`ServerConfig`, `FileConfig` and `Config`, then verifies complete
+restoration. Third, the completeness assertion, with its boundary
+stated honestly: it inspects every model class declared in
+`config.models` (not "the whole package", which no
+`__subclasses__()` walk of loaded classes can promise), traverses
+field annotations recursively through containers and unions, and
+compares the non-empty derived set of `DatabaseConfig` embedders
+against the one module-level ordered rebuild tuple the helper
+itself iterates, so a fourth embedder declared in that module
+fails the pin instead of reopening the hole silently, and the
+helper cannot drift from the manifest it is compared against.
 
-**The vacuous test becomes real, and is reread rather than
-assumed.**
+**The vacuous test is restructured so it cannot become vacuous
+again.**
 `test_recording_off_starts_no_writer_and_writes_no_rows` today
 boots into `vinga` and counts rows in the lane database, asserting
-zero about a database it never touched. After the fix both halves
-are the lane database and the autouse truncate keeps the count
-honest; the implementation rereads the test and records in the
-implementation doc whether its assertions needed strengthening
-rather than assuming green means proven. The three explicit
+zero about a database it never touched, and a mere reread would
+leave it structurally able to split again. It is rebuilt so the
+boot and the count share one fact: the configuration is built
+once, its resolved database asserted to be the lane database,
+that same configuration handed to `create_app`, the row count
+queried through that exact `config.server.database`, and
+`current_database()` asserted immediately before the count. The three explicit
 `DatabaseConfig().name` workaround call sites in
 `test_app_lifespan.py` are left as they are: they state their
 database and stating is not a bug, but the implementation doc
@@ -249,6 +273,11 @@ ready after the P1/P2 amendments.
    and the omitted ones must inherit the lane instance values, and
    include the integration lane in verification.
 
+   *Resolution*: accepted in full; the census names
+   `_restricted_app` and every partial mapping, the pin gains the
+   partial-payload inheritance case, and the integration lane
+   joins the verification.
+
 4. **P2: the pins verify only `name` while the helper owns four
    inlined defaults.** Stale host, port and user equal shipped
    values on the normal configuration and stay invisible. Drive
@@ -256,6 +285,10 @@ ready after the P1/P2 amendments.
    assert the complete tuple through `DatabaseConfig`,
    `ServerConfig`, `FileConfig` and `Config`, then verify complete
    restoration.
+
+   *Resolution*: accepted in full; the four-sentinel drive with
+   the complete tuple through all four models and the restoration
+   check is in the pin's second half.
 
 5. **P2: `BaseModel.__subclasses__()` cannot support a
    whole-package completeness guarantee.** It enumerates loaded
@@ -267,9 +300,19 @@ ready after the P1/P2 amendments.
    and compare that non-empty derived set against one module-level
    ordered rebuild tuple the helper uses.
 
+   *Resolution*: accepted in full; the boundary is stated as
+   `config.models`-declared classes with recursive annotation
+   traversal, compared against the one ordered rebuild tuple the
+   helper iterates, and the facts section's whole-package claim is
+   corrected.
+
 6. **P2: the row-count test remains structurally capable of
    becoming vacuous.** Rereading is not a pin. Build the
    configuration once, assert its resolved database is the lane
    database, pass that same configuration to `create_app`, query
    through that exact `config.server.database`, and assert
    `current_database()` before the row count.
+
+   *Resolution*: accepted in full; the test is restructured onto
+   one shared configuration with the resolved-database and
+   `current_database()` assertions, replacing the reread promise.
