@@ -675,6 +675,31 @@ PLANTED_KEYS = [
         {"transport": "stdio", "command": "uvx", "env": {f"{KEY_SENTINEL}_TOKEN": "v"}},
         lambda store, fragment: store.set_mcp_server("home", fragment),
     ),
+    # The two below are the same rule with the key half removed. An MCP
+    # server's `url` is a field this repository declared, so the refusal
+    # names it and the only place the sentinel can hide is the value,
+    # which is the half that matters: a URL is where a credential travels
+    # without a key that admits to holding one (#279).
+    PlantedKey(
+        "a credential written before the host of an MCP server's url",
+        "/mcp-servers/home",
+        {
+            "transport": "streamable_http",
+            "url": f"https://user:{URL_KEY_SENTINEL}@host/mcp",
+        },
+        lambda store, fragment: store.set_mcp_server("home", fragment),
+        URL_KEY_SENTINEL,
+    ),
+    PlantedKey(
+        "a credential in a query parameter of an MCP server's url",
+        "/mcp-servers/home",
+        {
+            "transport": "streamable_http",
+            "url": f"https://host/mcp?token={URL_KEY_SENTINEL}",
+        },
+        lambda store, fragment: store.set_mcp_server("home", fragment),
+        URL_KEY_SENTINEL,
+    ),
 ]
 
 PLANTED_IDS = [case.what for case in PLANTED_KEYS]
@@ -849,6 +874,47 @@ def test_the_cli_prints_a_url_credential_refusal_without_the_key(
     assert "providers.llm.local" in printed
     assert "user and password before its host" in printed
     assert "api_key_env" in printed
+
+
+def test_the_cli_prints_an_mcp_url_credential_refusal_without_the_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    store: ConfigStore,
+) -> None:
+    """The same discipline for the rule one section over (#279).
+
+    A provider's address is an option, so the refusal about it can only
+    name the option when the type declared it. An MCP server's is a
+    declared field of a closed model, so the refusal always names it,
+    and what may not be printed is only the value. Both halves are one
+    string again: the CLI prints what the repository said.
+    """
+    url = f"https://user:{URL_KEY_SENTINEL}@host/mcp"
+    fragment = {"transport": "streamable_http", "url": url}
+    with pytest.raises(ConfigError) as caught:
+        store.set_mcp_server("weather", fragment)
+
+    run = runner(monkeypatch)
+
+    assert (
+        run(
+            "mcp-server", "set", "weather",
+            "-f",
+            "-",
+            stdin=f"transport: streamable_http\nurl: {url}\n",
+        )
+        == 1
+    )
+    printed = capsys.readouterr().err.rstrip("\n")
+
+    assert printed == str(caught.value)
+    assert URL_KEY_SENTINEL not in printed
+    # What is left is what an operator needs: the field, the rule, and
+    # what to do instead.
+    assert "mcp_servers.weather.url" in printed
+    assert "user and password before its host" in printed
+    assert "headers.Authorization" in printed
 
 
 # The status vocabulary

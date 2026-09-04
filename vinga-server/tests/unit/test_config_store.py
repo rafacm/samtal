@@ -806,6 +806,64 @@ def test_the_url_rule_is_write_time_only() -> None:
     assert config.providers.llm["vendor"].options["base_url"].endswith("@host/v1")
 
 
+def test_an_mcp_url_carrying_a_credential_is_refused(store: ConfigStore) -> None:
+    """The same shape one section over, and the reason it needed a rule
+    of its own: a provider's address is an option, checked by the walk
+    over a pass-through model, and an MCP server's is a declared field of
+    a closed one that no walk reaches. Stored, it is read back on every
+    display path, so it is refused where it is chosen (#279)."""
+    refused = [
+        {"transport": "streamable_http", "url": f"https://user:{SECRET}@host/mcp"},
+        {"transport": "streamable_http", "url": f"https://{SECRET}@host/mcp"},
+        {"transport": "streamable_http", "url": f"https://host/mcp?token={SECRET}"},
+    ]
+    for fragment in refused:
+        with pytest.raises(ConfigError) as caught:
+            store.set_mcp_server("weather", fragment)
+        message = str(caught.value)
+        assert "not allowed" in message
+        # The field is a name this repository declared, so the refusal
+        # addresses it.
+        assert "mcp_servers.weather.url" in message
+        assert "headers.Authorization" in message, (
+            "the refusal does not say what to do instead"
+        )
+        # The rule and the field, never the value: what fails this check
+        # is a credential.
+        assert SECRET not in message
+        assert SECRET not in _chain(caught.value)
+    assert store.load().domain.mcp_servers == {}
+
+
+def test_an_ordinary_mcp_url_and_an_entry_with_none_are_accepted(store: ConfigStore) -> None:
+    """The two shapes the rule must not touch: a clean address, and a
+    stdio entry, which has no url at all and is therefore not a URL
+    carrying anything."""
+    url = "https://weather.example/mcp?model=small"
+    store.set_mcp_server("weather", {"transport": "streamable_http", "url": url})
+    store.set_mcp_server("home", {"transport": "stdio", "command": "uvx"})
+
+    assert store.read_mcp_server("weather").entry.url == url
+    assert store.read_mcp_server("home").entry.url is None
+
+
+def test_the_mcp_url_rule_is_write_time_only() -> None:
+    """The provider rule's precedent, and it holds for the same reason:
+    the check runs inside a write and nowhere else, so a row written
+    before this rule still boots, still reads and is still deletable."""
+    from vinga_server.config import Config
+
+    config = Config(
+        mcp_servers={
+            "weather": {
+                "transport": "streamable_http",
+                "url": f"https://user:{SECRET}@host/mcp",
+            }
+        }
+    )
+    assert config.mcp_servers["weather"].url.endswith("@host/mcp")
+
+
 def test_a_name_that_only_needs_encoding_is_accepted(store: ConfigStore) -> None:
     """Spaces, percent signs and characters outside ASCII percent-encode
     and decode losslessly, so nothing about them is a problem to

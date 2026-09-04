@@ -41,6 +41,7 @@ from vinga_server.config.models import (
     is_env_name,
     is_mcp_secret_key,
     mcp_entry_fragment,
+    url_credential,
 )
 from vinga_server.config.provider_options import checked_options, declared_options
 from vinga_server.config.store import ConfigStore
@@ -363,8 +364,16 @@ def test_no_committed_body_holds_a_credential(
     else: an environment reference, or the name of the variable holding
     the value. Both are names rather than values, which is the whole
     reason the configuration is written that way.
+
+    A URL is the shape that gets past that, and so it is asked of every
+    string rather than of the secret-shaped keys: a credential written
+    into `url` or `base_url` sits under a key that admits to nothing
+    (#279). The predicate is the one both write paths refuse with, so a
+    fixture these files could not be written by today is a failure here
+    rather than a discovery.
     """
     for where, value in _strings(json.loads(path.read_text(encoding="utf-8"))):
+        assert url_credential(value) is None, f"{path}: {where}"
         if not is_mcp_secret_key(where):
             continue
         assert value.startswith("$") or is_env_name(value), f"{path}: {where}"
