@@ -1036,13 +1036,14 @@ class FillerSkip(StrEnum):
 class FallbackReason(StrEnum):
     """Why a turn said its agent's fixed phrase instead of an answer.
 
-    One member for now and a closed set on purpose: the phrase covers a
-    second case as well as this one (a reply with nothing sayable left
-    in it), and reading which of them happened is the whole reason the
-    record exists.
+    Two situations, one phrase, and reading which of them happened is
+    the whole reason the record exists: a pipeline that broke is an
+    operator's problem, and a model whose every sentence was a leaked
+    tool call is a fact about the deployment's model choice.
     """
 
     REPLY_FAILED = "reply_failed"
+    NOTHING_SAYABLE = "nothing_sayable"
 
 
 class ToolSource(StrEnum):
