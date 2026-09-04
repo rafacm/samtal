@@ -747,6 +747,10 @@ def test_a_provider_url_carrying_a_credential_is_refused(store: ConfigStore) -> 
         {"type": "openai_compatible", "model": "m", "base_url": f"https://user:{SECRET}@host/v1"},
         {"type": "openai_compatible", "model": "m", "base_url": f"https://{SECRET}@host/v1"},
         {"type": "openai_compatible", "model": "m", "base_url": f"https://host/v1?api_key={SECRET}"},
+        # A query parameter is the vendor's word rather than one this
+        # repository or a provider type declared, so the rule reads the
+        # wider set of names and `?auth=` is refused here too (#279).
+        {"type": "openai_compatible", "model": "m", "base_url": f"https://host/v1?auth={SECRET}"},
         # And in a key that type does not declare at all, which is the
         # question its escape hatch raises: an option nobody declared is
         # kept and forwarded now, so the rules that read values rather
@@ -816,6 +820,12 @@ def test_an_mcp_url_carrying_a_credential_is_refused(store: ConfigStore) -> None
         {"transport": "streamable_http", "url": f"https://user:{SECRET}@host/mcp"},
         {"transport": "streamable_http", "url": f"https://{SECRET}@host/mcp"},
         {"transport": "streamable_http", "url": f"https://host/mcp?token={SECRET}"},
+        # The two spellings the narrower provider-option rule never
+        # matched: a query parameter is named by the vendor whose
+        # endpoint it addresses, and `auth` is as ordinary a name for
+        # one as `token` is.
+        {"transport": "streamable_http", "url": f"https://host/mcp?auth={SECRET}"},
+        {"transport": "streamable_http", "url": f"https://host/mcp?authorization={SECRET}"},
     ]
     for fragment in refused:
         with pytest.raises(ConfigError) as caught:

@@ -55,9 +55,14 @@ _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 # of holding the value.
 _SECRET_KEY_FRAGMENTS = ("secret", "token", "password", "api_key", "apikey", "credential")
 
-# The same rule for an MCP server's env and headers, where the key that
-# carries a secret is as often called Authorization as it is token.
-_MCP_SECRET_KEY_FRAGMENTS = (*_SECRET_KEY_FRAGMENTS, "auth")
+# The same rule where the name is not one this repository or a provider
+# type declared, and so is whatever somebody else called it: an MCP
+# server's env and headers, where the key that carries a secret is as
+# often called Authorization as it is token, and a URL's query, where
+# the parameter is named by the vendor whose endpoint it addresses. One
+# tuple and not two, because a word that marks a secret in a header
+# marks one in a query parameter as well.
+_UNDECLARED_SECRET_KEY_FRAGMENTS = (*_SECRET_KEY_FRAGMENTS, "auth")
 
 # An environment reference in an MCP server's env or headers: the whole
 # value is $NAME, which is resolved from the server's own environment at
@@ -1072,6 +1077,27 @@ def is_secret_option(name: str) -> bool:
 MASK = "********"
 
 
+def is_url_credential_parameter(name: str) -> bool:
+    """Whether a URL query parameter's name says it carries a credential.
+
+    The one home of that question, and it has three readers by design:
+    `url_credential` below refuses such a URL where one is written,
+    `without_url_credential` beside it takes the parameter out of
+    anything built from a value that got in before the rule, and
+    `printing.shown_url` is the display door. What is refused, what a
+    record strips and what may be printed have to be one set, or the
+    first of them is decoration.
+
+    The undeclared fragments rather than a provider option's, which is
+    the whole of what this fixes: a query parameter is named by the
+    vendor whose endpoint it addresses, so `?auth=` and
+    `?authorization=` are as ordinary a spelling of a credential as
+    `?token=` is, and neither of them matched the narrower set (#279).
+    """
+    lowered = name.lower()
+    return any(fragment in lowered for fragment in _UNDECLARED_SECRET_KEY_FRAGMENTS)
+
+
 def url_credential(value: object) -> str | None:
     """Which credential a URL-shaped value carries, or None.
 
@@ -1099,7 +1125,10 @@ def url_credential(value: object) -> str | None:
         return None
     if "@" in parts.netloc:
         return "userinfo"
-    if any(is_secret_option(key) for key, _ in parse_qsl(parts.query, keep_blank_values=True)):
+    if any(
+        is_url_credential_parameter(key)
+        for key, _ in parse_qsl(parts.query, keep_blank_values=True)
+    ):
         return "query"
     return None
 
@@ -1119,7 +1148,7 @@ def without_url_credential(value: str) -> str:
     kept = [
         (key, held)
         for key, held in parse_qsl(parts.query, keep_blank_values=True)
-        if not is_secret_option(key)
+        if not is_url_credential_parameter(key)
     ]
     return urlunsplit(
         (
@@ -1228,7 +1257,9 @@ def mcp_secret_fragment(name: str) -> str | None:
     the same answer: which fragment matched, so a refusal can say so
     without printing a key the caller invented."""
     lowered = name.lower()
-    return next((fragment for fragment in _MCP_SECRET_KEY_FRAGMENTS if fragment in lowered), None)
+    return next(
+        (fragment for fragment in _UNDECLARED_SECRET_KEY_FRAGMENTS if fragment in lowered), None
+    )
 
 
 def is_mcp_secret_key(name: str) -> bool:

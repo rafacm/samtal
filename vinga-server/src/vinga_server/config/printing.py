@@ -18,9 +18,9 @@ The display door is one function rather than strip primitives a caller
 has to order correctly, which is what makes this the rule's home instead
 of a toolbox beside it. What counts as a credential in a query is not
 restated here either: `config/models.py` already owns that rule for the
-configuration's own URL-shaped values (`url_credential`,
-`without_url_credential`), and `shown_url` filters through the same
-predicate.
+configuration's own URL-shaped values (`is_url_credential_parameter`,
+which `url_credential` and `without_url_credential` read too), and
+`shown_url` filters through the same predicate.
 
 Two callers, `config/cli.py` and `doctor.py`, and neither may import the
 other: the doctor must not pull the config CLI's machinery, and the
@@ -32,7 +32,7 @@ it reuses, and stays light enough for a top-level command to import.
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import is_secret_option
+from vinga_server.config.models import is_url_credential_parameter
 
 # How much of anything that arrived in a response may be repeated back.
 # What a command reaches may be a proxy, a captive portal or anything
@@ -104,7 +104,7 @@ def shown_url(parsed: SplitResult) -> str:
     kept = [
         (key, held)
         for key, held in parse_qsl(parsed.query, keep_blank_values=True)
-        if not is_secret_option(key)
+        if not is_url_credential_parameter(key)
     ]
     return urlunsplit((parsed.scheme, host, parsed.path, urlencode(kept), ""))
 
