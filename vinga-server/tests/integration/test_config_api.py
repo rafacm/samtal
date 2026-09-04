@@ -176,10 +176,18 @@ def test_the_reload_answers_over_a_real_socket(served_api) -> None:
             "servers": {},
         },
         "prompts": {"changed": []},
-        # Present and empty rather than null: this server applies the
-        # filled pauses, and it considered every agent it has, which is
-        # none.
-        "fillers": {"resynthesized": [], "reused": [], "disabled": []},
+        # Present and empty rather than null: this server applies both
+        # kinds of cached speech, the filled pauses and the phrase a
+        # failed reply says, and it considered every agent it has, which
+        # is none.
+        "fillers": {
+            "resynthesized": [],
+            "reused": [],
+            "disabled": [],
+            "fallback_resynthesized": [],
+            "fallback_reused": [],
+            "fallback_degraded": [],
+        },
         # Present and empty for the same reason: this server builds the
         # engines its agents reference, and it has no agents.
         "providers": {"built": [], "reused": [], "retired": []},
