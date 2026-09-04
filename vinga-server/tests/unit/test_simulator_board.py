@@ -390,6 +390,79 @@ def test_a_credential_named_in_the_reply_is_carried_and_never_printed(
     assert DEVICE_TOKEN not in captured.out + captured.err
 
 
+def test_an_open_admission_says_that_deployment_issues_no_tokens(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The report an operator learns the deployment's auth setting from.
+
+    Admission with no credential is still admission, so this says both:
+    the board may speak, and there is no token because that deployment
+    mints none. Reporting "issued" here would be the one false sentence
+    the new reading could ship.
+    """
+    far_side(answering(body=admitted_without_a_token()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    captured = capsys.readouterr()
+    assert "is admitted" in captured.out
+    assert cli.NO_TOKEN_ISSUED in captured.out
+    assert cli.TOKEN_ISSUED not in captured.out
+
+
+def test_an_admission_with_a_credential_says_a_token_was_issued(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other reading of the same state, so the two sentences are held
+    apart rather than one being asserted alone."""
+    far_side(answering(body=admitted_with_a_token()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    assert cli.TOKEN_ISSUED in capsys.readouterr().out
+
+
+def test_the_trap_state_names_every_reading_that_produces_it(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The tail, enumerated from the decision sites rather than from the
+    sentence it replaced.
+
+    Two of these the old sentence missed: a deployment that could not
+    read its own record of what is bound offers no code while resolving
+    nothing, and the unloaded agent can be named by `default_agent`
+    rather than by a binding. The last is not a configuration at all: a
+    server too old to say why a token is empty answers an admitted board
+    on a token-less deployment in exactly these bytes.
+    """
+    far_side(answering(body=unwelcome()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    said = capsys.readouterr().out
+    assert cli.MAY_NOT_SPEAK in said
+    assert "onboarding is turned off" in said
+    assert "default_agent" in said
+    assert "not serving yet" in said
+    assert "waiting to be claimed would not take another one" in said
+    assert "could not read its own record of what is bound" in said
+    assert "issues no device tokens at all and is too old to say so" in said
+
+
+def test_the_conversation_refusal_advises_the_claim_only_where_it_applies() -> None:
+    """The sentence that used to advise its own opposite.
+
+    `--claim` binds the board showing an activation code, so a board
+    that was never offered one is a board the claim cannot address, and
+    the old wording sent a reader from here to `NOTHING_TO_CLAIM` and
+    back. It points at the check-in's own answer first now, and
+    conditions the claim on the state that has something to claim.
+    """
+    assert "check-in" in cli.CANNOT_CONVERSE
+    assert cli.CANNOT_CONVERSE.index("check-in") < cli.CANNOT_CONVERSE.index("--claim")
+    assert "showing an activation code" in cli.CANNOT_CONVERSE
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
@@ -965,6 +1038,32 @@ def test_a_claim_needs_a_code_and_says_so_when_there_is_none(
 
     assert len(endpoint.requests) == 1
     assert capsys.readouterr().err.strip() == cli.NOTHING_TO_CLAIM
+
+
+def test_the_post_ceremony_trap_names_the_deployment_that_issues_none(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A claim that went through, an activation that said it was
+    activated, and a check-in after it that admitted nothing.
+
+    Against a server new enough to say why a token is empty this is the
+    binding, and `device show` is where to look. Against an older one it
+    is the auth-off deployment, which is precisely the sequence #369 was
+    reported from, so the sentence names that reading too.
+    """
+    code = bound(run)
+    far_side(
+        answering(body=activating(code=code)),
+        answering(status=200, text=""),
+        answering(body=unwelcome()),
+    )
+    capsys.readouterr()
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 1
+
+    said = capsys.readouterr().err
+    assert said.strip().splitlines()[-1] == cli.NOT_ADMITTED_AFTER_CLAIM
+    assert "issues no device tokens and is too old to say so" in said
 
 
 # Every wait, bounded

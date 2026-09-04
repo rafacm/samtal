@@ -5465,8 +5465,8 @@ MAC_HELP = (
 
 CLAIM_HELP = (
     "bind this board to an agent through the configuration API and check in again to be "
-    "issued a token; repeat the option for several agents (default: print the code and "
-    "the command to run)"
+    "admitted; repeat the option for several agents (default: print the code and the "
+    "command to run)"
 )
 
 # What is printed on stderr beside an activation code, which is the same
@@ -5520,11 +5520,50 @@ FIRMWARE_UNEXPECTED_VERSION = (
     "fetch; the version is not repeated, being whatever that endpoint returned."
 )
 
+# What an admitted board was handed, in the two readings admission has.
+#
+# The state carries an empty token exactly where the reply said this
+# deployment issues none (#369), so the emptiness of that one field is
+# what tells the two apart, and it is read here rather than by asking the
+# reply a second question. The value is never printed either way.
+TOKEN_ISSUED = "device token: issued, and its value is never printed"
+
+NO_TOKEN_ISSUED = (
+    "device token: none, and none is needed: that deployment issues no device tokens, "
+    "which is what turning device authentication off means on the wire"
+)
+
+# What a board that was handed neither a token nor a code is told.
+#
+# Enumerated from the decision sites that produce such a reply rather
+# than from the sentence this replaced: `ota/reply.py` withholds the
+# token whenever nothing this deployment serves resolves the board, and
+# `onboarding/unbound.py` withholds the code for four separate reasons,
+# one of which is that the deployment could not read its own record of
+# what is bound and would not mint a claim ticket off a stale answer.
+#
+# The last reading is not a configuration at all. A server new enough to
+# say why a token is empty never reaches this sentence for a board it
+# admits (#369); one built before it answers an admitted board on a
+# deployment that issues no tokens with exactly these bytes.
+MAY_NOT_SPEAK = (
+    f"It was issued no token and offered no activation code, which is what five "
+    f"readings look like from here: onboarding is turned off on that deployment and "
+    f"nothing resolves this MAC; or this MAC, or that deployment's default_agent, names "
+    f"an agent it is not serving yet, which `{PROGRAM} apply` installs; or the table of "
+    f"boards waiting to be claimed would not take another one; or that deployment could "
+    f"not read its own record of what is bound, so it offered no code rather than one "
+    f"for a board somebody has already claimed; or it issues no device tokens at all and "
+    f"is too old to say so, which a newer one says outright."
+)
+
 NOT_ADMITTED_AFTER_CLAIM = (
     f"this board was claimed and the activation poll said it was activated, and the "
-    f"check-in after it did not hand this board a token. Nothing here can go on from "
-    f"that: read what the deployment says about the MAC with "
-    f"`{PROGRAM} device show <mac>`."
+    f"check-in after it admitted nothing: no token, and no word saying none was needed. "
+    f"Nothing here can go on from that: read what the deployment says about the MAC with "
+    f"`{PROGRAM} device show <mac>`. One reading is not about the binding at all: a "
+    f"deployment that issues no device tokens and is too old to say so answers a "
+    f"just-claimed board in exactly these bytes."
 )
 
 
@@ -5557,11 +5596,13 @@ def _claimed(
     Check in and read a code; claim it through the act the grammar
     already has; poll where a waiting board polls; and check in AGAIN.
     The fourth step is the one that makes the other three worth anything:
-    an activating check-in's token is empty and the poll route answers a
-    status, so the only thing that mints a token is a check-in reply. A
-    socket opened with the token from step one would be refused at the
-    handshake with no_token, which is the confusion
-    `docs/xiaozhi-notes.md` warns about from the other side.
+    a board showing a code is not admitted, and the poll route answers a
+    status rather than a configuration, so the only thing that admits
+    this board is a check-in reply. A socket opened on what step one
+    handed back would be presenting the empty token an activating reply
+    carries and would be refused at the handshake with no_token, which is
+    the confusion `docs/xiaozhi-notes.md` warns about from the other
+    side.
 
     The same MAC and the same client id cross all four requests, because
     the token is signed for the two of them together.
@@ -5605,8 +5646,10 @@ RUN_HELP = (
 # and cannot have one, so the same states are a refusal here.
 CANNOT_CONVERSE = (
     "this board is not admitted, so there is no conversation to hold. Run "
-    f"`{PROGRAM} simulator check-in` against the same address to see which of the states "
-    f"it is in, and pass --claim <agent> to bind it."
+    f"`{PROGRAM} simulator check-in` against the same address to see which state it is "
+    f"in and what that state means. If it is showing an activation code, --claim <agent> "
+    f"binds the board showing one; if it is not, a claim has nothing to address and the "
+    f"check-in's own answer is where to start."
 )
 
 
@@ -5616,7 +5659,10 @@ def _simulator_run(args: Invocation) -> None:
     Everything before the socket is `check-in`'s, exactly: the same
     endpoint, the same identity, the same four-step ceremony behind
     --claim. The token and the websocket address this opens with are the
-    LAST check-in reply's, which is the only thing that mints either.
+    LAST check-in reply's, which is the only reply that admits anything.
+    That token is empty where the deployment issues none, which is an
+    admission the reply states and this half reads (#369) rather than a
+    board that may not speak.
 
     Everything this command needs of its own INSTALLATION is settled
     before anything about the arguments, and both are settled before
@@ -5739,7 +5785,7 @@ def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> Non
     if isinstance(state, board.Admitted):
         print(
             f"{device_endpoint.SUPPLIED_ENDPOINT} answered, and this board is admitted.\n"
-            f"device token: issued, and its value is never printed\n"
+            f"{TOKEN_ISSUED if state.token else NO_TOKEN_ISSUED}\n"
             f"websocket: {device_endpoint.REPORTED_WEBSOCKET}, which is not printed "
             f"either: it is what a token would be sent to\n"
             f"protocol version: {state.protocol_version}\n"
@@ -5748,11 +5794,7 @@ def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> Non
         return
     print(
         f"{device_endpoint.SUPPLIED_ENDPOINT} answered, and this board may not speak.\n"
-        f"It was issued no token and offered no activation code, which is what three "
-        f"configurations look like from here: onboarding is turned off on that "
-        f"deployment and nothing resolves this MAC; or this MAC is bound to an agent "
-        f"that deployment is not serving yet, which `{PROGRAM} apply` installs; or the "
-        f"table of boards waiting to be claimed would not take another one.\n"
+        f"{MAY_NOT_SPEAK}\n"
         f"{_firmware(state.firmware)}"
     )
 

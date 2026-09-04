@@ -2491,8 +2491,8 @@ Options:
                  02:00:00:00:00:01, whose leading octet is the locally-
                  administered bit; a second board is 02:00:00:00:00:02)
   --claim AGENT  bind this board to an agent through the configuration API and
-                 check in again to be issued a token; repeat the option for
-                 several agents (default: print the code and the command to run)
+                 check in again to be admitted; repeat the option for several
+                 agents (default: print the code and the command to run)
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
@@ -2624,8 +2624,8 @@ Options:
                  02:00:00:00:00:01, whose leading octet is the locally-
                  administered bit; a second board is 02:00:00:00:00:02)
   --claim AGENT  bind this board to an agent through the configuration API and
-                 check in again to be issued a token; repeat the option for
-                 several agents (default: print the code and the command to run)
+                 check in again to be admitted; repeat the option for several
+                 agents (default: print the code and the command to run)
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
