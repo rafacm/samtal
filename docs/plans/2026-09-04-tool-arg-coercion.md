@@ -71,17 +71,25 @@ the record's column comment and the API description both promise
 promise is worth keeping: the model emitting a string where the
 schema says integer is the very fact an operator diagnosing a
 marginal model needs to see, and it is the fact #383 itself was
-diagnosed from. So the coercion happens on the way out instead:
-`_tool_loop` builds a published-name-to-schema mapping from the
-snapshot it already holds, threads it through `_run_tools` into
-`_run_one`, and `_run_one` dispatches a claim carrying the
-conformed arguments (`dataclasses.replace` on the frozen record)
-while the reservation, the record, the events and the working
-history keep the original. The surfaces then mean: record, API and
-history show what the model said; the wire to the device, the MCP
-server or the builtin receives what the schema declares. The new
-module's docstring states that split, because it is the one fact a
-reader of either surface needs.
+diagnosed from. So the coercion happens on the way out instead,
+and at the one point every execution path shares: after
+`_reserve_tools` has filed the originals and the working-history
+append has captured them, and before `_run_tools` branches into
+the move tools (`_moves`/`_move`, which never reach `_run_one`)
+and ordinary dispatch, `_tool_loop` derives execution-only
+`ToolCall` copies (`dataclasses.replace`, arguments run through
+the coercion against the snapshot's schema for that published
+name) and hands those to `_run_tools`. `_run_one` keeps its
+`(call, slot)` signature, so the direct-call reload-routing pin at
+`test_session_tools.py:963` stays green; at dispatch it replaces
+only the reserved claim's arguments with the execution copy's
+(`dataclasses.replace` on the frozen record) while the
+reservation, the record, the events and the working history keep
+the original. The surfaces then mean: record, API and history show
+what the model said; the wire to the device, the MCP server or the
+builtin, and the move tools' own reads, receive what the schema
+declares. The new module's docstring states that split, because it
+is the one fact a reader of either surface needs.
 
 **One leaf module, `tools/arguments.py`, and `ToolSource` stays
 four members wide.** The design guide holds the four-member
@@ -159,8 +167,10 @@ today and stays that way; coercion runs only on a dict.
   through. Imports nothing beyond the stdlib.
 - `runtime/pipeline.py`: `_tool_loop` builds
   `{tool.name: tool.input_schema}` from the snapshot it already
-  takes; `_run_tools` and `_run_one` carry the mapping; `_run_one`
-  dispatches the conformed claim. No new field on
+  takes and derives the execution-only call copies at the one
+  shared point described above; `_run_tools` and `_run_one` keep
+  their signatures, and `_run_one` dispatches the reserved claim
+  with the execution copy's arguments. No new field on
   `PipelineRuntime`; the mapping lives and dies with the loop the
   snapshot lives and dies with.
 
@@ -263,6 +273,13 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    `_run_tools` branches; `_run_one` then replaces only the
    reserved claim's arguments for dispatch, without gaining a
    schema parameter.
+
+   *Resolution*: accepted in full; the site moves exactly there.
+   Execution-only copies are derived after the reservation and the
+   working-history append and before `_run_tools` branches, so the
+   move tools are covered, `_run_one` keeps its `(call, slot)`
+   signature, the direct-call pin stays green, and the dispatch
+   replaces only the reserved claim's arguments.
 
 3. **P2: rejecting all observability contradicts the
    decision-reason rule.** A vinga-owned decision exposes a closed
