@@ -81,10 +81,15 @@ message spelling.** `every_declared_message_is_classified` selects
 so a prose row can begin with any words at all and an invented
 message row must declare itself to be counted, which is the
 by-construction matching the issue asks for. The read-side-closed
-case filters by kind first and then reads the direction off the
-spelling `named_message` owns; that is no longer a parse of
-English, because the spelling of a message row's `what` has exactly
-one author and the test says so where it splits. The two bite
+case filters by kind first and then still reads the direction off
+the `what`, and the plan says so plainly rather than claiming
+otherwise: what moves entirely to `kind` is the message-versus-
+prose classification, while the direction extraction remains
+string inspection of the spelling `named_message` owns, done
+deliberately and commented as such at the split. A direction field
+on `Capability` was considered and rejected: it would widen the
+row beyond what the issue asks for the sake of one test that
+already has a single-author spelling to read. The two bite
 cases that select or append message rows by prefix move to the
 kind field, and the invented-entry bite declares its row
 `MESSAGE`, with a comment noting that under declared kinds the
@@ -122,7 +127,9 @@ pointing at this plan as the removal.
 No new module. `simulator/capabilities.py` deepens: the table's
 own docstring already claims everything here is declared, and the
 kind makes the last derived fact declared too. The test file stops
-knowing how message rows are worded.
+classifying rows by their wording; the one place it still inspects
+a message row's spelling reads the single-author `named_message`
+form and says so.
 
 ## Tests
 
@@ -160,7 +167,7 @@ knowing how message rows are worded.
   dated pointer in the 2026-08-25 implementation doc; a CHANGELOG
   entry; the implementation-doc section. Design footprint: deepens
   `Capability` (a row states its own classification, and the pins
-  stop parsing English); no new module, no interface widening
+  stop classifying by English); no new module, no interface widening
   beyond the one declared fact. Documentation footprint:
   `docs/reference/cli.md` stays byte-identical (asserted by its
   freshness pin); the census manifest regenerates through its
@@ -222,3 +229,8 @@ about 6 minutes. Verdict: ready after the P1/P2 amendments.
    `kind`, while the read-side case deliberately keeps inspecting
    the `named_message`-owned spelling; do not add a direction
    field, which would widen `Capability` beyond the issue.
+
+   *Resolution*: accepted in full; the claims are narrowed
+   throughout (classification moves to `kind`, the direction
+   extraction stays and says so where it splits), and the
+   direction field is recorded as considered and rejected.
