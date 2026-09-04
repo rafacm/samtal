@@ -225,10 +225,13 @@ prove it with a planted sentinel.
   case: a device tool declared with an `integer` property (the
   fixture in `tests/support/device_tools.py` grows a typed tool
   beside `STATUS`, which has no schema), called by the scripted
-  model with a string value; the assertion reads the wire payload
-  the fake device received (`40`, an `int`) and the turn record's
-  claim (`"40"`, the `str`), pinning both halves of the split in
-  one test. A companion case drives a value coercion cannot help
+  model with a string value; the assertions pin every surface of
+  the split where it is actually read, never the in-flight
+  accumulator: the wire payload the fake device received (`40`, an
+  `int`); the completed `TurnRecord` handed through the
+  recording-session infrastructure, whose invocation carries
+  `"40"` (the `str`); and the second scripted round's request,
+  whose history carries the original `ToolCall` unchanged. A companion case drives a value coercion cannot help
   (`"a lot"`), with the fake device scripted to answer the
   firmware-style refusal rather than its permissive default (which
   succeeds on anything and would let a guessed conversion pass),
@@ -373,6 +376,11 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    recording-session infrastructure, assert the completed
    `TurnRecord` carries `"40"`, and assert the second scripted
    round receives the original `ToolCall` unchanged.
+
+   *Resolution*: accepted in full; the session case now pins the
+   completed `TurnRecord` through the recording-session
+   infrastructure and the next round's request history, not the
+   in-flight accumulator.
 
 7. **P2: the typed fixture proposal duplicates an existing schema
    fixture.** The exact integer-typed volume tool already exists
