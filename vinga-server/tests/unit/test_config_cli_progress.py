@@ -184,6 +184,28 @@ def test_the_line_repeats_nothing_the_caller_typed(run, document: Path) -> None:
     assert str(document) not in err
 
 
+def test_a_writer_that_will_not_start_changes_nothing_about_the_command(
+    run, document: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An interpreter out of thread stacks raises from `start`, and the
+    boundary above this catches two exception classes, neither of them
+    that one. Unhandled it would be a traceback, a line left standing on
+    the screen, and a request never made because a progress line could
+    not be drawn. So it is handled: the line drawn on the way in comes
+    back off, and the command runs and answers exactly as it does with a
+    writer behind it."""
+    argv = _argv("import", document)
+    _captured(run, argv, terminal=False)
+    expected = _captured(run, argv, terminal=False)
+    monkeypatch.setattr(cli, "threading", _NoThreads)
+
+    printed, err = _captured(run, argv, terminal=True)
+
+    assert printed == expected[0]
+    assert cli.PROGRESS_PHASE not in _after_the_line(err)
+    assert _after_the_line(err) == expected[1]
+
+
 def test_a_refusal_arrives_whole_after_the_line_has_gone(run) -> None:
     """The wait ends in a refusal as readily as in an answer, and the
     refusal is the one thing the command still has to say. So the erase
@@ -306,6 +328,29 @@ class _Refusing(io.StringIO):
         with self.lock:
             self.attempts += 1
         raise ValueError("I/O operation on closed file")
+
+
+class _Unstartable:
+    """A thread an interpreter out of thread stacks will not start."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def start(self) -> None:
+        raise RuntimeError("can't start new thread")
+
+
+class _NoThreads:
+    """The threading module as that interpreter presents it.
+
+    Substituted for the name the CLI module holds rather than for the
+    module itself, so it is this affordance that cannot start a thread
+    and not the test client serving the request underneath it.
+    """
+
+    Event = threading.Event
+    Lock = threading.Lock
+    Thread = _Unstartable
 
 
 @contextlib.contextmanager

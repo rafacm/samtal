@@ -1231,11 +1231,11 @@ vinga-server/src/vinga_server/config/api.py:562  respell  vinga-server config ap
 vinga-server/src/vinga_server/config/api.py:563  respell  vinga-server config list
 vinga-server/src/vinga_server/config/cli.py:633  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:795  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:3140  respell  vinga apply
-vinga-server/src/vinga_server/config/cli.py:3367  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:3395  respell  config list
-vinga-server/src/vinga_server/config/cli.py:7967  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:7967  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:3157  respell  vinga apply
+vinga-server/src/vinga_server/config/cli.py:3384  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:3412  respell  config list
+vinga-server/src/vinga_server/config/cli.py:7984  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:7984  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:199  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:589  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:173  respell  vinga apply
