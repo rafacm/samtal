@@ -121,6 +121,7 @@ def device_session(
     conversations: Any = None,
     generations: Generations | None = None,
     threads: Any = None,
+    fallbacks: dict[str, Any] | None = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -150,7 +151,10 @@ def device_session(
     `fillers` are the clips that world holds, since a session binds them
     off its generation rather than being handed them: a suite that wants
     a masked session says which clips the world has, and a suite that
-    hands its own holder in has already said.
+    hands its own holder in has already said. `fallbacks` is the other
+    cache on the same generation and is passed the same way; absent is a
+    world nothing was synthesized for, where a failed reply is the
+    silence it was before the phrase existed.
 
     `memory` is the one collaborator with a default rather than an
     absence, because there is no deployment without a memory store
@@ -162,6 +166,7 @@ def device_session(
             config,
             fillers=fillers,
             providers=providers if providers is not None else agent_providers(config),
+            fallbacks=fallbacks,
         )
     factory = bespoke_runtime_factory(
         generations,
@@ -210,6 +215,7 @@ def session_for(
     stages: dict[str, Any] | None = None,
     generations: Generations | None = None,
     threads: Any = None,
+    fallbacks: dict[str, Any] | None = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -226,6 +232,7 @@ def session_for(
         conversations,
         generations,
         threads,
+        fallbacks,
     )
 
 
@@ -384,11 +391,18 @@ def listening_in_realtime(session: DeviceSession) -> None:
 
 
 async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | None = None):
-    """A session with its filler cache built the way boot builds it, on
-    a recording socket, listening in realtime so the after-reply state
-    is assertable."""
+    """A session with its cached speech built the way boot builds it,
+    both kinds, on a recording socket, listening in realtime so the
+    after-reply state is assertable.
+
+    Both kinds because the boot builds both: a masked session whose
+    world had no failure phrase would be a world this server never
+    serves, and the two interact (a reply that fails while a clip is
+    sounding settles the clip before it speaks)."""
     fillers = await build_agent_fillers(config, built_world(config).agents)
-    session = session_for(config, mac, scripts, fillers=fillers.clips)
+    session = session_for(
+        config, mac, scripts, fillers=fillers.clips, fallbacks=fillers.fallbacks
+    )
     session.websocket = cast(Any, RecordingSocket())
     listening_in_realtime(session)
     return session

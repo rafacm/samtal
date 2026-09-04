@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 63 events in 89 variants. What was
+This document is that surface written down: 64 events in 90 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -229,6 +229,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `barge_in_merged` | `vinga_server.session` | INFO | 1 |
 | `filler_skipped` | `vinga_server.session` | INFO | 2 |
 | `filler_played` | `vinga_server.session` | INFO | 1 |
+| `reply_fallback` | `vinga_server.session` | INFO | 1 |
 | `ota_check` | `vinga_server.ota` | INFO, WARNING | 4 |
 | `activation_not_offered` | `vinga_server.ota` | WARNING | 2 |
 | `activation_complete` | `vinga_server.ota` | INFO | 1 |
@@ -1176,6 +1177,32 @@ session %s: no reply audio after %d ms, playing filler %d
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `delay_ms` | `INT` | yes | no |  | Measured, from the transcription to the fire. |
 | `phrase_index` | `COUNT` | yes | no |  |  |
+
+### `reply_fallback`
+
+A turn said the agent's fixed fallback phrase instead of an answer, and why.
+What it says is configuration and is never on the record; what is, is which of
+the reasons happened and whether the phrase was heard as well as shown.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: the reply failed, so this agent's fallback phrase went out
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `reason` | `TOKEN` | yes | no | one of: `reply_failed` |  |
+| `audio` | `BOOL` | yes | no |  | Whether the phrase was heard as well as shown. False is a turn that degraded to the display alone, because the phrase would not synthesize when this world was built; the `fallback_degraded` record on the build channel says which agent and why. The phrase itself is configuration and is on neither record. |
 
 ### `ota_check`
 

@@ -79,6 +79,7 @@ from vinga_server.events.values import (
     EventName,
     EventValue,
     EventValueError,
+    FallbackReason,
     FillerSkip,
     FirmwareVersion,
     Flag,
@@ -1827,6 +1828,40 @@ class FillerPlayed(Variant):
     phrase_index: Count = value()
 
 
+@dataclass(frozen=True)
+class ReplyFailedFallback(Variant):
+    """A reply failed terminally, so the agent's fixed phrase went out
+    in place of the silence that used to be the whole of it."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: the reply failed, so this agent's fallback phrase went out"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    reason: FallbackReason = value(fixed=FallbackReason.REPLY_FAILED)
+    audio: Flag = value(
+        note=(
+            "Whether the phrase was heard as well as shown. False is a "
+            "turn that degraded to the display alone, because the "
+            "phrase would not synthesize when this world was built; the "
+            "`fallback_degraded` record on the build channel says which "
+            "agent and why. The phrase itself is configuration and is "
+            "on neither record."
+        )
+    )
+
+
 SESSION_REJECTED = declare(
     "session_rejected",
     note=(
@@ -1976,6 +2011,17 @@ FILLER_PLAYED = declare(
         "wait. Its first frame is the turn's `speaking_started`."
     ),
     variants=(FillerPlayed,),
+)
+
+REPLY_FALLBACK = declare(
+    "reply_fallback",
+    note=(
+        "A turn said the agent's fixed fallback phrase instead of an "
+        "answer, and why. What it says is configuration and is never on "
+        "the record; what is, is which of the reasons happened and "
+        "whether the phrase was heard as well as shown."
+    ),
+    variants=(ReplyFailedFallback,),
 )
 
 

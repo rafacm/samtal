@@ -41,6 +41,7 @@ import functools
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Any
 
 from vinga_server.audio.resample import Resampler
@@ -83,7 +84,7 @@ from vinga_server.events.values import (
     PromptSources,
     Real,
 )
-from vinga_server.filler import FillerClips
+from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.generation import Generation, Generations
 from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import (
@@ -455,11 +456,19 @@ class PipelineRuntime:
     Two of the things it used to do are now modules of their own. Who
     holds the floor is `TurnTaking` ([turntaking.py](turntaking.py)),
     which reaches back into four of this class's methods and nothing
-    else; the latency mask is `FillerRunner`
+    else; this world's cached speech is `FillerRunner`
     ([filler_runner.py](filler_runner.py)), which reads the floor with
     two questions and never writes it. What stays here is the
     orchestration: the reply task, the conversation history, the tool
     loop, agent handover, and the provider observability.
+
+    The runner owns two verbs and this class uses both: the reply path
+    arms the latency mask at the transcription and settles it at the
+    end, and the failure arm asks it to say the agent's fixed phrase.
+    Neither adds state here. What the phrase needs is a read of the
+    world's cache and the output handle, both of which are the runner's
+    already, so a failed turn speaks without this class learning
+    anything new to remember (#384).
 
     The mutable state that crosses those responsibilities, listed
     because it is what a reader has to hold in mind at once (#141):
@@ -520,6 +529,7 @@ class PipelineRuntime:
         memory: MemoryStore,
         fillers: Mapping[str, FillerClips],
         agents: Sequence[str],
+        fallbacks: Mapping[str, FallbackClip] = MappingProxyType({}),
         recorder: TurnRecorder | None = None,
         threads: resumption.ThreadReads | None = None,
         purge: Callable[[Sequence[str]], object] | None = None,
@@ -647,17 +657,19 @@ class PipelineRuntime:
         # conversation history stay on this side of the seam.
         self._turntaking = TurnTaking(events, output, self._server, self)
         self._reply_task: asyncio.Task[None] | None = None
-        # This turn's latency mask, if any agent this device is bound to
-        # has one. It reads the floor with two questions and answers it
-        # nothing, so the one field the two clusters share (whether the
-        # outgoing frames are paused) has one writer and one reader and
-        # crosses as a question.
+        # This world's cached speech, bound at construction: this turn's
+        # latency mask if any agent this device is bound to has one, and
+        # the phrase a failed reply says. It reads the floor with two
+        # questions and answers it nothing, so the one field the two
+        # clusters share (whether the outgoing frames are paused) has one
+        # writer and one reader and crosses as a question.
         self._filler = FillerRunner(
             events,
             output,
             fillers,
             agents,
             self._turntaking,
+            fallbacks,
         )
         self._agents = list(agents)
         # The three places a tool can come from, asked in the order the
@@ -1344,6 +1356,26 @@ class PipelineRuntime:
             logger.error(
                 "session %s: reply failed: %s", self.session_id, type(exc).__name__
             )
+            # And the user is told, which they were not before (#384): a
+            # terminally failed reply used to be silence, and from the
+            # couch a broken pipeline was indistinguishable from a slow
+            # one. Only this arm says anything. `DeviceGone` above has
+            # nobody to tell, and a cancellation means the user is
+            # talking, so speaking into either would be worse than the
+            # silence.
+            #
+            # After the log, so the reason an operator reads is written
+            # down before anything can go wrong with saying it; after
+            # the filler settles, so a clip still sounding is not talked
+            # over and the shared encoder is not interleaved. The
+            # `finally`'s own settle stays and is idempotent.
+            #
+            # `speak_fallback` raises nothing but `CancelledError` by
+            # contract, so the `finally` below still runs and the
+            # closing `tts stop` still goes out, which in auto mode is
+            # what re-arms the device's listening.
+            await self._filler.settle()
+            await self._filler.speak_fallback()
         finally:
             # Before the closing tts stop: an unfired timer is stood
             # down, and a clip already sounding finishes rather than
@@ -2623,6 +2655,7 @@ def bespoke_runtime_factory(
             memory,
             generation.fillers,
             agents,
+            generation.fallbacks,
             None if conversations is None else SessionTurns(conversations, events.session_id),
             threads,
             memory.purge_threads if conversations is None else None,

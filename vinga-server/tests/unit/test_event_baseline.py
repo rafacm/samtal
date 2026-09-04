@@ -101,11 +101,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     acts for no agent at all (#83), eighty-six since a handshake
     refused by a shutdown stopped being reported as a full server
     (#318), and eighty-seven since a call whose argument types this
-    server corrected says so (#383), and eighty-eight since a failure
-    phrase that would not synthesize says so too (#384)."""
+    server corrected says so (#383), and eighty-nine since a reply that
+    failed says so out loud and a failure phrase that would not
+    synthesize says so too (#384)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 88
+    assert len(set(claimed)) == len(claimed) == 89
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -235,9 +236,12 @@ def test_every_catalog_variant_on_a_scoped_channel_is_produced(
 #
 # These are the untyped diagnostics that survived #210: per-utterance
 # and per-listen lines a session writes, the filler cache's own line,
-# the ASR echo retry, the MCP guidance line, and the reply-failed line
-# beside the typed `provider_failed`. They are not events, they carry no
-# payload, and no tap is offered them.
+# the ASR echo retry, the MCP guidance line, and the two lines a broken
+# reply writes: the reply-failed line beside the typed `provider_failed`,
+# and the one for a fallback phrase whose send then broke as well. The
+# fallback's line is its own rather than the filler's, because the
+# filler's template says filler and reusing it would be semantic drift.
+# They are not events, they carry no payload, and no tap is offered them.
 #
 # The set is closed here because nothing else closes it any more. The
 # static walk that read the scoped modules for emit sites retired with
@@ -253,6 +257,7 @@ UNTYPED: frozenset[tuple[str, str]] = frozenset(
         ("vinga_server.session", "session %s: listening (%s mode)"),
         ("vinga_server.session", "session %s: utterance of %.1f s"),
         ("vinga_server.session", "session %s: reply failed: %s"),
+        ("vinga_server.session", "session %s: fallback playback failed: %s"),
         ("vinga_server.filler", "agent %s: cached %d filler clip(s) in its own voice"),
         (
             "vinga_server.providers.openai_asr",
@@ -616,6 +621,20 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             "FillerSkippedForBargeIn",
             (
                 "agent",
+                "conversation",
+                "device",
+                "event",
+                "reason",
+                "session",
+            ),
+        ),
+    ),
+    "vinga_server.runtime.filler_runner:FillerRunner.speak_fallback #1": (
+        (
+            "ReplyFailedFallback",
+            (
+                "agent",
+                "audio",
                 "conversation",
                 "device",
                 "event",

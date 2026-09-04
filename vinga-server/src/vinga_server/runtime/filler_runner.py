@@ -1,29 +1,44 @@
-"""This session's latency mask: one timer per turn, and the clip it
-plays when the reply is late.
+"""This session's cached speech: the latency mask it plays when a reply
+is late, and the phrase it says when one fails.
 
 The sibling of [`filler.py`](../filler.py), and the two are told apart
-by when they run: that module builds the clips once at boot,
+by when they run: that module builds both kinds of clip once at boot,
 synthesizing each agent's phrases in its own voice and caching them as
 PCM, while this one is the per-session runner that decides whether a
-cached clip is played at all. Nothing here synthesizes anything, and
+cached clip goes out at all. Nothing here synthesizes anything, and
 nothing there knows a session exists.
 
-The silence between the end of an utterance and the first audio of a
-reply is where a voice assistant feels dead (#48), and a filled pause is
-how a human holds that gap. The timer is armed at the transcription; if
-the reply has not started speaking by the time it expires, the active
-agent's clip goes out through the device's normal paced path and the
-reply's first real sentence queues behind its tail.
+One class for both, because they are one act with two triggers: taking
+a clip from this world's cache, resampling it, encoding it in one batch
+and sending it down the device's paced path. Everything that act needs
+(the output handle, the read-only clip views, the batching rule that
+keeps the shared encoder honest) is held here once, and a second owner
+of paced clip playback would be a second copy of the rule the risk
+section of #74 exists about.
+
+They differ in what triggers them and in what they are. The silence
+between the end of an utterance and the first audio of a reply is where
+a voice assistant feels dead (#48), and a filled pause is how a human
+holds that gap: a timer armed at the transcription, and a clip if the
+reply has not started speaking by the time it expires. That is a noise
+that buys time, so it announces nothing and stays out of the transcript.
+The failure phrase is asked for rather than timed, by the reply body's
+own failure arm, and it carries information the user needs, so it goes
+to the display as well as the speaker (#384). It is still not something
+the model said, and it enters no transcript either.
 
 The mask yields to whoever holds the floor, which is read as two
 questions and answered with nothing. A user still speaking, or a
 barge-in being confirmed, stands the timer down, because a mask that
-talks over the user is worse than no mask at all.
+talks over the user is worse than no mask at all. The failure phrase
+asks no such question: it is said after the reply is over, when nobody
+is holding anything.
 """
 
 import asyncio
 import contextlib
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from vinga_server.audio.resample import Resampler
@@ -33,9 +48,16 @@ from vinga_server.events.catalog import (
     FillerPlayed,
     FillerSkippedForBargeIn,
     FillerSkippedForSpeech,
+    ReplyFailedFallback,
 )
-from vinga_server.events.values import ConversationId, Count, Identifier, Whole
-from vinga_server.filler import FillerClips
+from vinga_server.events.values import (
+    ConversationId,
+    Count,
+    Flag,
+    Identifier,
+    Whole,
+)
+from vinga_server.filler import FallbackClip, FillerClips
 
 if TYPE_CHECKING:
     # Named for the annotation alone: the runner never needs the floor
@@ -45,7 +67,8 @@ if TYPE_CHECKING:
 
 
 class FillerRunner:
-    """One turn's latency mask at a time, for the life of one connection.
+    """One turn's latency mask at a time, and its failure phrase, for
+    the life of one connection.
 
     `fillers` is the clip cache keyed by agent, read off the generation
     this session bound and never asked for again: a reload that
@@ -56,6 +79,13 @@ class FillerRunner:
     carries, so a test that hands it two entries need not build a world.
     `agents` is what the device is bound to, which is what the arming
     rule asks rather than only the agent talking now.
+
+    `fallbacks` is the other cache off the same generation, read the
+    same way and bound at the same instant: what a failed reply says is
+    the phrase this conversation opened with, whatever a reload has
+    synthesized since. It defaults to empty, which is honest for every
+    caller that is not about failure phrases and is what a world built
+    before anything was synthesized holds.
 
     `turn` is whoever is deciding the floor, and the fire-time
     stand-down asks it two things: how much of what was fed the
@@ -73,11 +103,13 @@ class FillerRunner:
         fillers: Mapping[str, FillerClips],
         agents: Sequence[str],
         turn: "TurnTaking",
+        fallbacks: Mapping[str, FallbackClip] = MappingProxyType({}),
     ) -> None:
         self._events = events
         self.session_id = events.session_id
         self._output = output
         self._fillers = fillers
+        self._fallbacks = fallbacks
         self._agents = list(agents)
         self._turn = turn
         # One timer per turn, armed at the transcription:
@@ -290,6 +322,87 @@ class FillerRunner:
         with contextlib.suppress(asyncio.CancelledError):
             await task
         self._filler_sounding = False
+
+    async def speak_fallback(self) -> None:
+        """Say the active agent's fixed failure phrase, on the display
+        and, where a clip was cached, out loud.
+
+        Here rather than in the reply body because this class already
+        holds all three things it takes: the output handle, the
+        read-only view of what was synthesized for this world, and the
+        paced recipe below that a clip has to go out through. The reply
+        body asks; nothing about playing a cached clip moves.
+
+        The phrase goes to the display as well as the speaker, which is
+        the one place this differs from the filler above and the
+        difference is deliberate. A filled pause is a noise that buys
+        time and sends no `sentence_start` anywhere. This carries
+        information the user needs, and `sentence_started` is the only
+        display the protocol has. It is still not something the model
+        said, so nothing here touches the reply's spoken sentences, the
+        conversation history or the stored turn: what says it happened
+        is the record below.
+
+        Nothing at all where the agent has no phrase, which is an agent
+        whose section is off and a world built before anything was
+        synthesized alike: an entry that is present is one to say, which
+        is the same rule the clip lookup above follows. A phrase whose
+        synthesis failed is present without audio, and the turn is shown
+        and not heard.
+
+        The contract is the fire path's, exactly: `CancelledError`
+        propagates, because swallowing one would consume a barge-in or
+        an abort and the reply's own `finally` sends the closing
+        `tts stop` either way; a device that went away is swallowed,
+        since there is nobody left to tell; anything else is a bug in
+        this process, reported by class name and swallowed, because a
+        broken notice must not cost the turn the `tts stop` that re-arms
+        a device's listening.
+        """
+        cached = self._fallbacks.get(self._events.agent or "")
+        if cached is None:
+            return
+        self._events.emit(
+            lambda: ReplyFailedFallback(
+                agent=Identifier(self._events.agent),
+                conversation=ConversationId(self._events.conversation),
+                audio=Flag(cached.clip is not None),
+            )
+        )
+        failed: str | None = None
+        try:
+            await self._output.begin_speaking()
+            await self._output.sentence_started(cached.phrase)
+            if cached.clip is not None:
+                resampler = Resampler(cached.sample_rate, self._output.output_sample_rate)
+                # Three encoder calls with no await between them, for
+                # the reason `_fire` gives at length: the reply task
+                # feeds the same encoder, and a flush split off after an
+                # await could carry out audio that is not this clip's.
+                batch = (
+                    self._output.encode_audio(resampler.process(cached.clip))
+                    + self._output.encode_audio(resampler.flush())
+                    + self._output.flush_encoder()
+                )
+                await self._output.send_audio(batch)
+        except DeviceGone:
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # The class name and nothing else, for the reason the fire
+            # path gives: a traceback rendered onto the retained log
+            # prints the whole chain behind it, and this runs in the arm
+            # that catches whatever a provider raised.
+            failed = type(exc).__name__
+        # Reported out here rather than in the arm, for the reason the
+        # fire path gives: inside it the swallowed exception is still
+        # the active one, and a logging call that itself failed would
+        # escape carrying it.
+        if failed is not None:
+            logger.error(
+                "session %s: fallback playback failed: %s", self.session_id, failed
+            )
 
     def abandon(self) -> None:
         """The reply this mask belongs to is being cancelled, and the
