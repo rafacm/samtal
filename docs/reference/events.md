@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 64 events in 90 variants. What was
+This document is that surface written down: 65 events in 94 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -224,12 +224,13 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `provider_failed` | `vinga_server.session` | WARNING | 1 |
 | `tool_call` | `vinga_server.session` | INFO | 3 |
 | `tool_arguments_coerced` | `vinga_server.session` | INFO | 1 |
+| `sentence_withheld` | `vinga_server.session` | INFO | 3 |
 | `barge_in` | `vinga_server.session` | INFO | 1 |
 | `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
 | `barge_in_merged` | `vinga_server.session` | INFO | 1 |
 | `filler_skipped` | `vinga_server.session` | INFO | 2 |
 | `filler_played` | `vinga_server.session` | INFO | 1 |
-| `reply_fallback` | `vinga_server.session` | INFO | 1 |
+| `reply_fallback` | `vinga_server.session` | INFO | 2 |
 | `ota_check` | `vinga_server.ota` | INFO, WARNING | 4 |
 | `activation_not_offered` | `vinga_server.ota` | WARNING | 2 |
 | `activation_complete` | `vinga_server.ota` | INFO | 1 |
@@ -1004,6 +1005,90 @@ session %s: %s tool%s was called with %d argument(s) whose types the schema decl
 | `tool` | `IDENTIFIER` | no | no |  | Present for a builtin, the only tool names this server authors. |
 | `entry` | `IDENTIFIER` | no | no |  | Present for an MCP call: the configured entry, never the far side's tool name. |
 
+### `sentence_withheld`
+
+A sentence of a reply was shaped like a call to a tool this session offered,
+so it was dropped instead of spoken. How long it was and which tool it was
+shaped like, under the naming policy `tool_call` follows; never a byte of the
+sentence itself.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: a sentence shaped like a call to a %s tool%s was not spoken (%d characters)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `source` (`TOKEN`) | no | one of: `builtin` |  |
+| 3 | `named` (`COMPOSED`) | no | the `quoted_tool_name` grammar |  |
+| 4 | `characters` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `source` | `TOKEN` | yes | no | one of: `builtin` |  |
+| `tool` | `IDENTIFIER` | yes | no |  | The only tool names this server authors. |
+| `characters` | `COUNT` | yes | no |  | How long the sentence was and never a byte of it. What was withheld is the model's own text about a tool it was offered, which is exactly the content this surface may not carry; the length is what tells a leaked call from a paragraph that happened to hold one. |
+
+#### Variant 2: `vinga_server.session` at INFO
+
+```text
+session %s: a sentence shaped like a call to a %s tool%s was not spoken (%d characters)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `source` (`TOKEN`) | no | one of: `mcp` |  |
+| 3 | `named` (`COMPOSED`) | no | the `from_entry` grammar |  |
+| 4 | `characters` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `source` | `TOKEN` | yes | no | one of: `mcp` |  |
+| `entry` | `IDENTIFIER` | yes | no |  | The configured entry, never the far side's tool name. |
+| `characters` | `COUNT` | yes | no |  | How long the sentence was and never a byte of it. |
+
+#### Variant 3: `vinga_server.session` at INFO
+
+A device tool's name is the board's vocabulary, so it is not named. `unknown`
+is also what a sentence carrying only arguments reports when they fit more
+than one offered tool: it is withheld because every reading of it is
+tool-shaped, and it names none of them because which one it was is exactly
+what could not be decided.
+
+```text
+session %s: a sentence shaped like a call to a %s tool%s was not spoken (%d characters)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `source` (`TOKEN`) | no | one of: `device`, `unknown` |  |
+| 3 | `named` (`COMPOSED`) | no | the `empty_fragment` grammar |  |
+| 4 | `characters` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
+| `characters` | `COUNT` | yes | no |  | How long the sentence was and never a byte of it. |
+
 ### `barge_in`
 
 Speech cuts a reply short.
@@ -1203,6 +1288,26 @@ session %s: the reply failed, so this agent's fallback phrase went out
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `reason` | `TOKEN` | yes | no | one of: `reply_failed` |  |
 | `audio` | `BOOL` | yes | no |  | Whether the phrase was heard as well as shown. False is a turn that degraded to the display alone, because the phrase would not synthesize when this world was built; the `fallback_degraded` record on the build channel says which agent and why. The phrase itself is configuration and is on neither record. |
+
+#### Variant 2: `vinga_server.session` at INFO
+
+```text
+session %s: the reply had nothing sayable left in it, so this agent's fallback phrase went out
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `reason` | `TOKEN` | yes | no | one of: `nothing_sayable` |  |
+| `audio` | `BOOL` | yes | no |  | Whether the phrase was heard as well as shown, exactly as its sibling reports it. |
 
 ### `ota_check`
 
