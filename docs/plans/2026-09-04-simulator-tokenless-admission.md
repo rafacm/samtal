@@ -105,10 +105,21 @@ conversation. A fifth state that behaves exactly like `Admitted`
 would fold nothing apart; decision 4's own argument for closed
 states cuts the other way here, and the state count in
 `capabilities.py`'s row stays a true sentence. The precedence's
-last step is amended: the field decides when it is present, and a
-missing field (an older server image, exactly the skew #386
-documents) falls back to today's token rule, so the simulator
-against an old image behaves as it does now rather than worse.
+last step is amended: the field decides when it is present and
+recognized, and a missing field (an older server image, exactly
+the skew #386 documents) falls back to today's token rule, so the
+simulator against an old image behaves as it does now rather than
+worse. The producer stays typed to the closed three-value set; the
+consumer models the field as a strict optional string and
+recognizes the known set at `read()`, because a `Literal` on the
+model would turn an unknown value into a malformed reply instead
+of an absent field. An unrecognized value is read as the field
+being absent, which is conservative compatibility with servers
+this simulator does not know, not a promise that a future
+empty-token admission mode survives the fallback (it would read
+`Unwelcome`, as today's rule says). The value is far-side bytes
+under the never-print rule: like the token and the URL, it reaches
+no output surface.
 A reply whose field contradicts what stands beside it is `Refused`
 as the contradictory replies already are, refused rather than
 resolved, and the matrix is stated whole: `"token"` with an empty
@@ -205,7 +216,10 @@ simulator's `read()` applies it, and no third place re-derives it.
   cases: `"token"` with an empty token, `"open"` and `"denied"`
   with a non-empty one, and an activation object beside `"open"`
   (the empty-token variant included) and beside `"token"`; an
-  unknown value falls back to the token rule. The existing
+  unknown value falls back to the token rule, and a
+  credential-shaped unknown value (a sentinel that must appear
+  nowhere) joins the existing four-surface no-leak inventory:
+  stdout, stderr, logs and exception chains. The existing
   `test_the_conversation_verb_refuses_a_board_that_may_not_speak`
   keeps its `unwelcome()` half by making that fixture an explicit
   `"denied"` (or leaving it field-less), and a new case beside it
@@ -383,6 +397,14 @@ read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
    four-surface no-leak inventory, and describe the fallback as
    conservative compatibility rather than support for future
    empty-token admission modes.
+
+   *Resolution*: accepted in full. The classification section now
+   states the producer/consumer typing split with its reason, the
+   fallback claim is softened to conservative compatibility with
+   the future-mode caveat spelled out, the value joins the
+   never-print rule beside the token and URL, and the test list
+   gains the credential-shaped sentinel across the four-surface
+   no-leak inventory.
 
 7. **P3: the fixture-preservation instructions contradict each
    other.** The plan says field-less fixture bodies stay unchanged
