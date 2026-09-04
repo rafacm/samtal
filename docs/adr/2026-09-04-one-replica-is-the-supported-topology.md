@@ -39,8 +39,9 @@ to its process:
   shared view.
 - **Providers and engines.** Startup-built singletons per process
   (see
-  [providers are stateless singletons](2026-08-04-providers-are-stateless-singletons.md)),
-  with model caches on a per-container volume.
+  [providers are stateless singletons](2026-08-04-providers-are-stateless-singletons.md)):
+  every process loads its own models into memory at startup, whatever
+  volume the downloaded weights are cached on.
 - **Runtime lifecycle.** Drain on SIGTERM is the process closing its
   own sessions; nothing hands a conversation to a peer.
 
