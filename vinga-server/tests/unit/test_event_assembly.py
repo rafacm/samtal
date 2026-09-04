@@ -105,13 +105,16 @@ UNREGISTERED = Stamped()
 
 
 INTERFACE = [
+    "builtin_sentence_withheld",
     "builtin_tool_called",
     "llm_retried",
     "llm_rounded",
+    "mcp_sentence_withheld",
     "mcp_tool_called",
     "provider_failure",
     "tool_arguments_coerced",
     "tool_fragment",
+    "unnamed_sentence_withheld",
     "unnamed_tool_called",
 ]
 
@@ -133,7 +136,7 @@ def defined_here(module: ModuleType) -> list[str]:
 
 
 def test_the_module_defines_its_builders_and_nothing_that_makes_an_entry() -> None:
-    """The interface is the seven builders and the fragment. The quartet
+    """The interface is the ten builders and the fragment. The quartet
     type and the crossing that fills it are private, which is what makes
     the builders the only producers of the four entry values.
 
