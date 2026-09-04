@@ -98,6 +98,25 @@ def test_the_payload_door_answers_this_lane_through_every_embedder() -> None:
     )
 
 
+# Four facts that look like nothing this lane or a deployment would
+# ever hold, so a field that failed to travel is a mismatch rather than
+# a coincidence. Nothing connects on them: the tests below drive the
+# defaults and read them back.
+SENTINEL_CONNECTION = {
+    "host": "10.255.255.254",
+    "port": 15432,
+    "name": "vinga_sentinel_never_created",
+    "user": "vinga_sentinel_role",
+}
+
+# What a partial payload states for itself, distinct from the sentinel
+# defaults above as well as from the lane's own, so that "the explicit
+# fields were honored" and "the omitted fields were inherited" are two
+# assertions that cannot be satisfied by one accident.
+RESTRICTED_NAME = "vinga_restricted_never_created"
+RESTRICTED_USER = "vinga_analyst_role"
+
+
 def test_a_partial_database_payload_inherits_this_lane_s_instance() -> None:
     """The shape the integration lane's `_restricted_app` builds: a
     `database` mapping naming some fields and leaving the rest to the
@@ -105,26 +124,34 @@ def test_a_partial_database_payload_inherits_this_lane_s_instance() -> None:
 
     Its omitted `host` and `port` travel the same stale-schema path as
     an empty mapping, and were masked on CI only because the shipped
-    values and the service container's coincide. A lane pointed at an
-    instance of its own would have written somewhere else entirely.
+    values and the service container's coincide. That coincidence is
+    exactly why this case is driven under sentinel defaults rather than
+    under the ordinary ones: asserting that the omitted fields equal the
+    lane instance's host and port proves nothing while the lane instance
+    IS the compose instance, and would pass just as well against a
+    payload that had been discarded whole.
+
+    So the condition is moved onto four values nothing ships, the
+    payload states a name and a user that are none of them, and the
+    complete tuple is asserted: what was stated, as stated, and what was
+    omitted, from the condition the cascade was last driven with.
     """
-    resolved = ServerConfig(
-        **{"database": {"name": LANE_DATABASE, "user": DB_USER}}
-    ).database
+    _database_condition(
+        **SENTINEL_CONNECTION, environment_name=SENTINEL_CONNECTION["name"]
+    )
+    try:
+        resolved = config_with_agent(
+            server={"database": {"name": RESTRICTED_NAME, "user": RESTRICTED_USER}}
+        ).server.database
 
-    assert (resolved.host, resolved.port) == (DB_HOST, DB_PORT)
-
-
-# Four facts that look like nothing this lane or a deployment would
-# ever hold, so a field that failed to travel is a mismatch rather than
-# a coincidence. Nothing connects on them: the test drives the defaults
-# and reads them back.
-SENTINEL_CONNECTION = {
-    "host": "10.255.255.254",
-    "port": 15432,
-    "name": "vinga_sentinel_never_created",
-    "user": "vinga_sentinel_role",
-}
+        assert (resolved.host, resolved.port, resolved.name, resolved.user) == (
+            SENTINEL_CONNECTION["host"],
+            SENTINEL_CONNECTION["port"],
+            RESTRICTED_NAME,
+            RESTRICTED_USER,
+        )
+    finally:
+        _database_default(LANE_DATABASE)
 
 
 def _resolved_everywhere() -> list[tuple[str, int, str, str]]:
