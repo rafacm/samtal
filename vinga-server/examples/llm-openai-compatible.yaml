@@ -9,6 +9,11 @@ base_url: http://localhost:11434/v1
 
 model: qwen3:8b
 
+# The cap on one reply's length, in tokens, written here at the value
+# the server uses when it is left out. Spoken replies are short, so this
+# bounds a runaway rather than a conversation.
+# max_tokens: 1024
+
 # Any other key is sent to the endpoint as part of the request, and this
 # is the one provider type that works that way. That is what the type is
 # there for: every server speaking this dialect takes parameters no

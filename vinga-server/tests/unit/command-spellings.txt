@@ -1212,7 +1212,7 @@ vinga-server/examples/agent.yaml:54  respell  vinga agent preview
 vinga-server/examples/asr-faster-whisper.yaml:3  respell  vinga provider set asr whisper
 vinga-server/examples/asr-openai.yaml:9  respell  vinga provider set asr ears
 vinga-server/examples/llm-anthropic.yaml:6  respell  vinga provider set llm claude
-vinga-server/examples/llm-anthropic.yaml:22  respell  vinga provider secret set llm claude
+vinga-server/examples/llm-anthropic.yaml:27  respell  vinga provider secret set llm claude
 vinga-server/examples/llm-openai-compatible.yaml:4  respell  vinga provider set llm local
 vinga-server/examples/mcp-server-stdio.yaml:4  respell  vinga mcp-server set home
 vinga-server/examples/mcp-server-stdio.yaml:31  respell  vinga mcp-server secret set home

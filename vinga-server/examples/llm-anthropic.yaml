@@ -14,6 +14,11 @@ type: anthropic
 
 model: claude-sonnet-5
 
+# The cap on one reply's length, in tokens, written here at the value
+# the server uses when it is left out. Spoken replies are short, so this
+# bounds a runaway rather than a conversation.
+# max_tokens: 1024
+
 # The environment variable holding the key, never the key itself.
 #
 # The alternative is to store the credential in the database, encrypted,

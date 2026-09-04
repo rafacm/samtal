@@ -210,6 +210,37 @@ def test_every_documented_option_of_a_typed_type_installs(
     assert run(*argv) == 0, f"{fragment.name}, uncommented: {capsys.readouterr().err}"
 
 
+def test_the_anthropic_fragments_documented_options_install(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same promise for the one LLM type the case above cannot
+    reach.
+
+    `_typed_fragments` selects the types that declare an options model,
+    and `anthropic` declares none: its builder reads the entry's
+    pass-through extras. So the generic uncommenting never covers it,
+    and its `# max_tokens: 1024` line would be a documented key nothing
+    holds to installing (#277). Targeted rather than folded into the
+    generic case, because the two rest on different things: that one is
+    a model contradicting its own documentation, this one is a
+    pass-through entry a builder reads by hand.
+    """
+    fragment = EXAMPLES / "llm-anthropic.yaml"
+    text = fragment.read_text(encoding="utf-8")
+    written = tmp_path / fragment.name
+    written.write_text(_uncommented(text), encoding="utf-8")
+    assert "# max_tokens:" in text, "the fragment documents no cap to install"
+
+    argv = [*_command(fragment), "-f", str(written)]
+    assert run(*argv) == 0, f"{fragment.name}, uncommented: {capsys.readouterr().err}"
+    capsys.readouterr()
+
+    # And the documented value arrived, rather than the command having
+    # succeeded by dropping the key it was about.
+    assert run("provider", "show", "llm", "claude") == 0
+    assert yaml.safe_load(capsys.readouterr().out)["max_tokens"] == 1024
+
+
 def test_the_uncommenting_is_doing_something() -> None:
     """A transform that changed nothing would make the case above a
     second copy of the one before it."""
