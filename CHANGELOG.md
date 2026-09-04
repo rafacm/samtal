@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-04
+
+### Added
+
+- **One process, one replica is the supported topology** (#316),
+  recorded as an ADR. The inventory behind it: pending activation
+  codes, the loaded configuration generation, session admission,
+  provider singletons and the drain are all process-local, while the
+  database writes (advisory-locked) and device tokens (stateless HMAC)
+  are merely safe across processes, not coordinated. The server README
+  now says a deployment runs one replica and why, the token
+  statelessness passages no longer read as replica support, and the
+  ADR names the one future module (cluster coordination: activation
+  claims, configuration revisions, node status) plus the
+  reconsideration triggers that would justify building it. The
+  topology itself is exercised by CI booting the committed compose
+  file, one server service, no replica setting.
+
 ## 2026-09-03
 
 ### Added
