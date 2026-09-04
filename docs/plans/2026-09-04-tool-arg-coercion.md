@@ -60,7 +60,8 @@ the coercion function must tolerate an empty schema, a missing
 
 ## Open questions, resolved
 
-**The site is dispatch, and the record keeps the model's bytes.**
+**The site is dispatch, and the record keeps the original
+values.**
 Two candidate sites exist. Rewriting `calls` in `_tool_loop` before
 reservation would make every downstream reader see coerced
 arguments: the conversation record, the API's `ToolInvocation`
@@ -98,8 +99,11 @@ four members wide.** The design guide holds the four-member
 travel through `dispatch`. The pipeline, which owns the snapshot,
 passes the mapping down its own private call chain. The coercion
 itself is a pure function in a new leaf module beside `publish.py`:
-`conformed(arguments, schema)` returns a new dict, never raises,
-and never mutates its input. The deletion test: inlining it into
+`with_lossless_coercions(arguments, schema)` returns a new dict,
+never raises, and never mutates its input; the name promises
+exactly what it does, since the result is not necessarily
+schema-conformant (unions, nested structure and undeclared
+properties pass through). The deletion test: inlining it into
 `_run_one` would put a domain rule with its own per-type test
 matrix inside a method whose job is timing and dispatch, and the
 rule already has a sibling precedent worth keeping beside it
@@ -195,7 +199,8 @@ and `"1"` behave exactly as before.
 
 ## Module layout
 
-- `tools/arguments.py` (new): `conformed(arguments, schema)`, pure,
+- `tools/arguments.py` (new): `with_lossless_coercions(arguments,
+  schema)`, pure,
   tolerant of every degenerate schema shape `publish()` can let
   through. Imports nothing beyond the stdlib.
 - `runtime/pipeline.py`: `_tool_loop` builds
@@ -279,15 +284,19 @@ and `"1"` behave exactly as before.
 ## Milestones
 
 - [ ] **M1: the coercion, wired and tested.** `tools/arguments.py`
-  with `conformed`; the snapshot mapping threaded
-  `_tool_loop` to `_run_tools` to `_run_one`; the conformed claim
-  dispatched with the reservation left original; the typed device
-  tool fixture; the test matrix and the session-level split pin; a
-  CHANGELOG entry; the implementation-doc section. Design
-  footprint: one new leaf module (callers stop having to know how
-  JSON Schema types map onto small-model argument habits), and
-  `_run_one` deepened; `ToolSource` stays four members and no
-  pass-through layer appears. Documentation footprint: no
+  with `with_lossless_coercions`; the execution-only call copies
+  derived in `_tool_loop` and the reserved claim's arguments
+  replaced at dispatch, signatures unchanged; the
+  `tool_arguments_coerced` declaration with its driver, `CARRIED`
+  row, regenerated `events.md` and README index row; the `VOLUME`
+  fixture moved to the support module; the test matrix, the
+  session-level split pins, the scripted-refusal, permanence and
+  sentinel cases; a CHANGELOG entry; the implementation-doc
+  section. Design footprint: one new leaf module (callers stop
+  having to know how JSON Schema types map onto small-model
+  argument habits), and `_tool_loop` deepened at its one shared
+  point; `ToolSource` stays four members and no pass-through layer
+  appears. Documentation footprint: no
   hand-maintained page claims arguments pass through verbatim
   (checked: `concepts.md`, `glossary.md`, `system-overview.md`
   describe the tool loop at a higher altitude), the record and API
@@ -428,3 +437,9 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    what it guarantees (`with_lossless_coercions`), and say
    "original values" rather than "the model's bytes", since the
    provider adapters already decoded the JSON.
+
+   *Resolution*: accepted in full; the function is
+   `with_lossless_coercions`, its docstring states the
+   non-conformance caveat, and the plan says original values. The
+   M1 wiring text is also brought in line with the amended site
+   from finding 2 in the same change.
