@@ -23,6 +23,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   topology itself is exercised by CI booting the committed compose
   file, one server service, no replica setting.
 
+### Fixed
+
+- **An MCP server's address may not carry a credential either** (#279):
+  `url: https://user:password@host/mcp` names nothing secret-shaped, so
+  every rule this project had about inline secrets passed it, and it was
+  stored as written and read back on every display path. A provider's
+  `base_url` has been refused for the same shape since the record work;
+  an MCP server's `url` is a declared field of a closed model that the
+  provider's option walk never reaches, so it got the rule of its own it
+  needed. Writing such a URL is refused where an MCP server is written
+  (both write paths, since the rule is the repository's), for a user and
+  password before the host and for a credential-shaped query parameter
+  alike, with a refusal that names the field and the rule, says to send
+  the credential as a header read from the server's own environment, and
+  never quotes the value. Write time only, exactly like the provider's
+  rule, so a deployment that already has such a row still boots, still
+  reads it and can still edit it out.
+
 ## 2026-09-03
 
 ### Added
