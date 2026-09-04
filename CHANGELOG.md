@@ -65,6 +65,34 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- **The simulator holds a conversation on a deployment that issues no
+  device tokens** (#369). With `server.auth.enabled: false`, a default
+  agent set and the store applied, the server admitted the simulated
+  board and said so in its own log, and `vinga simulator run` refused
+  to speak: the reply's empty token was the only thing it had to read,
+  and an empty token had always meant "not admitted". It now reads the
+  `access` word the reply carries beside the token, so an admitted
+  board on a deployment that mints no credentials holds its
+  conversation, a board that was turned away is still reported as such,
+  and a reply from a server too old to carry the word is read exactly
+  as it was before. A reply whose word contradicts what stands beside
+  it is refused rather than resolved, as contradictory replies already
+  were.
+- **The simulator's messages stop advising their own opposite** (#369).
+  `simulator run` on a board that may not speak advised `--claim`,
+  which answered that a board showing no activation code has nothing to
+  claim and told the reader to drop the flag. The refusal now points at
+  `simulator check-in` and mentions the claim only for the board that
+  is showing a code. The check-in's own account of a board that may not
+  speak names every configuration that produces one, which is two more
+  than it used to (a deployment that could not read its own record of
+  what is bound, and an agent named by `default_agent` rather than by a
+  binding), plus the reading that is not a configuration at all: a
+  deployment that issues no device tokens and is too old to say so. The
+  post-claim refusal names that last reading too, and an admitted board
+  is told whether a credential was issued or whether that deployment
+  issues none.
+
 - **An MCP server's address may not carry a credential either** (#279):
   `url: https://user:password@host/mcp` names nothing secret-shaped, so
   every rule this project had about inline secrets passed it, and it was
