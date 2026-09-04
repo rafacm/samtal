@@ -47,6 +47,12 @@ SENTINEL_ENTRY = "sentinel-agent-4c1f"
 
 SENTINEL_FILE = "sentinel-document-9b2e.yaml"
 
+# How long one redraw is held inside the stream, in the case that holds
+# the erase to arriving after it. Longer than the bounded wait for the
+# writer that this design used to have, because a hold shorter than that
+# bound passes against the implementation the case exists to reject.
+HELD_FOR_S = 1.2
+
 DOCUMENT = f"""\
 providers:
   llm:
@@ -264,6 +270,47 @@ def test_the_line_is_redrawn_on_its_cadence() -> None:
     assert errors.getvalue().count(f"{cli.PROGRESS_PHASE}:") >= 3
 
 
+def test_a_redraw_held_inside_the_stream_cannot_land_after_the_erase() -> None:
+    """The claim the erase makes, held against the case that breaks a
+    timed wait for the writer.
+
+    A redraw is caught inside `write` and kept there, and the context is
+    left while it is still in there. The erase has to wait for it and
+    then be the last thing written, and nothing the writer does
+    afterwards may reach the stream at all.
+
+    The hold is longer than a second on purpose, and it is why this
+    case costs what it costs. What it is written against is a bounded
+    wait for the writer, which this design had and which let exactly
+    this redraw land on top of whatever printed next; a hold shorter
+    than the bound passes against that implementation and proves
+    nothing. No finite hold can prove there is no bound at all, so this
+    one proves there is none up to a second and a bit, which is where
+    the bound was.
+    """
+    stream = _Holding()
+
+    with contextlib.redirect_stderr(stream):
+        with cli.narrated(True, cadence_s=0.001):
+            _until(stream.held.is_set)
+            # Let go well after the context is left, so the erase meets
+            # a redraw that is still inside the stream rather than one
+            # that has finished with it.
+            threading.Timer(HELD_FOR_S, stream.release.set).start()
+
+    # The held redraw has to have landed before there is an order to
+    # assert anything about. Under the rule above it landed before the
+    # context was left, and this returns at once; under a bounded wait
+    # it lands here, which is the failure.
+    _until(lambda: len(stream.taken()) >= 3)
+    at_the_exit = stream.taken()
+    assert cli.PROGRESS_PHASE not in at_the_exit[-1]
+    # Several cadences later, and the writer is still running: what
+    # stops it writing is the erase rather than the clock.
+    time.sleep(0.05)
+    assert stream.taken() == at_the_exit
+
+
 def test_a_stream_that_will_not_be_written_to_takes_nothing_down() -> None:
     """An affordance may not fail a command. A stream closed under a
     running command answers a `ValueError` from the object and an
@@ -328,6 +375,48 @@ class _Refusing(io.StringIO):
         with self.lock:
             self.attempts += 1
         raise ValueError("I/O operation on closed file")
+
+
+class _Holding(io.StringIO):
+    """A terminal that catches one redraw inside `write` and keeps it
+    there until the test lets it go, which is what a stopped reader and
+    a flow-controlled terminal both look like from in here.
+
+    Each write is recorded when it FINISHES rather than when it starts,
+    because what the question is about is the order bytes reach a
+    screen. A record taken on the way in would put a held redraw ahead
+    of an erase that overtook it, which is the very inversion this is
+    written to catch.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes: list[str] = []
+        self.lock = threading.Lock()
+        self.started = 0
+        self.held = threading.Event()
+        self.release = threading.Event()
+
+    def isatty(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        with self.lock:
+            self.started += 1
+            order = self.started
+        # The second write is the first redraw: the first is the line
+        # the calling thread draws on the way in, and holding that one
+        # would hold the command rather than the writer.
+        if order == 2:
+            self.held.set()
+            self.release.wait(HELD_FOR_S * 5)
+        with self.lock:
+            self.writes.append(text)
+        return len(text)
+
+    def taken(self) -> list[str]:
+        with self.lock:
+            return list(self.writes)
 
 
 class _Unstartable:
