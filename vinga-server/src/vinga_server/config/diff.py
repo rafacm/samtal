@@ -63,6 +63,7 @@ from vinga_server.config.responses import (
     Applies,
     ConfigDiff,
     EntityDiff,
+    FallbackDiff,
     FillerDiff,
     GrantsDiff,
     LiveKind,
@@ -99,13 +100,18 @@ APPLIES: Mapping[str, Applies] = {
 GRANTS_APPLY = Applies.RELOAD
 PROMPT_APPLY = Applies.RELOAD
 FILLER_APPLY = Applies.RELOAD
+FALLBACK_APPLY = Applies.RELOAD
 
-# Which fields of an agent entry the prompt half compares, and which the
-# filler half does. Two tuples rather than one, because they are two
-# answers with two convergence points: prompt text reaches a conversation
-# at its next activation and a clip at the next session.
+# Which fields of an agent entry the prompt half compares, which the
+# filler half does, and which the fallback half does. Three tuples
+# rather than one, because they are three answers: prompt text reaches a
+# conversation at its next activation, and each kind of cached clip is
+# bound when the next conversation opens. The two clip kinds are kept
+# apart because they are staled apart: toggling the filler must not send
+# a fallback phrase to a voice, or the reverse.
 _PROMPT_FIELDS = ("prompt", "prompt_includes")
 _FILLER_FIELDS = ("filler",)
+_FALLBACK_FIELDS = ("fallback",)
 
 
 class Loaded(Protocol):
@@ -185,6 +191,9 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
     def same_filler(name: str) -> bool:
         return same_fields(name, _FILLER_FIELDS)
 
+    def same_fallback(name: str) -> bool:
+        return same_fields(name, _FALLBACK_FIELDS)
+
     return ConfigDiff(
         providers=EntityDiff(
             applies=APPLIES["providers"],
@@ -224,6 +233,12 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
                 applies=FILLER_APPLY,
                 changed=_names(
                     running.config.agents, stored.config.agents, same_filler
+                ).changed,
+            ),
+            fallback=FallbackDiff(
+                applies=FALLBACK_APPLY,
+                changed=_names(
+                    running.config.agents, stored.config.agents, same_fallback
                 ).changed,
             ),
         ),

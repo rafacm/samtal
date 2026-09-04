@@ -52,6 +52,7 @@ from vinga_server.config.responses import (
     ConfigDiff,
     ConfigReloadResult,
     EntityDiff,
+    FallbackDiff,
     FillerDiff,
     GrantsDiff,
     LiveKind,
@@ -879,6 +880,7 @@ def answer(
     grants: tuple[str, ...] = (),
     prompts: tuple[str, ...] = (),
     fillers: tuple[str, ...] = (),
+    fallbacks: tuple[str, ...] = (),
 ) -> ConfigDiff:
     """One whole diff, the way the composition root composes one: every
     kind present with its own regime, and whatever this case is about
@@ -898,6 +900,7 @@ def answer(
             grants=GrantsDiff(applies=Applies.RELOAD, changed=grants),
             prompt=PromptDiff(applies=Applies.RELOAD, changed=prompts),
             filler=FillerDiff(applies=Applies.RELOAD, changed=fillers),
+            fallback=FallbackDiff(applies=Applies.RELOAD, changed=fallbacks),
         ),
         devices=LiveKind(applies=Applies.CHECK_IN),
         default_agent=LiveKind(applies=Applies.CHECK_IN),
@@ -948,7 +951,7 @@ def test_an_application_without_a_server_has_nothing_to_compare(
 def test_the_diff_answers_every_kind_with_its_own_regime(database: DatabaseConfig) -> None:
     """The whole shape on the wire, since this is the contract a client
     generates against: seven kinds, each labelled, the two live ones
-    carrying their label and nothing else, and the three halves an agent
+    carrying their label and nothing else, and the four halves an agent
     entry converges by beside the agents rather than inside their
     lists."""
     composed = answer(
@@ -957,6 +960,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(database: DatabaseConfi
         grants=("assistant",),
         prompts=("assistant",),
         fillers=("assistant",),
+        fallbacks=("assistant",),
     )
 
     with serving(database, None, config_diff=comparing(composed)) as client:
@@ -991,6 +995,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(database: DatabaseConfi
             "grants": {"applies": "reload", "changed": ["assistant"]},
             "prompt": {"applies": "reload", "changed": ["assistant"]},
             "filler": {"applies": "reload", "changed": ["assistant"]},
+            "fallback": {"applies": "reload", "changed": ["assistant"]},
         },
         "devices": {"applies": "check-in"},
         "default_agent": {"applies": "check-in"},

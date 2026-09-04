@@ -333,6 +333,7 @@ vinga agent set <name> -f fragment.yaml
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
 | `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this list: the memory family is offered wherever the memory section leaves it on, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
+| `fallback` | `FallbackConfig \| null` | `null` | What a failed reply says out loud and on the display. Unset inherits the agent_defaults section, and an agent under neither speaks the declared default phrase, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `fallback: {enabled: false}` opts an agent out and leaves its failed turns silent. |
 | `memory` | `MemoryPolicy \| null` | `null` | Whether this layer may remember anything. Unset inherits the agent_defaults section, and an agent under neither may remember, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `memory: {enabled: false}` opts an agent out of the memory tools and the injected scope blocks together. |
 | `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments this agent's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts this agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch. Leaving it unset inherits the agent_defaults list, whose edits reach this agent at the same moment. |
 | `prompt` | `str` | `""` | The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
@@ -373,6 +374,7 @@ vinga agent-defaults set -f fragment.yaml
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
 | `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this list: the memory family is offered wherever the memory section leaves it on, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
+| `fallback` | `FallbackConfig \| null` | `null` | What a failed reply says out loud and on the display. Unset inherits the agent_defaults section, and an agent under neither speaks the declared default phrase, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `fallback: {enabled: false}` opts an agent out and leaves its failed turns silent. |
 | `memory` | `MemoryPolicy \| null` | `null` | Whether this layer may remember anything. Unset inherits the agent_defaults section, and an agent under neither may remember, which is the default; naming a section replaces the inherited one wholly rather than merging with it, so `memory: {enabled: false}` opts an agent out of the memory tools and the injected scope blocks together. |
 | `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments every agent's system prompt carries unless the agent names a list of its own, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. An agent naming a list replaces this one rather than extending it, so an empty list there opts that agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, along with an agent's own and the text of a fragment either layer names, so a change here reaches every agent that inherits it at that agent's next activation, which is a new session or an agent switch. |
 
@@ -383,8 +385,8 @@ re-keying the table is what it will do.
 An agent that names no provider for a stage inherits this entry's provider for
 that stage. A list field replaces rather than extends: an agent naming `mcp`
 names all of its MCP servers, and `mcp: []` opts it out of the tools its
-siblings have. The `filler` and `memory` sections behave the same way, each
-replacing this one wholly rather than merging with it.
+siblings have. The `filler`, `fallback` and `memory` sections behave the same
+way, each replacing this one wholly rather than merging with it.
 
 Examples:
 
@@ -432,6 +434,33 @@ provider is the thing being slow.
 | `enabled` | `bool` | `false` | Whether a filled pause is played while a slow reply is prepared. Off by default. |
 | `delay_ms` | `float` | `1800.0` | How long the user hears silence before the filler starts, in milliseconds, counted from the transcription of their utterance. |
 | `phrases` | `list[str]` | `[]` | The phrases to play, written in the agent's own language; the player rotates through them rather than always playing the same one. At least one is required when the feature is enabled. |
+
+### Fallback
+
+`agent_defaults.fallback, agents.<name>.fallback`
+
+What a failed reply says out loud and on the display. Nested inside an agent
+or the agent defaults rather than written on its own, and on unless it says
+otherwise, which is the opposite default to the filler beside it: a turn that
+broke in silence is indistinguishable from a slow one. The phrase is
+synthesized in the agent's own voice ahead of time and cached, exactly as a
+filler phrase is, so a failed turn costs no text-to-speech call and says its
+piece even when the voice is what failed.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `true` | Whether a failed reply says so out loud and on the display. On by default, because a silent turn is indistinguishable from a slow one; a deployment that would rather have silence sets this to false. |
+| `phrase` | `str` | `"I ran into a problem and could not answer. The server log has the details."` | What a failed reply says, written in the agent's own language. Fixed configuration and never the failure's own words, which arrive from the far side of a network and are not this server's to speak. |
+
+The phrase is fixed configuration and never the failure's own words. What
+reaches the arm that speaks this is whatever a provider or its transport
+raised, and a message from the far side of a network is the one thing about a
+broken turn that must not be read out loud.
+
+A phrase whose synthesis fails degrades rather than disappears: the failed
+turn still shows the sentence on the display and still closes with the `tts
+stop` a device waits on, and only the audio is lost. The outcome is reported
+per agent by `vinga apply`.
 
 ### Memory
 

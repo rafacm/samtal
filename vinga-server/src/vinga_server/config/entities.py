@@ -53,6 +53,7 @@ from vinga_server.config.models import (
     SERVER_PROGRAM,
     AgentConfig,
     AgentDefaults,
+    FallbackConfig,
     FillerConfig,
     McpGrant,
     McpServerConfig,
@@ -512,9 +513,9 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "An agent that names no provider for a stage inherits this entry's "
             "provider for that stage. A list field replaces rather than extends: an "
             "agent naming `mcp` names all of its MCP servers, and `mcp: []` opts it "
-            "out of the tools its siblings have. The `filler` and `memory` sections "
-            "behave the same way, each replacing this one wholly rather than merging "
-            "with it.",
+            "out of the tools its siblings have. The `filler`, `fallback` and "
+            "`memory` sections behave the same way, each replacing this one wholly "
+            "rather than merging with it.",
         ),
         route="/agent-defaults",
         addressing=(),
@@ -565,6 +566,31 @@ NESTED: tuple[NestedShape, ...] = (
             "voice ahead of time, at a start and again at every reload that moves "
             "them, and cached, so the clip costs nothing at the moment it "
             "masks and keeps working when the TTS provider is the thing being slow."
+        ),
+    ),
+    NestedShape(
+        name="fallback",
+        title="Fallback",
+        location="agent_defaults.fallback, agents.<name>.fallback",
+        model=FallbackConfig,
+        purpose=(
+            "What a failed reply says out loud and on the display. Nested inside an "
+            "agent or the agent defaults rather than written on its own, and on "
+            "unless it says otherwise, which is the opposite default to the filler "
+            "beside it: a turn that broke in silence is indistinguishable from a slow "
+            "one. The phrase is synthesized in the agent's own voice ahead of time "
+            "and cached, exactly as a filler phrase is, so a failed turn costs no "
+            "text-to-speech call and says its piece even when the voice is what failed."
+        ),
+        notes=(
+            "The phrase is fixed configuration and never the failure's own words. "
+            "What reaches the arm that speaks this is whatever a provider or its "
+            "transport raised, and a message from the far side of a network is the "
+            "one thing about a broken turn that must not be read out loud.",
+            "A phrase whose synthesis fails degrades rather than disappears: the "
+            "failed turn still shows the sentence on the display and still closes "
+            "with the `tts stop` a device waits on, and only the audio is lost. The "
+            f"outcome is reported per agent by `{PROGRAM} apply`.",
         ),
     ),
     NestedShape(

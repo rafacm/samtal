@@ -1764,6 +1764,66 @@ class FillerConfig(BaseModel):
         return self
 
 
+# The sentence a terminally failed reply says. Fixed configuration and
+# never anything a provider answered with: what reaches this arm is a
+# failure from the far side of a network, and its message is the one
+# thing about a broken turn that must not be spoken out loud.
+DEFAULT_FALLBACK_PHRASE = (
+    "I ran into a problem and could not answer. The server log has the details."
+)
+
+
+class FallbackConfig(BaseModel):
+    """What the user hears when a reply fails outright.
+
+    A terminally failed reply used to be a silent turn: the failure was
+    logged and nothing reached the speaker or the display, so from the
+    couch a broken pipeline was indistinguishable from a slow one
+    (#384). This is the short fixed phrase that ends that silence,
+    synthesized in the agent's own voice at the server start and cached
+    as PCM exactly the way a filler clip is, spoken from the failure arm
+    and shown on the display.
+
+    On by default, which is the one place this differs from the filler
+    beside it: the silent turn is at its worst during onboarding, where
+    misconfiguration is likeliest and nobody has a log open. A
+    deployment that would rather have silence turns it off.
+
+    Cached rather than synthesized when the failure happens, for the two
+    reasons the filler gives and one more: synthesis at failure time
+    would add latency to a turn that has already gone wrong, and the TTS
+    provider may itself be what failed. A phrase that will not
+    synthesize degrades rather than disappears, since the display half
+    needs no audio at all: the failure still shows the sentence and
+    still closes with the `tts stop` a device waits on, and only the
+    audio is lost.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether a failed reply says so out loud and on the display. On by "
+            "default, because a silent turn is indistinguishable from a slow one; a "
+            "deployment that would rather have silence sets this to false."
+        ),
+    )
+
+    # One phrase rather than a rotation, unlike the filler's list: a
+    # filler is heard on ordinary turns and a repeated one grates, while
+    # this is heard when something is broken, and variety there would be
+    # decoration on a diagnostic.
+    phrase: NonBlankStr = Field(
+        default=DEFAULT_FALLBACK_PHRASE,
+        description=(
+            "What a failed reply says, written in the agent's own language. Fixed "
+            "configuration and never the failure's own words, which arrive from the "
+            "far side of a network and are not this server's to speak."
+        ),
+    )
+
+
 class MemoryPolicy(BaseModel):
     """Whether an agent remembers anything at all.
 
@@ -2060,6 +2120,25 @@ class AgentDefaults(BaseModel):
             "Latency masking with a pre-synthesized filled pause. Unset inherits the "
             "agent_defaults section; naming one replaces it wholly rather than "
             "merging with it, so `filler: {enabled: false}` opts an agent out."
+        ),
+    )
+
+    # What a failed reply says. None means inherit, and a section
+    # replaces the inherited one wholly exactly as `filler` does, so
+    # `fallback: {enabled: false}` opts an agent out. On where neither
+    # layer names it, which is the opposite default to the filler's and
+    # is the issue's own asymmetry: masking latency is an enhancement,
+    # and saying that a turn broke is the difference between a
+    # diagnosable deployment and a silent one.
+    fallback: FallbackConfig | None = Field(
+        default=None,
+        description=(
+            "What a failed reply says out loud and on the display. Unset inherits the "
+            "agent_defaults section, and an agent under neither speaks the declared "
+            "default phrase, which is the default; naming a section replaces the "
+            "inherited one wholly rather than merging with it, so "
+            "`fallback: {enabled: false}` opts an agent out and leaves its failed "
+            "turns silent."
         ),
     )
 
@@ -2808,6 +2887,25 @@ class Config(DomainConfig):
         if own is not None:
             return own
         return self.agent_defaults.filler
+
+    def fallback_for_agent(self, agent: str) -> FallbackConfig:
+        """What a failed reply says for this agent: its own section when
+        it names one, agent_defaults' otherwise, and the declared
+        default when neither does. A section replaces rather than
+        merges, so an agent's own phrase is all of its section.
+
+        A section rather than None where nothing is written, the shape
+        `memory_for_agent` takes and for the same reason: an absent
+        `filler` section and one that is off mean the same thing, and an
+        absent `fallback` section means the opposite of an off one.
+        Answering with the model's own defaults keeps that difference
+        where the field declares it rather than at every call site.
+        """
+        own = self.agents[agent].fallback
+        if own is not None:
+            return own
+        inherited = self.agent_defaults.fallback
+        return inherited if inherited is not None else FallbackConfig()
 
     def memory_for_agent(self, agent: str) -> MemoryPolicy:
         """Whether this agent may remember anything: its own section when

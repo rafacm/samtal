@@ -22,6 +22,7 @@ from vinga_server.config import Config
 from vinga_server.config.boot import BootConfig
 from vinga_server.config.diff import (
     APPLIES,
+    FALLBACK_APPLY,
     FILLER_APPLY,
     GRANTS_APPLY,
     PROMPT_APPLY,
@@ -274,6 +275,7 @@ def test_a_grant_rewritten_in_the_other_form_is_no_edit_at_all() -> None:
     assert answer.agents.grants.changed == ()
     assert answer.agents.prompt.changed == ()
     assert answer.agents.filler.changed == ()
+    assert answer.agents.fallback.changed == ()
     assert answer.agent_defaults.changed is False
 
 
@@ -364,6 +366,47 @@ def test_a_filler_only_edit_rides_the_filler_half() -> None:
     assert answer.agents.filler.applies is FILLER_APPLY
     assert answer.agents.filler.applies is Applies.RELOAD
     assert answer.agents.applies is Applies.RELOAD
+
+
+def test_a_fallback_only_edit_rides_the_fallback_half() -> None:
+    """The failure phrase is its own cached clip, so it is its own half:
+    an operator who reworded what a broken turn says has asked for that
+    phrase to be spoken again in each agent's voice and for nothing else
+    to be sent to one."""
+    running = config_with(agents={"assistant": {"prompt": "A"}})
+    stored = config_with(
+        agents={"assistant": {"prompt": "A", "fallback": {"phrase": "Sorry, I broke."}}}
+    )
+
+    answer = diff_of(running, stored)
+
+    assert answer.agents.changed == ("assistant",)
+    assert answer.agents.fallback.changed == ("assistant",)
+    assert answer.agents.fallback.applies is FALLBACK_APPLY
+    assert answer.agents.fallback.applies is Applies.RELOAD
+    # And the filler half is untouched by it, which is the whole reason
+    # the two are separate: toggling one must not send the other's
+    # phrases to a voice.
+    assert answer.agents.filler.changed == ()
+
+
+def test_a_filler_only_edit_leaves_the_fallback_half_alone() -> None:
+    """The same claim from the other side, so neither direction rests on
+    the other's evidence."""
+    running = config_with(agents={"assistant": {"prompt": "A"}})
+    stored = config_with(
+        agents={
+            "assistant": {
+                "prompt": "A",
+                "filler": {"enabled": True, "phrases": ["Hmm..."]},
+            }
+        }
+    )
+
+    answer = diff_of(running, stored)
+
+    assert answer.agents.filler.changed == ("assistant",)
+    assert answer.agents.fallback.changed == ()
 
 
 def test_an_agent_defaults_filler_edit_is_reported_against_the_layer() -> None:
