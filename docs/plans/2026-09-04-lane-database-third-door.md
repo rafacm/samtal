@@ -213,7 +213,7 @@ doors).
 
 ## Milestones
 
-- [x] **[M1: the cascade, the mirror, and the three-door pin](2026-09-04-lane-database-third-door-implementation.md#m1-the-cascade-the-mirror-and-the-three-door-pin)** (PR TBD). The
+- [x] **[M1: the cascade, the mirror, and the three-door pin](2026-09-04-lane-database-third-door-implementation.md#m1-the-cascade-the-mirror-and-the-three-door-pin)** (PR [#395](https://github.com/rafacm/vinga/pull/395)). The
   conftest helper with the ordered cascade; `_database_default`
   and `packaged_database` rebuilt on it; the extended pin with the
   payload door and the derived completeness assertion; the
