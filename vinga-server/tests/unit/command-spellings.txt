@@ -1273,6 +1273,8 @@ vinga-server/src/vinga_server/conversations/api.py:131  respell  vinga session s
 vinga-server/src/vinga_server/conversations/api.py:132  respell  vinga conversation show
 vinga-server/src/vinga_server/conversations/docgen.py:243  respell  vinga session delete
 vinga-server/src/vinga_server/conversations/docgen.py:243  respell  vinga session
+vinga-server/src/vinga_server/db/migrations/versions/3002_drop_max_tokens_secrets.py:9  respell  vinga provider secret set
+vinga-server/src/vinga_server/db/migrations/versions/3002_drop_max_tokens_secrets.py:15  respell  vinga export
 vinga-server/src/vinga_server/device/session.py:775  respell  config schema
 vinga-server/src/vinga_server/device_endpoint.py:5  respell  vinga simulator
 vinga-server/src/vinga_server/doctor.py:29  respell  vinga simulator
