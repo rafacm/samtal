@@ -9,7 +9,8 @@ so explicitly.
 
 ## M1: the kind, declared and pinned
 
-PR TBD. Closes [#303](https://github.com/rafacm/vinga/issues/303).
+PR [#392](https://github.com/rafacm/vinga/pull/392). Closes
+[#303](https://github.com/rafacm/vinga/issues/303).
 
 ### What landed
 
