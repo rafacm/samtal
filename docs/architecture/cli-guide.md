@@ -833,8 +833,9 @@ all and `apply` waits up to sixty seconds, and until #297 both left an
 operator watching an empty screen for the length of it. `narrated`
 draws one line on stderr while such a wait runs, carrying a fixed
 phrase and the elapsed whole seconds and nothing else, rewritten in
-place once a second by a daemon thread and erased on the way out, so
-that the answer or the refusal after it prints into an empty line.
+place once a second by a daemon thread and taken back off on the way
+out, so that the answer or the refusal after it prints into an empty
+line on any terminal still accepting output.
 
 Every clause of the licence is a condition it meets rather than a claim
 made about it. The terminal is asked once, on the way in, so a run
@@ -850,20 +851,39 @@ an entry's name and not the address reached, because the no-leak
 posture applies to progress exactly as it applies to a refusal. And
 none of the four things the counterexample below rejects appears in it.
 
-**The empty line is a guarantee rather than a hope, and it took a second
-try.** Two threads write that line, the command's own and the one
-redrawing it, and the first version waited a bounded second for the
-writer and then erased whatever that wait returned. A redraw held inside
-a write for longer than the bound therefore completed afterwards and
-landed on top of what printed next, which for a refused import is the
-one sentence the command has to say. They share a lock now, held across
-the write itself, so a redraw already in flight finishes before the
-erase begins and none starts after it; there is no bounded wait left
-anywhere in it, because a bound is exactly the window that was the bug.
-What is held is that the erase is the last thing written and the writer
-writes nothing afterwards, and it is held by a case that catches a
-redraw inside the stream, leaves the wait while it is still in there and
-reads back the order the bytes finished in.
+**What the empty line is worth, stated exactly, because two absolutes
+were wanted here and only one of them can be had.** Two threads write
+that line, the command's own and the one redrawing it, and they share a
+lock held across the write itself. The first thing wanted was that no
+redraw ever lands after the line is finished, since one that did would
+sit on top of what printed next, which for a refused import is the one
+sentence the command has to say. The second was that a command whose
+request has been answered can always say so, since a wait an operator
+sits through after the server has replied is the ambiguity every timeout
+in this grammar exists to prevent, reached from the other side. A
+terminal under flow control stops accepting writes and may never start
+again, and on such a stream the lock that orders the two threads is the
+lock the finished command would be stuck behind, so both cannot hold.
+
+Completion wins, and the ordering is kept as far as anything can keep
+it. The way out sets the finished flag first, which every redraw reads
+inside the lock, so nothing that has not already begun writing can ever
+write again: that half is absolute. Then it waits for the lock under a
+bound. Getting it means a redraw in flight has finished and the erase is
+the last thing written, which is the ordinary case and the whole of what
+a live stream ever does. Not getting it means one write is wedged inside
+the terminal, and the erase is abandoned rather than raced: the command
+returns and reports itself, the line stays on the screen, and the
+sentence after it prints on the same line rather than under it. That is
+the degradation, it is named rather than discovered, and it is on a
+terminal that had already stopped taking output.
+
+Three cases hold the three claims: a redraw caught inside a slow stream
+and released, proving the erase waits for it and lands last; a redraw
+wedged and never released, proving an import that was committed still
+prints what it did and a refusal still arrives whole; and the whole of
+it run on a thread with a join, so a completion that stopped being
+bounded fails rather than hangs.
 
 Which acts narrate is a fact on the act's row, beside the bound rather
 than read off it, because the two say different things: every act has a

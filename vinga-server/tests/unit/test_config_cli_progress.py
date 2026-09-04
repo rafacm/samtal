@@ -294,28 +294,28 @@ def test_a_cadence_that_is_not_a_cadence_is_refused(cadence: float) -> None:
     assert errors.getvalue() == ""
 
 
-def test_a_redraw_held_inside_the_stream_cannot_land_after_the_erase() -> None:
-    """The claim the erase makes, held against the case that breaks a
-    timed wait for the writer.
+def test_a_redraw_held_inside_a_live_stream_cannot_land_after_the_erase() -> None:
+    """The ordering half of the claim, on a stream that is slow rather
+    than gone: while a write eventually returns, the erase is the last
+    thing written and the writer writes nothing after it.
 
     A redraw is caught inside `write` and kept there, and the context is
     left while it is still in there. The erase has to wait for it and
-    then be the last thing written, and nothing the writer does
-    afterwards may reach the stream at all.
+    then be the last thing written.
 
-    The hold is longer than a second on purpose, and it is why this
-    case costs what it costs. What it is written against is a bounded
-    wait for the writer, which this design had and which let exactly
-    this redraw land on top of whatever printed next; a hold shorter
-    than the bound passes against that implementation and proves
-    nothing. No finite hold can prove there is no bound at all, so this
-    one proves there is none up to a second and a bit, which is where
-    the bound was.
+    The hold is longer than a second on purpose, and it is why this case
+    costs what it costs. What it is written against is a wait for the
+    writer bounded at one second, which this design had and which let
+    exactly this redraw land on top of whatever printed next; a hold
+    shorter than that bound passes against that implementation and
+    proves nothing. The erase is given a bound well above the hold,
+    which is what "live" means here and is the case's whole subject: the
+    stream that never comes back is the case below.
     """
     stream = _Holding()
 
     with contextlib.redirect_stderr(stream):
-        with cli.narrated(True, cadence_s=0.001):
+        with cli.narrated(True, cadence_s=0.001, erase_wait_s=HELD_FOR_S * 4):
             _until(stream.held.is_set)
             # Let go well after the context is left, so the erase meets
             # a redraw that is still inside the stream rather than one
@@ -333,6 +333,72 @@ def test_a_redraw_held_inside_the_stream_cannot_land_after_the_erase() -> None:
     # stops it writing is the erase rather than the clock.
     time.sleep(0.05)
     assert stream.taken() == at_the_exit
+
+
+def test_a_wedged_redraw_does_not_stop_an_answered_import_reporting(
+    run, document: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The completion half, and the reason the ordering half is not an
+    absolute.
+
+    A terminal under flow control stops accepting writes and may never
+    start again. The write that orders the two threads is then the write
+    the command would be stuck behind, and being stuck there means an
+    import the server has already committed cannot tell anybody it did,
+    which is the ambiguity every timeout in this module exists to
+    prevent, reached from the other side. So the way out waits under a
+    bound and gives up the erase rather than the answer.
+
+    The bound is the shipped one, which is what the second this case
+    costs is: what is being proven is that the default bounds a real
+    command, not that some number does.
+
+    Only the redraw is wedged, deliberately. A stream that took nothing
+    at all would block every command in this grammar and always has;
+    what is new, and what this is about, is a command blocked by a line
+    drawn over its own wait.
+    """
+    monkeypatch.setattr(cli, "PROGRESS_CADENCE_S", 0.001)
+    stream = _Wedged()
+    printed = _Stream(terminal=True)
+
+    try:
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(stream):
+            code = _answered(lambda: run(*_argv("import", document)))
+    finally:
+        stream.release.set()
+
+    assert code == 0
+    assert f"agents.{SENTINEL_ENTRY}: wrote" in printed.getvalue()
+    # The line is still on the screen, which is the named degradation:
+    # the erase was given up rather than raced with a write nobody can
+    # get back.
+    assert not any(set(text) <= {"\r", " "} for text in stream.taken())
+
+
+def test_a_wedged_redraw_does_not_stop_a_refusal_arriving(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same bound on the path where the command has a sentence to
+    say rather than an answer to print, which is the one a progress line
+    could do the most damage to."""
+    monkeypatch.setattr(cli, "PROGRESS_CADENCE_S", 0.001)
+    run.runtime["reload"] = None
+    stream = _Wedged()
+    printed = _Stream(terminal=True)
+
+    try:
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(stream):
+            code = _answered(lambda: run("apply"))
+    finally:
+        stream.release.set()
+
+    assert (code, printed.getvalue()) == (1, "")
+    # Whole and unbroken, after the line rather than under it: the erase
+    # was given up, so the sentence follows the last thing the writer
+    # got through rather than an empty line.
+    assert "no running server" in "".join(stream.taken())
+    assert not any(set(text) <= {"\r", " "} for text in stream.taken())
 
 
 def test_a_stream_that_will_not_be_written_to_takes_nothing_down() -> None:
@@ -457,6 +523,47 @@ class _Ticking:
             return float(next(self.readings))
 
 
+class _Wedged(io.StringIO):
+    """A terminal that takes one redraw and never comes back from it,
+    which is what one under flow control does.
+
+    Only the redraw is wedged, and that is the isolation the cases using
+    it are about. A stream that accepted nothing at all would block
+    every command in this grammar and always has; the exposure a
+    progress line adds is a command whose request has been answered
+    stuck behind a line it drew over its own wait.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes: list[str] = []
+        self.lock = threading.Lock()
+        self.started = 0
+        self.wedged = threading.Event()
+        self.release = threading.Event()
+
+    def isatty(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        with self.lock:
+            self.started += 1
+            order = self.started
+        if order == 2:
+            self.wedged.set()
+            # Never, until the case that started it is over and lets the
+            # thread go rather than leaving it blocked for the rest of
+            # the worker's life.
+            self.release.wait()
+        with self.lock:
+            self.writes.append(text)
+        return len(text)
+
+    def taken(self) -> list[str]:
+        with self.lock:
+            return list(self.writes)
+
+
 class _Unstartable:
     """A thread an interpreter out of thread stacks will not start."""
 
@@ -515,6 +622,28 @@ def _after_the_line(err: str) -> str:
     """What is left on the screen once the line has erased itself, which
     is everything after the last carriage return anything wrote."""
     return err.rsplit("\r", 1)[-1]
+
+
+def _answered(call, seconds: float = 15.0) -> int:
+    """What one command answered, run on a thread of its own.
+
+    On a thread because the claim is that completion is bounded, and a
+    claim like that has to fail rather than hang: a command that never
+    returns would otherwise take the whole lane with it and say nothing
+    about why. The bound here is nothing like the one under test, which
+    is a second; it is only far enough above it to say which of the two
+    was exceeded.
+    """
+    answer: list[int] = []
+
+    def go() -> None:
+        answer.append(call())
+
+    worker = threading.Thread(target=go, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    assert answer, "the command did not return: the narration blocked its completion"
+    return answer[0]
 
 
 def _until(answered, seconds: float = 5.0) -> None:
