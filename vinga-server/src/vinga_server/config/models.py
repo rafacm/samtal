@@ -35,9 +35,9 @@ from pydantic import (
 )
 from pydantic_settings import (
     BaseSettings,
+    InitSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
-    YamlConfigSettingsSource,
 )
 
 # The block shape the assembler owns, imported rather than restated for
@@ -2641,10 +2641,25 @@ def domain_fields(snapshot: DomainSnapshot) -> dict[str, object]:
     return {key: getattr(snapshot, key) for key in DOMAIN_KEYS}
 
 
-# The YAML file the settings source should read, set by the loader around
-# instantiation. pydantic-settings has no init kwarg for a runtime-chosen
-# path yet (pydantic-settings#259).
-yaml_file_var: ContextVar[Path | None] = ContextVar("vinga_yaml_file", default=None)
+# The file half's YAML, already read and already parsed, set by the
+# loader around instantiation. A ContextVar because pydantic-settings
+# has no init kwarg for a runtime-chosen source yet
+# (pydantic-settings#259).
+#
+# The mapping rather than the path it came from, which is the whole
+# point (#291). A path here meant the file was opened and parsed twice,
+# once by the loader's no-leak boundary and once by
+# `YamlConfigSettingsSource` behind it, and the second read answered to
+# nobody: a file deleted between the two booted the defaults in silence,
+# one that turned malformed left as the parser's own `ScannerError` with
+# the path and the offending line in it, one that turned into bytes left
+# as a `UnicodeDecodeError`, and the second read did not even name an
+# encoding. What the settings machinery gets now is the object the
+# boundary already validated, so there is one read, one parse and one
+# refusal.
+yaml_data_var: ContextVar[Mapping[str, object] | None] = ContextVar(
+    "vinga_yaml_data", default=None
+)
 
 
 class FileConfig(BaseSettings):
@@ -2678,7 +2693,11 @@ class FileConfig(BaseSettings):
         return (
             init_settings,
             env_settings,
-            YamlConfigSettingsSource(settings_cls, yaml_file=yaml_file_var.get()),
+            # In the position the YAML source held, so the priority is
+            # unchanged: a VINGA_ variable still beats the file and the
+            # file still beats the defaults. `YamlConfigSettingsSource`
+            # is this class plus a read, which is the read that is gone.
+            InitSettingsSource(settings_cls, dict(yaml_data_var.get() or {})),
             file_secret_settings,
         )
 
