@@ -102,9 +102,16 @@ from vinga_server.config.loader import (
     # the name every test and both wheel lanes reach for.
     NEEDS_THE_SERVER_HALF,
     NEEDS_THE_SIM_EXTRA,
+    # The other two of the same shape, and the same reason: the boot
+    # path reads YAML off a file nobody validated exactly as this
+    # module reads it off a fragment, so the sentence for a source that
+    # will not parse and the locator that is the one thing a refusal
+    # may take from the parser are defined once, below both readers.
+    YAML_NOT_QUOTED,
     ConfigError,
     load_environment_file,
     load_file_config,
+    stopped_at,
 )
 from vinga_server.config.models import (
     API_MOUNT_PATH,
@@ -3179,12 +3186,6 @@ def _yaml(data: object) -> str:
 # to reach an operator as a traceback with the source in it.
 _UNPARSEABLE = (yaml.YAMLError, ValueError, ArithmeticError, RecursionError)
 
-YAML_NOT_QUOTED = (
-    "Nothing of what it holds is quoted back: a source that will not parse is one "
-    "nothing here has validated, and what a parser says about one repeats the tag or "
-    "the key it stopped on"
-)
-
 # What the inline form calls the thing it could not read. Its own
 # source name rather than a path, because there is no file: the value
 # is one argument, and where the parser stopped is a column inside it.
@@ -3207,21 +3208,10 @@ def _parsed_yaml(text: str, source: str) -> object:
     try:
         parsed = yaml.safe_load(text)
     except _UNPARSEABLE as exc:
-        problem = f"invalid YAML in {source}{_stopped_at(exc)}. {YAML_NOT_QUOTED}"
+        problem = f"invalid YAML in {source}{stopped_at(exc)}. {YAML_NOT_QUOTED}"
     if problem is not None:
         raise ConfigError(problem)
     return parsed
-
-
-def _stopped_at(exc: BaseException) -> str:
-    """Where the parser stopped, when it says: two integers off the
-    exception's mark and nothing else off the exception at all. Empty
-    for the failures that carry no mark, which is every one of the
-    non-YAML family above."""
-    if not isinstance(exc, yaml.MarkedYAMLError) or exc.problem_mark is None:
-        return ""
-    mark = exc.problem_mark
-    return f" at line {mark.line + 1}, column {mark.column + 1}"
 
 
 # What a source that will not parse is called. Two names of this
