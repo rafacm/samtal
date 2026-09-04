@@ -2129,6 +2129,61 @@ clip played into that would talk over them (field round 2 measured
 exactly this on dictation-style turns). The skip consumes no phrase,
 and the reply that answers the completed sentence arms its own timer.
 
+## When a reply fails
+
+The other end of the same turn. A reply that fails outright, on a
+provider that is down or a model that never answers, used to be
+silence: the failure was logged and nothing reached the speaker or the
+display, so from the couch a broken pipeline and a slow one were the
+same turn. Every agent therefore has a fixed phrase for it, cached the
+same way the filled pauses above are:
+
+```bash
+vinga-server config agent-defaults set -f - <<'YAML'
+fallback:
+  # on by default
+  enabled: true
+  phrase: "I ran into a problem and could not answer. The server log has the details."
+YAML
+```
+
+It is spoken and shown: the sentence goes out as a `tts sentence_start`,
+so it renders on the display, and the cached clip follows it, so it is
+heard. It is vinga's own words rather than the agent's, and it goes no
+further than that turn: it never enters the reply's spoken sentences,
+the conversation history or the stored conversation, and `replied`
+keeps its meaning of model speech that went out. What says it happened
+is a `reply_fallback` event, carrying the reason and whether the phrase
+was heard as well as shown, never the words themselves. The phrase is
+fixed configuration and is never the failure's own message, which
+arrives from the far side of a network and is not this server's to
+speak.
+
+Only a terminal failure speaks. A device that went away is told
+nothing, because there is nobody left to tell, and a reply cancelled by
+a barge-in says nothing either, because a cancellation means the user
+is talking. Neither reads the section.
+
+**This one is on by default, unlike the filler above.** The silent turn
+is at its worst during onboarding, where a misconfiguration is
+likeliest and nobody has a log open, so a deployment that would rather
+have silence is the one that says so: `fallback: {enabled: false}`, on
+`agent_defaults` or on a single agent. Being on by default has a
+one-time cost worth knowing: the first start after upgrading
+synthesizes one short phrase per agent through the configured TTS
+provider before the server begins serving, which is one provider call
+per agent, a few seconds of startup, and, on a metered voice, a few
+seconds of billed synthesis. It is once per world rather than once per
+process: an agent whose `fallback` section and whose voice are both
+unchanged keeps the clip it had across a `vinga apply`, and each of the
+two kinds of clip is re-synthesized only when its own section moves.
+Synthesis is bounded per phrase, so a provider that hangs delays the
+start by seconds rather than indefinitely; a phrase that will not
+synthesize in time, or at all, degrades to the display alone, with a
+`fallback_degraded` event naming the agent. That turn still shows the
+sentence and still closes with its `tts stop`, and only the audio is
+lost.
+
 ## Limits
 
 Three numbers bound what one server holds, and none is visible in normal
@@ -2225,10 +2280,18 @@ by default) has its request cancelled and the round retried once,
 logged as `llm_retry`; a second stall gives the round up as a
 `provider_failed` with `error: FirstTokenTimeout` and the session goes
 back to listening, so the worst a stalled provider can cost is one
-silent turn. Only the wait for the stream to begin is bounded: a long
-reply that is already streaming runs to the end, a round that streams
-nothing but a tool call counts as delivering too, and barging in still
-cancels a stalled round the way it cancels anything else. The
+turn, and that turn says so out loud (see [When a reply
+fails](#when-a-reply-fails)) rather than passing in silence. Only the
+wait for the stream to begin is bounded: a long reply that is already
+streaming runs to the end, a round that streams nothing but a tool call
+counts as delivering too, and barging in still cancels a stalled round
+the way it cancels anything else. The default is worth raising for one
+case in particular: a local model served by Ollama or llama.cpp loads
+its weights on the first request after a cold start, which routinely
+takes longer than ten seconds on a machine that has just booted or has
+evicted the model, so the first turn of the day gives up before the
+model has finished loading. Keeping the model resident, or raising this
+value on a deployment that runs one locally, is the remedy. The
 reasoning behind the default is in `config.example.yaml`.
 
 ## Logging
