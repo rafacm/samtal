@@ -1,9 +1,10 @@
 """What a device is answered when it asks what its backend is.
 
 The POST every board makes on every boot and the human GET beside it.
-The reply carries the websocket URL and its token, the wall clock, the
-firmware verdict, and, for a device nobody has claimed, the `activation`
-section that puts a six-digit code on its screen.
+The reply carries the websocket URL and its token, the word for how that
+token is to be read, the wall clock, the firmware verdict, and, for a
+device nobody has claimed, the `activation` section that puts a
+six-digit code on its screen.
 
 The decision behind that section is not made here. `activation_for` in
 `onboarding.unbound` answers what an unbound device gets and returns a
@@ -15,8 +16,9 @@ about the ceremony.
 
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -86,25 +88,67 @@ UNKNOWN_VERSION = "0.0.0"
 DEVICE_ID_PROBLEM = OtaRefusal.DEVICE_ID_UNREADABLE
 
 
+# How to read the token beside it, as a closed set of three literals.
+# Kept a `Literal` on this side of the wire, where the values are
+# produced: a value outside the set is a bug in this module, and the
+# type checker is where that is caught. What a client does with an
+# unrecognized one is the client's rule, not this one's.
+Access = Literal[
+    # Admitted, and the non-empty token beside this is the credential.
+    "token",
+    # Admitted, and this deployment issues no device tokens at all;
+    # connect without one.
+    "open",
+    # Not admitted: the token is empty because there is nothing to
+    # admit.
+    "denied",
+]
+
+
+@dataclass(frozen=True)
+class Admission:
+    """What this device is admitted with, and how the token beside it is
+    to be read.
+
+    One answer rather than two, because the empty string is the same six
+    bytes of nothing whether the deployment issues no tokens or the
+    device resolves to nothing to reach, and only this module knows
+    which of the two it just decided. A caller handed the token alone
+    would have to re-derive the reason from facts it does not have, and
+    a reply whose token and whose explanation were computed separately
+    could contradict each other.
+    """
+
+    token: str
+    access: Access
+
+
 def token_for(
     device_auth: DeviceAuth | None, client_id: str, mac: str, agents: Sequence[str]
-) -> str:
+) -> Admission:
     """The token this device gets, which is a token only when there is
-    something for it to reach.
+    something for it to reach, and the word for why.
 
     A device the configuration does not resolve to an agent is turned
     away at the websocket anyway, so issuing it a token would only widen
     what an unauthenticated endpoint hands out: the `devices` map plus
-    `default_agent` is the allowlist, and this is where it bites.
+    `default_agent` is the allowlist, and this is where it bites. That
+    device is `denied`, whatever the auth setting says, because being
+    unresolved is the stronger fact: turning authentication off does not
+    give a board an agent to talk to.
 
     The empty string is sent rather than the key omitted, in both the
     no-agent and the auth-disabled case, because the firmware persists
     what it is given: an empty token clears one left in NVS by another
-    server, where a missing key would leave it in place.
+    server, where a missing key would leave it in place. The two cases
+    are byte for byte identical on the wire, which is why the reply says
+    which one it is instead of leaving a reader to guess (#369).
     """
-    if device_auth is None or not agents:
-        return ""
-    return device_auth.issue(client_id, mac)
+    if not agents:
+        return Admission("", "denied")
+    if device_auth is None:
+        return Admission("", "open")
+    return Admission(device_auth.issue(client_id, mac), "token")
 
 
 def timezone_offset_minutes(server: ServerConfig) -> int:
@@ -250,6 +294,8 @@ async def check_version(request: Request) -> Response:
             )
         )
 
+    admission = token_for(comp.device_auth, client_id, mac, agents)
+
     body: dict[str, Any] = {}
     if activation is not None:
         # First, the way upstream's own reply carries it, and present
@@ -270,13 +316,28 @@ async def check_version(request: Request) -> Response:
             # what it is about to talk to. The firmware reads the keys it
             # knows and ignores the rest, so this is additive.
             "server": {"name": "vinga-server", "version": __version__, "revision": revision()},
+            # How to read the token below, for a client that has to tell
+            # an admitted board on a deployment issuing no tokens from a
+            # board that was turned away: the two get the same empty
+            # string, and this is the only side that knows which it just
+            # decided (#369).
+            #
+            # Top level, and deliberately not a member of `websocket`.
+            # The two boundaries differ in what stock firmware does with
+            # them: it parses exactly `activation`, `mqtt`, `websocket`,
+            # `server_time` and `firmware` and ignores every other
+            # top-level key, which is what makes this additive the same
+            # way `server` above is, while it writes every member of
+            # `websocket` into NVS, so a key added there would leave a
+            # stray NVS entry on every stock board.
+            "access": admission.access,
             "websocket": {
                 # The empty token stays beside the activation object: a
                 # device showing a code has nothing to reach yet, and the
                 # firmware persists what it is handed, so an empty string
                 # clears one another server left in NVS.
                 "url": websocket_url_for(server, request),
-                "token": token_for(comp.device_auth, client_id, mac, agents),
+                "token": admission.token,
                 "version": server.protocol_version,
             },
         }
