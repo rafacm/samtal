@@ -257,6 +257,36 @@ def test_a_pending_row_naming_a_verb_that_already_exists_fails() -> None:
         nothing_is_claimed_that_this_version_did_not_ship(parked)
 
 
+# What the declared kind buys
+
+
+def test_a_prose_row_may_open_with_a_direction_word() -> None:
+    """The trap the kind removes, in the exact shape it had.
+
+    A prose row whose text begins `reading ` used to be a message row to
+    the pin below, which told the two halves of the wire apart by that
+    prefix, so the firmware row is worded around it. Declared `PROSE`,
+    the same words pass, and a future row can say what it means.
+
+    Scoped to this one assertion on purpose. The rendering helper reads
+    the canonical `rows()` rather than the tuple it is handed, so a row
+    appended here is absent from the page by construction, and patching
+    the module's table to hold a synthetic row would pin the patch
+    rather than the freedom.
+    """
+    augmented = (
+        *capabilities.rows(),
+        capabilities.Capability(
+            what="reading the reply's firmware block the way a board reads it",
+            side=capabilities.SUPPORTED,
+            kind=capabilities.PROSE,
+            verb=capabilities.CHECK_IN,
+        ),
+    )
+
+    every_declared_message_is_classified(augmented)
+
+
 # What keeps the kind a closed set, since the alias does not
 #
 # `RowKind` is a `Literal`, and nothing enforces it here: this module is
