@@ -247,9 +247,12 @@ Existing assets carry the shapes; nothing they pin is restated.
   log in either format; `DeviceGone` and cancellation still
   produce nothing; with `enabled: false` the turn is byte-for-byte
   today's silence. The two "ends quietly" characterization pins
-  (`test_session_characterization.py` 477, 507) are re-cut for the
-  new default and their disabled-config variants keep the old
-  claim.
+  (`test_session_characterization.py` 477, 507) stay untouched and
+  silent under the default-on configuration, because what they
+  drive is a send-path failure translated to `DeviceGone`, which
+  must stay silent whatever the configuration says; the
+  enabled-fallback and disabled-silence behaviors get their own
+  new general-exception cases beside them.
 - **The clip is cached, not synthesized at failure time**: the TTS
   provider fake counts synthesis calls; a failure turn adds none.
   A fallback phrase that fails boot synthesis disables with the
@@ -408,6 +411,10 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    pins silent under the default-on configuration and add separate
    general-exception cases for enabled fallback and disabled
    silence.
+
+   *Resolution*: accepted in full; both pins stay untouched with
+   the reason stated in the test plan, and the new behaviors get
+   their own general-exception cases.
 
 4. **P1: a failed boot synthesis unnecessarily removes the
    required display fallback.** The display message needs no PCM
