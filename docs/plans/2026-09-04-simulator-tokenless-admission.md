@@ -164,6 +164,13 @@ recorded here rather than re-derived.
   the older-server reading, since the ceremony-then-`Unwelcome`
   sequence is precisely what an auth-off deployment on an old image
   produces.
+- The token-minting vocabulary around the claim flow is retired
+  wherever tokenless admission falsifies it: `CLAIM_HELP` stops
+  promising that the follow-up check-in issues a token,
+  `_claimed`'s explanation of its fourth step speaks of the final
+  check-in admitting the board rather than minting a credential,
+  and the capability rows that repeat the promise move with them,
+  with `docs/reference/cli.md` regenerated.
 
 ## Module layout
 
@@ -361,6 +368,11 @@ read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
    terms. Replace these with the final websocket admission
    vocabulary, update both affected capability rows, and
    regenerate the CLI reference.
+
+   *Resolution*: accepted in full. The sentences section gains the
+   retirement of the token-minting vocabulary (`CLAIM_HELP`, the
+   `_claimed` fourth-step explanation, both capability rows), and
+   M2 already carried the CLI reference regeneration.
 
 6. **P2: unknown `access` handling is underspecified and lacks the
    required no-leak pin.** A `Literal`-typed consumer field would
