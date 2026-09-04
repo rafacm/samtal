@@ -35,6 +35,7 @@ would have called the whole of it supported and been two thirds false.
 
 import textwrap
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -50,6 +51,28 @@ SUPPORTED = "supported"
 UNSUPPORTED = "not supported"
 
 PENDING = "not available yet"
+
+# The two kinds of row, as a closed set on the side that produces it.
+# Every value is authored in this module, so a value outside the set is
+# a bug here, which is the same reason `Access` in `ota/reply.py` is a
+# `Literal` rather than a `str`.
+#
+# What the kind decides is whether a row is one of the wire's own
+# messages, derived from `protocol/messages.py` below, or one of the
+# written statements about everything else. That used to be read off
+# the row's first word, which made the English of a prose row load
+# bearing; a row now says which it is.
+RowKind = Literal[
+    # Derived from the protocol's own models, and named by
+    # `named_message`.
+    "message",
+    # Written by hand in `_PROSE_ROWS`, in whatever words say it best.
+    "prose",
+]
+
+MESSAGE: RowKind = "message"
+
+PROSE: RowKind = "prose"
 
 # The two verbs of the noun. A row names one of them, and which side it
 # may sit on follows from whether the registered tree has that verb yet,
@@ -83,6 +106,11 @@ class Capability:
 
     # Which of the three sides it sits on.
     side: str
+
+    # Which of the two kinds of row it is. Required rather than
+    # defaulted, because a default is a classification nobody wrote and
+    # the point of the field is that the classification is declared.
+    kind: RowKind
 
     # Why it will never be done, which every `UNSUPPORTED` row carries
     # and no other row does. An "honest" statement that lists nothing
@@ -242,8 +270,8 @@ def _classified(what: str, reason: str) -> Capability:
     a milestone advertising the next one's work.
     """
     if reason:
-        return Capability(what=what, side=UNSUPPORTED, reason=reason)
-    return Capability(what=what, side=SUPPORTED, verb=RUN)
+        return Capability(what=what, side=UNSUPPORTED, kind=MESSAGE, reason=reason)
+    return Capability(what=what, side=SUPPORTED, kind=MESSAGE, verb=RUN)
 
 
 # Everything that is not a message, written out because it is not
@@ -254,6 +282,7 @@ _PROSE_ROWS: tuple[Capability, ...] = (
         what="the check-in POST, with the two headers the handler reads and the body "
         "shape the firmware sends",
         side=SUPPORTED,
+        kind=PROSE,
         verb=CHECK_IN,
     ),
     Capability(
@@ -262,34 +291,36 @@ _PROSE_ROWS: tuple[Capability, ...] = (
         "the device token, so a board a deployment issuing none admits is admitted "
         "rather than turned away",
         side=SUPPORTED,
+        kind=PROSE,
         verb=CHECK_IN,
     ),
     Capability(
         what="no redirect is followed, which is the firmware's own behavior and the "
         "reason every device-facing route serves the slashless spelling directly",
         side=SUPPORTED,
+        kind=PROSE,
         verb=CHECK_IN,
     ),
     Capability(
         what="the activation poll at Activation-Version 1, in the firmware's cadence of "
         "ten polls three seconds apart, bounded",
         side=SUPPORTED,
+        kind=PROSE,
         verb=CHECK_IN,
     ),
     Capability(
         what="claiming this board through the configuration API with --claim, and "
         "checking in again afterwards to be admitted",
         side=SUPPORTED,
+        kind=PROSE,
         verb=CHECK_IN,
     ),
-    # Deliberately not phrased as "reading ...": a row whose text starts
-    # with `reading ` or `sending ` is a message row to the both-ways
-    # pin, which reads the two halves of the wire off their prefixes.
     Capability(
         what="the reply's firmware block, read and reported as a board reads it: "
         "whether an image was offered, and whether the version named back is the one "
         "this board announced",
         side=SUPPORTED,
+        kind=PROSE,
         verb=CHECK_IN,
     ),
     Capability(
@@ -297,41 +328,48 @@ _PROSE_ROWS: tuple[Capability, ...] = (
         "Protocol-Version headers; the last is sent because the firmware sends it and "
         "this server reads nothing from it",
         side=SUPPORTED,
+        kind=PROSE,
         verb=RUN,
     ),
     Capability(
         what="the hello exchange, announcing whichever framing version the check-in "
         "reply named, as a websocket text frame",
         side=SUPPORTED,
+        kind=PROSE,
         verb=RUN,
     ),
     Capability(
         what="one packaged utterance of Opus, paced the way a microphone delivers it and "
         "sent under the negotiated framing",
         side=SUPPORTED,
+        kind=PROSE,
         verb=RUN,
     ),
     Capability(
         what="binary reply frames, counted, size-checked and unwrapped, with the reply's "
         "duration computed from the frame count",
         side=SUPPORTED,
+        kind=PROSE,
         verb=RUN,
     ),
     Capability(
         what="the close, reported by its code compared against the closed set this side "
         "knows and named in this side's own words",
         side=SUPPORTED,
+        kind=PROSE,
         verb=RUN,
     ),
     Capability(
         what="one turn and one only: the reply is read to its end and then the socket is "
         "closed",
         side=SUPPORTED,
+        kind=PROSE,
         verb=RUN,
     ),
     Capability(
         what="a real microphone and speakers",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="they need PortAudio and a runtime encoder, a push-to-talk loop has no "
         "non-interactive path at all, and no CI runner has an audio device, so it "
         "would ship as a headline feature no lane could drive",
@@ -339,6 +377,7 @@ _PROSE_ROWS: tuple[Capability, ...] = (
     Capability(
         what="saying anything but the one packaged sentence",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="the audio is encoded once at build time so that what this sends is "
         "byte-identical on a laptop and on a runner; there is no codec in any tier "
         "to encode something else with",
@@ -346,6 +385,7 @@ _PROSE_ROWS: tuple[Capability, ...] = (
     Capability(
         what="echo cancellation and barge-in",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="the board's own AEC quality is the number the whole barge-in gate stack "
         "is built around and it is invisible from the server, and a simulator with "
         "no playback has nothing to cancel",
@@ -353,12 +393,14 @@ _PROSE_ROWS: tuple[Capability, ...] = (
     Capability(
         what="decoding or playing the reply audio",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="no codec ships in any tier, so what is reported about reply audio is "
         "arithmetic over frames rather than sound",
     ),
     Capability(
         what="fetching and installing a firmware image",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="the block that offers one is read and reported, per the supported row "
         "above, and nothing is ever downloaded: there are no partitions here to "
         "write an image to and no bootloader to hand it to",
@@ -366,18 +408,21 @@ _PROSE_ROWS: tuple[Capability, ...] = (
     Capability(
         what="MQTT and UDP",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="vinga implements the websocket transport and promises no other, which is "
         "a bound of the compatibility promise itself",
     ),
     Capability(
         what="Activation-Version 2 and its HMAC",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="the key is burned into a device's eFuses and only the vendor's cloud has "
         "a copy, which is equally true of every consumer board",
     ),
     Capability(
         what="the display, the captive portal and NVS",
         side=UNSUPPORTED,
+        kind=PROSE,
         reason="this simulator is pointed at a URL rather than provisioned into one, so "
         "there is nothing to draw on and nothing to persist",
     ),
@@ -442,12 +487,15 @@ __all__ = [
     "CHECK_IN",
     "HEADINGS",
     "INTRODUCTION",
+    "MESSAGE",
     "NONE_DECLARED",
     "PENDING",
+    "PROSE",
     "RUN",
     "SUPPORTED",
     "UNSUPPORTED",
     "Capability",
+    "RowKind",
     "epilog",
     "named_message",
     "received_messages",
