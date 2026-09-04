@@ -144,7 +144,10 @@ def test_an_invented_entry_fails_it_from_the_other_side() -> None:
     invented = (
         *capabilities.rows(),
         capabilities.Capability(
-            what="sending frobnicate", side=capabilities.PENDING, verb=capabilities.RUN
+            what="sending frobnicate",
+            side=capabilities.PENDING,
+            kind=capabilities.MESSAGE,
+            verb=capabilities.RUN,
         ),
     )
 
@@ -201,6 +204,7 @@ def test_a_row_claiming_a_verb_the_tree_does_not_have_fails() -> None:
         capabilities.Capability(
             what="playing the reply out loud",
             side=capabilities.SUPPORTED,
+            kind=capabilities.PROSE,
             verb=("simulator", "listen"),
         ),
     )
@@ -215,7 +219,10 @@ def test_a_pending_row_naming_a_verb_that_already_exists_fails() -> None:
     parked = (
         *capabilities.rows(),
         capabilities.Capability(
-            what="checking in", side=capabilities.PENDING, verb=capabilities.CHECK_IN
+            what="checking in",
+            side=capabilities.PENDING,
+            kind=capabilities.PROSE,
+            verb=capabilities.CHECK_IN,
         ),
     )
 
