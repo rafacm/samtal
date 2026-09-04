@@ -216,7 +216,10 @@ def test_a_recorded_provider_carries_no_credential(store: ConfigStore) -> None:
             body=dumped(
                 ProviderConfig(
                     type="anthropic",
-                    base_url=f"https://user:{SECRET}@host/v1?api_key={OTHER_SECRET}",
+                    base_url=(
+                        f"https://user:{SECRET}@host/v1?api_key={OTHER_SECRET}"
+                        f"&auth={OTHER_SECRET}"
+                    ),
                     connection={"endpoint": f"https://{SECRET}@host"},
                 )
             )

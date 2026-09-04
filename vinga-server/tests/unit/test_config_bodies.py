@@ -379,6 +379,34 @@ def test_no_committed_body_holds_a_credential(
         assert value.startswith("$") or is_env_name(value), f"{path}: {where}"
 
 
+def test_the_sweep_catches_every_shape_a_url_hides_a_credential_in() -> None:
+    """The counterexamples the sweep above cannot carry.
+
+    That suite asks one predicate of every committed string, so it is
+    worth exactly what the predicate is worth, and a predicate that
+    answered None to a real credential would leave it green over a
+    fixture holding one. The counterexamples belong here rather than in
+    a file: none of them may be committed, which is the whole point of
+    the sweep.
+
+    The last two are the ones that used to get through. A query
+    parameter is named by the vendor whose endpoint it addresses, and
+    the rule read the narrower set of names a provider option is held
+    to, which has no word for `auth` (#279).
+    """
+    for hidden in (
+        f"https://user:{SECRET}@host/mcp",
+        f"https://host/mcp?token={SECRET}",
+        f"https://host/mcp?auth={SECRET}",
+        f"https://host/mcp?authorization={SECRET}",
+    ):
+        assert url_credential(hidden) is not None, hidden
+
+    # And the control, without which the four above would pass on a
+    # predicate that answered "a credential" to everything.
+    assert url_credential("https://host/mcp?model=small") is None
+
+
 def _strings(value: object, key: str = "") -> Iterator[tuple[str, str]]:
     """Every string in a body with the key it was written under."""
     if isinstance(value, dict):

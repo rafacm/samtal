@@ -700,6 +700,42 @@ PLANTED_KEYS = [
         lambda store, fragment: store.set_mcp_server("home", fragment),
         URL_KEY_SENTINEL,
     ),
+    # The two query spellings a provider option's narrower rule never
+    # matched. A query parameter is named by the vendor whose endpoint
+    # it addresses, so the rule reads the wider set of names (#279), and
+    # the same widening reaches a provider's address, which is the third
+    # row below.
+    PlantedKey(
+        "an auth query parameter on an MCP server's url",
+        "/mcp-servers/home",
+        {
+            "transport": "streamable_http",
+            "url": f"https://host/mcp?auth={URL_KEY_SENTINEL}",
+        },
+        lambda store, fragment: store.set_mcp_server("home", fragment),
+        URL_KEY_SENTINEL,
+    ),
+    PlantedKey(
+        "an authorization query parameter on an MCP server's url",
+        "/mcp-servers/home",
+        {
+            "transport": "streamable_http",
+            "url": f"https://host/mcp?authorization={URL_KEY_SENTINEL}",
+        },
+        lambda store, fragment: store.set_mcp_server("home", fragment),
+        URL_KEY_SENTINEL,
+    ),
+    PlantedKey(
+        "an auth query parameter on a provider's base_url",
+        "/providers/llm/local",
+        {
+            "type": "openai_compatible",
+            "model": "qwen3:8b",
+            "base_url": f"https://host/v1?auth={URL_KEY_SENTINEL}",
+        },
+        lambda store, fragment: store.set_provider("llm", "local", fragment),
+        URL_KEY_SENTINEL,
+    ),
 ]
 
 PLANTED_IDS = [case.what for case in PLANTED_KEYS]
@@ -876,11 +912,29 @@ def test_the_cli_prints_a_url_credential_refusal_without_the_key(
     assert "api_key_env" in printed
 
 
+@pytest.mark.parametrize(
+    ("url", "rule"),
+    [
+        (
+            f"https://user:{URL_KEY_SENTINEL}@host/mcp",
+            "user and password before its host",
+        ),
+        (f"https://host/mcp?token={URL_KEY_SENTINEL}", "credential as a query parameter"),
+        (f"https://host/mcp?auth={URL_KEY_SENTINEL}", "credential as a query parameter"),
+        (
+            f"https://host/mcp?authorization={URL_KEY_SENTINEL}",
+            "credential as a query parameter",
+        ),
+    ],
+    ids=["userinfo", "a token parameter", "an auth parameter", "an authorization parameter"],
+)
 def test_the_cli_prints_an_mcp_url_credential_refusal_without_the_value(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     store: ConfigStore,
+    url: str,
+    rule: str,
 ) -> None:
     """The same discipline for the rule one section over (#279).
 
@@ -889,8 +943,12 @@ def test_the_cli_prints_an_mcp_url_credential_refusal_without_the_value(
     declared field of a closed model, so the refusal always names it,
     and what may not be printed is only the value. Both halves are one
     string again: the CLI prints what the repository said.
+
+    Every shape the predicate answers, including the two query spellings
+    a provider option's narrower rule never matched, because a terminal
+    is where an operator meets the rule and a shape that is refused
+    silently somewhere else is not refused here.
     """
-    url = f"https://user:{URL_KEY_SENTINEL}@host/mcp"
     fragment = {"transport": "streamable_http", "url": url}
     with pytest.raises(ConfigError) as caught:
         store.set_mcp_server("weather", fragment)
@@ -913,7 +971,7 @@ def test_the_cli_prints_an_mcp_url_credential_refusal_without_the_value(
     # What is left is what an operator needs: the field, the rule, and
     # what to do instead.
     assert "mcp_servers.weather.url" in printed
-    assert "user and password before its host" in printed
+    assert rule in printed
     assert "headers.Authorization" in printed
 
 
