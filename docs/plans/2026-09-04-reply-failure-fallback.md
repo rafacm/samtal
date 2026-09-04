@@ -189,14 +189,24 @@ assistant turns, nor the `TurnRecord`, nor any event payload or
 log line, and the sentinel case in the tests proves every one of
 those absences.
 
-**Nothing replaces a withheld sentence unless nothing else spoke.**
-Mid-reply, a withheld sentence is dropped and its event emitted;
-the surrounding answer speaks, which is the issue's own
-constraint. When the reply ends with `spoken` empty and at least
-one sentence withheld, the user is about to get the exact silence
-#384 exists to end, so the same fallback plays (its event carrying
-the other reason). That happens at the end of `_speak_reply`, not
-by raising, so the reply-failed log stays what it means.
+**Nothing replaces a withheld sentence unless nothing else spoke,
+and "nothing else spoke" is a reply-wide fact.** Mid-reply, a
+withheld sentence is dropped and its event emitted; the
+surrounding answer speaks, which is the issue's own constraint.
+`spoken` cannot carry the reply-wide question, because
+`_speak_reply` clears it after every completed leg, so a reply
+where an earlier agent spoke and the final leg was wholly withheld
+would look empty. The check therefore reads two per-reply facts
+owned by `_speak_reply` and listed in the runtime docstring's
+state inventory: whether any sentence of this reply was spoken
+across all legs, and whether any was withheld. When the reply ends
+having spoken nothing and withheld something, the user is about to
+get the exact silence #384 exists to end, so the same fallback
+plays (its event carrying the other reason). That happens at the
+end of `_speak_reply`, not by raising, so the reply-failed log
+stays what it means. The tests drive both handover orders: speech
+before a withheld final leg plays no fallback; a wholly unsayable
+multi-leg reply plays it.
 
 **Two event declarations, payloads under the content rule.**
 
@@ -443,6 +453,10 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    leg, so an earlier leg's speech followed by a withheld final
    leg reads as empty. Introduce a reply-wide fact that survives
    leg clearing, and test both handover orders.
+
+   *Resolution*: accepted in full; the check reads two reply-wide
+   facts owned by `_speak_reply` and listed in the runtime state
+   inventory, and both handover orders are in the test plan.
 
 6. **P1: one `sentence_withheld` variant cannot safely express the
    promised tool fragment.** `_tool_fragment` returns three
