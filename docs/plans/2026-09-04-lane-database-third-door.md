@@ -86,10 +86,33 @@ the required order. `_database_default` becomes a call to it with
 the lane values; `packaged_database` (the mirror fixture that
 temporarily restores the shipped defaults and today rebuilds only
 `DatabaseConfig`, which would re-create the asymmetry in the
-opposite direction) becomes two calls to it, shipped values in,
+opposite direction) becomes two calls to it, shipped condition in,
 lane values back. The order constraint and the reason (a child's
 rebuild does not propagate) live as a comment on the helper, since
 that is the fact a future editor must not lose.
+
+The packaged span is ordering-safe by owning its own environment
+edits, because fixture and monkeypatch finalizers from different
+owners have no ordering contract and the failure is a poisoned
+xdist worker that keeps executing other files while the lane pin
+runs elsewhere: the fixture snapshots and restores the environment
+itself within its own single finalizer, the consuming test asks
+the fixture for any in-span override rather than monkeypatching
+`VINGA_DB_NAME` beside it (the existing consumer is rewritten onto
+that shape), and the finalizer's last statements assert, in the
+same process, that `os.environ` carries the lane name and that a
+payload composition (`ServerConfig(**{"database": {}})`) resolves
+to the lane database, so a broken restoration fails loudly in the
+worker it would poison.
+
+The helper also represents environment-name presence as its own
+fact rather than a value: the shipped condition means
+`VINGA_DB_NAME` is absent (the existing fixture deliberately
+removes it so `load_file_config()` exercises the package default,
+and a helper that set it to `vinga` would let the default test
+pass through an override with the model default still broken),
+while the lane condition sets it to the lane database; both
+transitions rebuild the complete cascade.
 
 **The pin grows a third door and a completeness half.**
 `test_lane_database.py`'s agreement test was framed as "the
@@ -198,6 +221,11 @@ ready after the P1/P2 amendments.
    name and a payload composition, and do not rely on fixture
    teardown order.
 
+   *Resolution*: accepted in full; the packaged span owns its own
+   environment edits in one finalizer, the consumer is rewritten
+   onto the fixture's API, and the finalizer ends with the
+   same-process env and payload assertions.
+
 2. **P2: setting `VINGA_DB_NAME=vinga` does not restore the
    shipped-default condition.** The existing fixture removes the
    variable so the package default is what answers; a helper that
@@ -206,6 +234,10 @@ ready after the P1/P2 amendments.
    represent env-name presence separately: absent during the
    packaged span, `LANE_DATABASE` during the lane span, both
    transitions rebuilding the full cascade.
+
+   *Resolution*: accepted in full; the helper carries presence as
+   its own fact, absent in the shipped condition with the reason
+   recorded.
 
 3. **P2: the call-site census misses a partial payload in the
    integration lane.** `_restricted_app` in
