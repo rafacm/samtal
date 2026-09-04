@@ -2080,6 +2080,73 @@ def _check_entry_name(
         raise ConfigError(problem)
 
 
+def _checked_mcp_server(
+    location: str, identity: tuple[str, ...], entry: McpServerConfig
+) -> None:
+    """What an MCP entry has to survive beyond its own model, in the
+    order a refusal is most useful in.
+
+    The name comes first, because it is what the rest of the entry is
+    addressed by and because a name this repository will not accept is
+    the thing to say before anything about the body. The URL rule below
+    is asked of whatever survived, and neither refusal quotes a value.
+    """
+    _check_entry_name(location, identity, entry)
+    _check_no_mcp_url_credential(location, identity, entry)
+
+
+def _check_no_mcp_url_credential(
+    location: str, identity: tuple[str, ...], entry: McpServerConfig
+) -> None:
+    """An MCP server's address holds no credential, the provider rule
+    one section over.
+
+    `url` is the same shape `base_url` is: an innocent field name whose
+    value can carry the whole credential, and
+    `url: https://user:password@host/mcp` passes every secret-shaped-key
+    rule this model has, since the key admits to nothing. Stored, it is
+    read back on every display path. So it is refused where it is
+    chosen.
+
+    One declared scalar and no further, deliberately: `headers` and
+    `env` carry their own rules about what a secret-bearing key may
+    hold, and this one has nothing to add to them. An entry with no
+    `url` at all, which is every stdio server, is not a URL and so is
+    not this rule's business; `url_credential` answers that on its own
+    and needs no case here.
+
+    Write time only, exactly like the provider's rule and for the same
+    reason: a row written before this rule still boots, still reads and
+    is still deletable, and a deployment does not get a server that
+    refuses to start over a value it can no longer edit.
+
+    The refusal names the field and the rule and never the value: what
+    fails this check is a credential. Naming the field is safe here in a
+    way it is not for a provider option, because `url` is a name this
+    repository declared rather than one the caller invented.
+    """
+    carried = url_credential(entry.url)
+    if carried == "userinfo":
+        raise ConfigError(
+            f'"{location}.url" is a URL carrying a user and password before its '
+            f"host, which is not allowed: this value is stored as written and "
+            f"shown on every read of this MCP server. Write the address on its "
+            f"own and send the credential as a header whose value is read from "
+            f"the server's own environment at startup, for example "
+            f"headers.Authorization: $MY_MCP_TOKEN. The value is not quoted back"
+        )
+    if carried == "query":
+        raise ConfigError(
+            f'"{location}.url" is a URL carrying a credential as a query '
+            f"parameter, which is not allowed, for the reason a user and "
+            f"password before the host is not: this value is stored as written "
+            f"and shown on every read of this MCP server. Send the credential as "
+            f"a header whose value is read from the server's own environment at "
+            f"startup instead, for example headers.Authorization: $MY_MCP_TOKEN. "
+            f"The value is not quoted back"
+        )
+
+
 def _checked_provider(
     location: str, identity: tuple[str, ...], entry: ProviderConfig
 ) -> None:
@@ -2190,7 +2257,7 @@ _STORAGE: dict[str, _Storage] = {
     "provider": _Storage(
         inside_write=_checked_provider, inside_read=_stored_option_types
     ),
-    "mcp-server": _Storage(inside_write=_check_entry_name),
+    "mcp-server": _Storage(inside_write=_checked_mcp_server),
     "prompt-fragment": _Storage(before_parse=_check_fragment_name),
     "agent": _Storage(),
     "agent-defaults": _Storage(),
