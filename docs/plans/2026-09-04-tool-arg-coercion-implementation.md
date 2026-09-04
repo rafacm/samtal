@@ -174,3 +174,53 @@ cannot depend on a minted id (`cb43c4bc`).
 `tests/unit/command-spellings.txt` was regenerated with
 `uv run python -m tests.unit.test_command_spellings` after the document
 edits, which is what moves its line numbers.
+
+### PR review round
+
+External review of the branch as pushed to PR #389, at `a71b5d06`
+against `origin/main`: backend codex (codex-cli 0.153.0), model
+gpt-5.6-sol, 2026-09-04, runtime 6m51s. One finding, a P2. Confirmed
+against the sources before being fixed.
+
+1. **P2: an unchanged `NaN` is reported as coerced.** `_coercions` in
+   `runtime/pipeline.py` decided whether an argument changed with
+   `held != sent[name]`, and `NaN != NaN` is true. A model can send one:
+   `providers/openai_llm.py` decodes with Python's permissive
+   `json.loads`, which accepts `NaN`, `Infinity` and `-Infinity`. So an
+   untouched non-finite float produced `coerced == 1`, an execution copy
+   nobody needed, and a `tool_arguments_coerced` event saying this
+   server converted something it did not. Fix: ask identity before
+   comparing values, or have the coercion answer explicit
+   changed-property metadata; and check that the float-to-integer case,
+   where `100 == 100.0`, is not read as unchanged by whatever replaces
+   the comparison.
+
+   *Resolution* (`00321882`): accepted and fixed by identity, which is
+   the honest question rather than the cheaper one.
+   `with_lossless_coercions` already answered the object it was handed
+   for every value it left alone, so identity distinguishes a converted
+   argument from an untouched one without comparing anything; the
+   contract is now stated in the function's own docstring as well as in
+   the count that reads it, since two modules rely on it. The
+   type-and-value comparison stays as the second half, so a float
+   rewritten as the integer its schema declares still counts as the
+   change it is. Three pins came with it: `NaN` through the loop with
+   the event silent and `_for_execution` asked directly that it answered
+   the call it was given (an unchanged value looks identical on the wire
+   whether or not a copy carried it, so the copy is observable nowhere
+   else); a mixed call carrying one real conversion and one `NaN`,
+   counting one; and the float-to-integer conversion counting one, which
+   is the half comparison alone would have got wrong. The unit suite
+   pins the contract itself, that a value no rule converted comes back
+   as the same object. Both new session cases were run against the
+   unfixed count and both fail there.
+
+#### Verification after the review round
+
+Run from `vinga-server/`, against a development Postgres on 5432.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 5 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, which is how CI
+  runs the lane: `5347 passed, 19 skipped in 78.97s`
+- The four new cases serially: `4 passed in 0.87s`
