@@ -281,7 +281,7 @@ simulator's `read()` applies it, and no third place re-derives it.
 ## Milestones
 
 - [x] **[M1: the reply says why the token is empty](2026-09-04-simulator-tokenless-admission-implementation.md#m1-the-reply-says-why-the-token-is-empty).**
-  (PR TBD)
+  (PR [#387](https://github.com/rafacm/vinga/pull/387))
   `token_for` deepened to answer (token, access); the reply body
   gains the closed top-level `access` field; the server-half tests
   above; the protocol addition recorded in `docs/xiaozhi-notes.md`
