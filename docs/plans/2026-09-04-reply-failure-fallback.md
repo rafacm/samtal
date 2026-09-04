@@ -127,9 +127,16 @@ reporting any other failure by class name outside the arm,
 filler-style. The failure arm calls it after the reply-failed log and
 after `await self._filler.settle()` (so a sounding filler clip is
 not talked over and the shared encoder is not interleaved); the
-`finally`'s own `settle()` stays and is idempotent. The arm's call
-cannot prevent `finish_speaking`, because `speak_fallback` does
-not raise. `CancelledError` and `DeviceGone` arms are untouched.
+`finally`'s own `settle()` stays and is idempotent. The contract,
+exactly the filler runner's own: `CancelledError` propagates,
+because swallowing it would consume a barge-in or an abort and the
+outer `finally` runs and sends `tts stop` either way;
+`DeviceGone` is swallowed; every other failure is sanitized to its
+class name and swallowed, reported outside the arm. So the arm's
+call cannot prevent `finish_speaking`, and a cancellation arriving
+mid-fallback stops the clip promptly with `tts stop` still
+attempted exactly once, which the tests drive. The `_reply`
+`CancelledError` and `DeviceGone` arms are untouched.
 
 **Config: an agent-layer `fallback` section, on by default.**
 `FallbackConfig` beside `FillerConfig`: `enabled: bool = True`,
@@ -332,7 +339,9 @@ Existing assets carry the shapes; nothing they pin is restated.
   filler's no-await-between-encoder-calls recipe verbatim; the
   encoder-interleaving test variant is the tripwire.
 - **The finally must survive the fallback.** `speak_fallback`
-  never raises by contract and the arm calls nothing else; the
+  raises nothing but `CancelledError` by contract, the outer
+  `finally` runs under cancellation too, and the arm calls nothing
+  else; the
   reply-failures suite drives a fallback whose own send explodes
   and asserts the closing `tts stop` still goes out and exactly
   one reply-failed line is logged.
@@ -486,6 +495,13 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    ordinary failures sanitized and swallowed, and test
    cancellation after playback has begun with `tts stop` still
    attempted exactly once.
+
+   *Resolution*: accepted in full; the contract is restated as the
+   filler runner's own (`CancelledError` propagates, `DeviceGone`
+   swallowed, the rest sanitized and swallowed) and the
+   mid-playback cancellation case is in the test plan. The
+   "explodes mid-fallback" risk case keeps its claim, since only
+   non-cancellation failures are swallowed.
 
 8. **P2: independent filler and fallback caching does not fit the
    current generation and reload result.** `Fillers`' single clip
