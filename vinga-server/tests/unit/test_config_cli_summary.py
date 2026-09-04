@@ -1,21 +1,27 @@
-"""`vinga list`: the tree it prints, and the document it prints it from.
+"""The commands that render the whole masked configuration, and the
+document all of them render it from.
 
-One command and one act, and the act's answer is the whole masked
-configuration. `ConfigDocument` declares that document as
-`dict[str, Any]` and stops there, deliberately: the entity models cannot
-validate an entry whose credential-bearing values have been replaced by
-the mask. So everything the tree walks into is a body nobody has
-vouched for, and it arrives from whatever answered at `--api-url`.
+Three of them, one act apiece and the same act: `list` prints the tree,
+`show` prints the document as the YAML file has it, and `export` prints
+the same document as the applicable one. (`info` prints a count per
+kind off the same read; its own file is beside this one, because what
+that command is about is which deployment answered.) `ConfigDocument`
+declares that document as `dict[str, Any]` and stops there,
+deliberately: the entity models cannot validate an entry whose
+credential-bearing values have been replaced by the mask. So everything
+these renderers walk into is a body nobody has vouched for, and it
+arrives from whatever answered at `--api-url`.
 
-Two halves, in the order they matter. The first is the rendering itself,
-pinned whole: the tree is what an operator reads a deployment off, so a
-line moving is a change to the artifact rather than to an
-implementation, and the byte-exact pins are what make the gate below a
-refactor rather than a rewrite. The second is the gate: every section
-is read as the shape the registry says it has, so a section that is a
-scalar, a list or absent meets the one fixed sentence a body this client
-cannot read gets, and every value the tree prints out of the document
-goes through the display door on its way to the terminal.
+Two halves, in the order they matter. The first is the renderings
+themselves, pinned whole: each is what an operator reads a deployment
+off, and `export` is a file another deployment is built from, so a line
+moving is a change to the artifact rather than to an implementation.
+The byte-exact pins are what make the gate below a refactor rather than
+a rewrite. The second is the gate: every section is read as the shape
+the registry says it has, so a section that is a scalar, a list or
+absent meets the one fixed sentence a body this client cannot read
+gets, and every value that reaches a line goes through the display door
+on its way to the terminal.
 """
 
 from pathlib import Path
@@ -151,6 +157,151 @@ def test_an_empty_deployment_names_every_section_it_has_nothing_in(
     assert run("list") == 0
 
     assert capsys.readouterr().out == EMPTY_TREE
+
+
+# The two documents beside the tree
+#
+# `show` and `export` render the same read the tree does, and neither is
+# a summary: what they print is the document itself, which is what makes
+# an export a file another deployment is built from. So they are pinned
+# as bytes for the same reason and with more at stake, and the
+# deployment behind these pins carries what the tree's does not: an MCP
+# server reached over HTTP with a reference-carrying header, a stored
+# credential shadowing that reference, and an agent whose grant is
+# written in the object form rather than as a bare server name.
+
+# The document half, which `show` prints alone and `export` prints under
+# its header. One constant because it IS one artifact: two copies could
+# drift, and a gate that perturbed the rendering of one would then be
+# caught by only one of the pins.
+DOCUMENT = """\
+providers:
+  llm:
+    brain:
+      type: mock
+  asr: {}
+  tts: {}
+  vad: {}
+mcp_servers:
+  house:
+    transport: streamable_http
+    url: https://example.invalid/mcp
+    headers:
+      Authorization: $HOUSE_TOKEN
+    tool_timeout_s: 15.0
+    use_server_instructions: false
+prompt_fragments:
+  household:
+    text: The bins go out.
+agent_defaults:
+  llm: brain
+agents:
+  sam:
+    prompt: You are Sam.
+    llm: brain
+    mcp:
+    - server: house
+      tools:
+      - turn_on
+devices:
+  aa:bb:cc:dd:ee:ff:
+  - sam
+default_agent: sam
+"""
+
+# What `show` writes under it: every stored credential named by its
+# location, masked, and marked where it displaces a reference the entity
+# also carries.
+SHOWN_SECRETS = """\
+
+# stored secrets, set with: vinga <kind> secret set
+#   mcp_server house headers.Authorization: ********  \
+(used instead of headers.Authorization: $HOUSE_TOKEN)
+#   provider llm.brain api_key: ********
+"""
+
+# And what `export` writes under it: the same credentials as the
+# commands that enter them, in the store's own order.
+EXPORTED_SECRETS = """\
+
+# Stored credentials are not exported. Enter each of them after the `vinga import`
+# and before the `vinga apply`:
+#   vinga mcp-server secret set -- house headers.Authorization
+#   vinga provider secret set -- llm brain api_key
+"""
+
+
+def documented(run) -> None:
+    """The deployment those two pins are taken from."""
+    assert run("provider", "set", "llm", "brain", "type=mock") == 0
+    assert (
+        run(
+            "mcp-server",
+            "set",
+            "house",
+            "-f",
+            "-",
+            stdin=(
+                "transport: streamable_http\n"
+                "url: https://example.invalid/mcp\n"
+                "headers:\n"
+                "  Authorization: $HOUSE_TOKEN\n"
+            ),
+        )
+        == 0
+    )
+    assert run("prompt-fragment", "set", "household", f"text={FRAGMENT}") == 0
+    assert (
+        run(
+            "agent",
+            "set",
+            "sam",
+            "-f",
+            "-",
+            stdin=(
+                "llm: brain\n"
+                "prompt: You are Sam.\n"
+                "mcp: [{server: house, tools: [turn_on]}]\n"
+            ),
+        )
+        == 0
+    )
+    assert run("agent-defaults", "set", "llm=brain") == 0
+    assert run("device", "bind", "aa:bb:cc:dd:ee:ff", "sam") == 0
+    assert run("default-agent", "set", "sam") == 0
+    assert run("provider", "secret", "set", "llm", "brain", "api_key", stdin="sk-x") == 0
+    assert (
+        run("mcp-server", "secret", "set", "house", "headers.Authorization", stdin="tok-x") == 0
+    )
+
+
+def test_show_prints_the_document_and_names_what_is_stored_beside_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    documented(run)
+    capsys.readouterr()
+
+    assert run("show") == 0
+
+    printed = capsys.readouterr()
+    assert printed.out == DOCUMENT + SHOWN_SECRETS
+    assert printed.err == ""
+
+
+def test_export_prints_the_same_document_as_one_that_can_be_applied(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The header is referenced rather than copied: it is prose with a
+    test of its own, and what this pins is the document under it and the
+    commands under that."""
+    documented(run)
+    capsys.readouterr()
+
+    assert run("export") == 0
+
+    printed = capsys.readouterr()
+    assert printed.out == cli.EXPORT_HEADER + DOCUMENT + EXPORTED_SECRETS
+    assert printed.err == ""
 
 
 # The document the tree is walked out of
