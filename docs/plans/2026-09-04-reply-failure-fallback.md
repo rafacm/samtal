@@ -109,11 +109,24 @@ the configured phrase with no clip, a terminal failure still sends
 the display message and closes with `tts stop`, only the audio is
 lost, and the telemetry below distinguishes the two without
 carrying the phrase. The
-cache result carries the fallback clip beside the filler clips per
-agent; the exact shape (a field on `FillerClips` versus a sibling
-mapping in `Fillers`) is the implementer's, with the constraint
-that one build pass produces both and the reload diff re-runs it
-exactly when either section or the voice changed. The deletion
+cache shape is settled here rather than left open. `FillerClips`
+stays exactly what it is; a frozen `FallbackClip` (phrase, clip
+bytes or `None` for display-only, sample rate) joins it, and
+`Fillers` grows a sibling per-agent mapping `fallbacks` beside
+`clips`, plus its own per-kind outcome names
+(`fallback_resynthesized`, `fallback_reused`,
+`fallback_degraded`), because the existing
+`resynthesized`/`reused`/`disabled` lists describe the filler and
+cannot honestly describe an agent whose filler was reused while
+its fallback resynthesized or failed. `Generation` carries the new
+mapping beside `fillers`; the reload result and its response model
+grow the per-kind outcome fields, which regenerates the OpenAPI
+document; `config/diff.py` gains `_FALLBACK_FIELDS` and
+`same_fallback` beside the filler pair; and `config/entities.py`
+gains the `fallback` `NestedShape` beside the filler's, with the
+`views.py` treatment for `phrase`. One build pass produces both
+kinds, and the reload diff re-runs each exactly when its own
+section or the voice changed. The deletion
 test rejects a new `fallback.py` build module: it would restate
 `build_agent_fillers` line for line against a second phrase list.
 
@@ -510,6 +523,13 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    structure in the plan: per-kind outcomes, generation wiring,
    reload response and OpenAPI changes, the diff surface, and the
    `config/entities.py` `NestedShape`.
+
+   *Resolution*: accepted in full; the cache shape section now
+   names `FallbackClip`, the `fallbacks` mapping, the three
+   per-kind outcome names, the generation wiring, the reload
+   response and OpenAPI regeneration, the diff pair and the
+   entities `NestedShape`, and no longer leaves the shape to the
+   implementer.
 
 9. **P2: fallback synthesis and playback failures have no honest
    telemetry surface.** `FillerDisabled`'s meaning is latency
