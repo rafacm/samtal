@@ -1552,7 +1552,11 @@ class _ProgressLine:
 
 
 @contextlib.contextmanager
-def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
+def narrated(
+    narrates: bool,
+    cadence_s: float | None = None,
+    clock: Callable[[], float] | None = None,
+) -> Iterator[None]:
     """One line on stderr for as long as a long wait lasts, at a
     terminal and nowhere else.
 
@@ -1570,20 +1574,21 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
     thread: there is no writer to be scheduled, no clock to be read, and
     no path by which a byte could reach a redirected stream.
 
-    The clock is monotonic, because what is displayed is a duration and
-    a wall clock stepping backwards mid-import would show one that ran
-    backwards with it.
+    Two seams, both for tests and both read as None rather than as false
+    values, because absent and zero are two different answers.
+    `cadence_s` is how often the line is redrawn, so that a test can
+    drive several redraws without waiting seconds for them; `clock` is
+    where elapsed time comes from, so that a test can assert the number
+    on the line moves rather than that something was drawn three times.
+    The clock's default is monotonic, because what is displayed is a
+    duration and a wall clock stepping backwards mid-import would show
+    one that ran backwards with it.
 
-    `cadence_s` is how often the line is redrawn, and it exists so that
-    a test can drive several redraws without waiting seconds for them.
-    None means the constant rather than no cadence, and it is read as
-    None rather than as a false value because those are two different
-    answers. Anything at or below zero is neither, and it is refused
-    where it is read: an event waited on for zero seconds answers at
-    once, so a loop asked for it would spin a core and rewrite the
-    terminal as fast as the stream took it. No command line reaches this
-    number, so the refusal is a programmer's rather than one of this
-    grammar's sentences.
+    A cadence at or below zero is refused where it is read: an event
+    waited on for zero seconds answers at once, so a loop asked for it
+    would spin a core and rewrite the terminal as fast as the stream
+    took it. No command line reaches that number, so the refusal is a
+    programmer's rather than one of this grammar's sentences.
 
     The first line is drawn here rather than by the writer, so that a
     wait shorter than one cadence still says what it is waiting for and
@@ -1608,7 +1613,8 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
     cadence = PROGRESS_CADENCE_S if cadence_s is None else cadence_s
     if cadence <= 0:
         raise ValueError(PROGRESS_CADENCE_RULE)
-    started = time.monotonic()
+    now = time.monotonic if clock is None else clock
+    started = now()
     line = _ProgressLine()
     line.draw(0)
     stop = threading.Event()
@@ -1617,7 +1623,7 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
         # `wait` returns True the moment the event is set, so the thread
         # leaves on the answer rather than on the next tick.
         while not stop.wait(cadence):
-            line.draw(int(time.monotonic() - started))
+            line.draw(int(now() - started))
 
     try:
         writer = threading.Thread(target=redraw_until_stopped, daemon=True)
