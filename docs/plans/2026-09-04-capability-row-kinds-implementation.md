@@ -52,7 +52,11 @@ The whole issue, in five commits.
   every canonical row's kind is one of `get_args(RowKind)`, the two
   constants are exactly those members (one encoding, so a third kind
   added to one and not the other fails here), and a bite that
-  misspells one row's kind and watches the invariant go red.
+  misspells the kind of exactly one message row, `sending abort`, and
+  watches the invariant go red. One row and not all of them, and one in
+  the middle of the table, so that an invariant reading a single row
+  and calling the set closed would fail the bite; the case asserts the
+  needle is in the haystack exactly once before handing it over.
 
 - The freedom pin: `every_declared_message_is_classified` is handed the
   canonical table plus a `PROSE` row whose `what` begins `reading `,
