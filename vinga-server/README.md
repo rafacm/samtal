@@ -2168,18 +2168,22 @@ is talking. Neither reads the section.
 is at its worst during onboarding, where a misconfiguration is
 likeliest and nobody has a log open, so a deployment that would rather
 have silence is the one that says so: `fallback: {enabled: false}`, on
-`agent_defaults` or on a single agent. Being on by default has a
-one-time cost worth knowing: the first start after upgrading
-synthesizes one short phrase per agent through the configured TTS
-provider before the server begins serving, which is one provider call
-per agent, a few seconds of startup, and, on a metered voice, a few
-seconds of billed synthesis. It is once per world rather than once per
-process: an agent whose `fallback` section and whose voice are both
-unchanged keeps the clip it had across a `vinga apply`, and each of the
-two kinds of clip is re-synthesized only when its own section moves.
-Synthesis is bounded per phrase, so a provider that hangs delays the
-start by seconds rather than indefinitely; a phrase that will not
-synthesize in time, or at all, degrades to the display alone, with a
+`agent_defaults` or on a single agent. Being on by default has a cost
+worth knowing, and it is per start rather than per upgrade: **every**
+server start synthesizes one short phrase for every agent that has not
+switched the section off, through the configured TTS provider, before
+the server begins serving. That is one provider call per agent, a few
+seconds of startup, and, on a metered voice, a few seconds of billed
+synthesis, paid again at every restart, redeploy and container
+replacement. Nothing is cached across processes: a start has no previous
+world to keep a clip from. What reuse there is lives inside one running
+process, across `vinga apply`: an agent whose `fallback` section and
+whose voice are both unchanged keeps the clip it already had, and each
+of the two kinds of clip is re-synthesized only when its own section or
+its voice moves, so applying a prompt edit costs no synthesis at all.
+Synthesis is bounded per phrase, so a provider that hangs delays a start
+by seconds rather than indefinitely; a phrase that will not synthesize
+in time, or at all, degrades to the display alone, with a
 `fallback_degraded` event naming the agent. That turn still shows the
 sentence and still closes with its `tts stop`, and only the audio is
 lost.

@@ -387,22 +387,28 @@ Existing assets carry the shapes; nothing they pin is restated.
   Deployments upgrade into a speaking failure arm; the CHANGELOG
   entry says so plainly, the README documents the off switch, and
   the phrase is fixed configuration, so nothing untrusted can
-  reach it. Default-on also means the first boot after the upgrade
-  synthesizes one clip per agent through the configured TTS
-  provider before the server begins serving, an operation that was
-  previously opt-in and that a pre-upgrade configuration cannot
-  stage an opt-out for (the old models forbid the unknown
-  section). Two mitigations, both in the plan rather than
-  discovered later: the fallback synthesis runs under its own
-  per-clip deadline (a module constant in `filler.py`), and a
-  synthesis that exceeds it degrades that agent to display-only
-  exactly like a failed one, so a hung provider delays the boot by
-  a bounded amount and stops nothing. The README and the CHANGELOG
-  state the one-time cost in provider calls, boot latency and, for
-  metered TTS, billing; a test drives a TTS stream that never
-  completes and asserts the boot finishes with the agent degraded.
-  The filler's own build keeps its current unbounded behavior
-  (opt-in, pre-existing), noted where the deadline is defined.
+  reach it. Default-on also means EVERY boot synthesizes one clip
+  for every agent that has not switched the section off, through
+  the configured TTS provider, before the server begins serving:
+  a boot has no previous world to keep a clip from, so nothing is
+  cached across processes and the cost is paid again at every
+  restart, redeploy and container replacement. It was previously
+  an opt-in operation, and a pre-upgrade configuration cannot
+  stage an opt-out for the first of those boots (the old models
+  forbid the unknown section). What reuse there is lives inside
+  one running process, across an apply. Two mitigations, both in
+  the plan rather than discovered later: the fallback synthesis
+  runs under its own per-clip deadline (a module constant in
+  `filler.py`), and a synthesis that exceeds it degrades that
+  agent to display-only exactly like a failed one, so a hung
+  provider delays the boot by a bounded amount and stops nothing.
+  The README and the CHANGELOG state the per-start cost in
+  provider calls, boot latency and, for metered TTS, billing, and
+  say plainly that it recurs; a test drives a TTS stream that
+  never completes and asserts the boot finishes with the agent
+  degraded. The filler's own build keeps its current unbounded
+  behavior (opt-in, pre-existing), noted where the deadline is
+  defined.
 - **Doc and census staleness.** events.md, domain-config.md,
   api-openapi.json and the example files all regenerate through
   generators; the root README edit can stale the command-spellings
@@ -627,6 +633,10 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
     *Resolution*: accepted in full. The risk section now defines
     the bounded policy (a per-clip deadline for the fallback
     synthesis, timeout degrading to display-only), the
-    never-completing-stream test, and the documented one-time
-    upgrade cost, and states plainly that a pre-upgrade opt-out
-    cannot exist because the old models forbid the section.
+    never-completing-stream test, and the documented synthesis
+    cost, and states plainly that a pre-upgrade opt-out cannot
+    exist because the old models forbid the section. The cost is
+    per start rather than per upgrade, which the M1 review round
+    below corrected in the wording here and in the documents this
+    section governs: a boot composes from no previous world, so
+    reuse is an apply's and never a restart's.
