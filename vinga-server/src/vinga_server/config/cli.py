@@ -53,6 +53,8 @@ import re
 import shlex
 import sys
 import textwrap
+import threading
+import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -285,6 +287,44 @@ IMPORT_READ_TIMEOUT_S: float | None = None
 # waits forever. The connect timeout stays bounded for the reason it
 # always is, that a server which is not there must say so quickly.
 STREAM_READ_TIMEOUT_S: float | None = None
+
+# What the two long waits say while they are waiting, and how often.
+#
+# The waits are the two above that are not a database call: an import
+# waits for a transaction whose length nothing bounds, and an apply
+# waits up to a minute for a server to compose, validate and build a
+# whole new world. Both are long enough that a terminal showing nothing
+# is a terminal that looks hung, and neither has anything to print until
+# it is answered.
+#
+# So a single line on stderr, and it is the interactive affordance the
+# determinism practice licenses rather than an exception to it
+# (`docs/architecture/cli-guide.md`). It is written only when stderr is
+# a terminal, so a pipe, a redirect and a log file get the bytes they
+# got before this existed, whole and in the order they got them. It
+# re-presents only what the run reports anyway, which is that this
+# client is waiting for the API's answer, so nothing is visible
+# interactively that a script is not also told. And it carries no value
+# of any kind: the no-leak posture applies to progress exactly as it
+# applies to a refusal, so the document's path, an entry's name and the
+# address reached are all as absent from it as they are from a sentence
+# this module raises.
+#
+# `events tail` is deliberately not narrated. Its answer IS the wait,
+# and a client drawing a line over a stream the server is writing to
+# would be narrating the thing it is printing.
+PROGRESS_PHASE = "waiting for the server"
+
+# Once a second: slow enough that nothing is redrawn faster than it can
+# be read, fast enough that the number visibly moves, and a whole number
+# of seconds because a wait nobody can bound is not measured in
+# milliseconds.
+PROGRESS_CADENCE_S = 1.0
+
+# How long the writer is waited for on the way out. It stops on an event
+# rather than on a clock, so this bounds a thread that somehow did not:
+# the erase must not be held up by the affordance it is erasing.
+PROGRESS_JOIN_S = 1.0
 
 # Said when the API answered something this client cannot read as an
 # answer. The body is deliberately not quoted: what a proxy, a gateway
@@ -1445,6 +1485,134 @@ def _reached(args: Invocation) -> Reached:
     """
     file_config = load_file_config(args.config)
     return Reached(address=_address(args, file_config), token=_token(file_config))
+
+
+@contextlib.contextmanager
+def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
+    """One line on stderr for as long as a long wait lasts, at a
+    terminal and nowhere else.
+
+    Two of this grammar's requests are answered after a wait an operator
+    watches with nothing on the screen, and `PROGRESS_PHASE` above says
+    which and why. Whether a given act is one of them is a fact on its
+    row rather than a rule guessed here, because a bound and a wait
+    worth narrating are different facts: every act waits, and a read
+    bounded by the database's busy timeout is not a wait anybody sits
+    through.
+
+    Nothing at all happens off a terminal, and that is the whole of the
+    licence this affordance runs under. The check is made once, on the
+    way in, so a non-terminal run does not so much as construct the
+    thread: there is no writer to be scheduled, no clock to be read, and
+    no path by which a byte could reach a redirected stream.
+
+    The clock is monotonic, because what is displayed is a duration and
+    a wall clock stepping backwards mid-import would show one that ran
+    backwards with it.
+
+    `cadence_s` is how often the line is redrawn, and it exists so that
+    a test can drive several redraws without waiting seconds for them.
+    None means the constant rather than no cadence, and it is read as
+    None rather than as a false value on purpose: zero is a cadence a
+    caller may legitimately ask for, and truthiness would silently turn
+    it into a second.
+
+    The first line is drawn here rather than by the writer, so that a
+    wait shorter than one cadence still says what it is waiting for and
+    still erases what it said. Everything after it is the thread's, and
+    the thread is a daemon that stops on an event: an interpreter
+    shutting down mid-wait is not held open by a line it was drawing,
+    and the wait itself is bounded by the request's own timeout rather
+    than by anything here.
+    """
+    if not narrates or not _stderr_at_a_terminal():
+        yield
+        return
+    cadence = PROGRESS_CADENCE_S if cadence_s is None else cadence_s
+    started = time.monotonic()
+    stop = threading.Event()
+    # How wide the line last drawn was, so the erase covers what was
+    # written rather than a guessed width. Too narrow leaves digits on
+    # the screen; too wide writes spaces past the end of the line, which
+    # on a narrow terminal is a second line of them.
+    drawn = [_narrate(0)]
+
+    def narrate_until_stopped() -> None:
+        # `wait` returns True the moment the event is set, so the thread
+        # leaves on the answer rather than on the next tick.
+        while not stop.wait(cadence):
+            drawn[0] = _narrate(int(time.monotonic() - started))
+
+    writer = threading.Thread(target=narrate_until_stopped, daemon=True)
+    writer.start()
+    try:
+        yield
+    finally:
+        # A `finally`, because an answer and a refusal leave the same
+        # screen behind: a sentence printed over half a progress line is
+        # a sentence nobody can read, and the refusal is the one thing
+        # this command still has to say.
+        stop.set()
+        writer.join(PROGRESS_JOIN_S)
+        _erase(drawn[0])
+
+
+def _stderr_at_a_terminal() -> bool:
+    """Whether the stream this line would be drawn on is a terminal.
+
+    Answered rather than assumed, and answered False for a stream that
+    cannot say: `sys.stderr` is None where an interpreter was started
+    without one, and a stream that has been closed raises rather than
+    answering. Neither is a terminal, and neither is a reason to fail a
+    command over an affordance.
+    """
+    stream = sys.stderr
+    if stream is None:
+        return False
+    try:
+        return bool(stream.isatty())
+    except (OSError, ValueError):
+        return False
+
+
+def _narrate(seconds: int) -> int:
+    """Draw the line where it already is, and answer how wide it is.
+
+    A carriage return and no newline, so the terminal rewrites the one
+    line rather than scrolling: what an operator watches is a number
+    changing in place. No colour, no spinner and no emoji, which the
+    determinism practice rejects outright.
+    """
+    line = f"{PROGRESS_PHASE}: {seconds}s"
+    _to_stderr(f"\r{line}")
+    return len(line)
+
+
+def _erase(width: int) -> None:
+    """Take the line back off the screen, leaving the cursor where it
+    started, so whatever prints next prints into an empty line."""
+    _to_stderr(f"\r{' ' * width}\r")
+
+
+def _to_stderr(text: str) -> None:
+    """Write, and say nothing when the stream will not take it.
+
+    Best effort on purpose. This is an affordance rather than an answer:
+    a stream closed under a running command, or one whose other end went
+    away, must not turn into a failure of the command, and the failure
+    it would turn into is one raised from a thread nothing is waiting
+    on. The two ways a Python stream refuses are an `OSError` from the
+    file descriptor under it and a `ValueError` from a closed object,
+    and neither carries anything worth saying.
+    """
+    stream = sys.stderr
+    if stream is None:
+        return
+    try:
+        stream.write(text)
+        stream.flush()
+    except (OSError, ValueError):
+        pass
 
 
 def _call(
@@ -4167,6 +4335,20 @@ class Act:
     # database's; None is no bound, which is one act's answer.
     read_timeout_s: float | None = READ_TIMEOUT_S
 
+    # Whether the wait for this act's answer is long enough to be worth
+    # saying so at a terminal, which is the two acts above and nothing
+    # else (`PROGRESS_PHASE`).
+    #
+    # A fact on the row rather than a reading of the bound beside it,
+    # for the reason the confirmation is a fact on a command's row: the
+    # two say different things. A bound is how long an endpoint may take
+    # before this client gives up on it, and every act has one; this is
+    # whether a person is left looking at nothing while it does. An act
+    # that grew a bound of its own would not thereby become a wait
+    # anybody sits through, and deriving one from the other would say it
+    # had.
+    narrates: bool = False
+
     # The shape the API declares for the body this act sends, or None
     # where it sends none. Declared and never validated against: a
     # fragment is the operator's YAML and the server is what refuses a
@@ -4208,15 +4390,25 @@ def _act(args: Invocation, act: Act, reached: Reached) -> None:
     `reached` is handed in rather than resolved here, so that the acts
     of one command all go to one place and a command that says where it
     is going says it truly: see `Reached`.
+
+    What the act carries is built before the narration opens and its
+    answer is rendered after that narration has closed, so the line the
+    two long waits draw covers the wait and nothing else. Reading a
+    document off standard input is not waiting for a server, and a
+    rendering printed under a line still being redrawn would be a
+    rendering nobody can read.
     """
-    answer = _call(
-        reached,
-        act.method,
-        act.path(args),
-        act.body(args) if act.body is not None else _NOTHING,
-        read_timeout_s=act.read_timeout_s,
-        query=act.query(args) if act.query is not None else {},
-    )
+    body = act.body(args) if act.body is not None else _NOTHING
+    query = act.query(args) if act.query is not None else {}
+    with narrated(act.narrates):
+        answer = _call(
+            reached,
+            act.method,
+            act.path(args),
+            body,
+            read_timeout_s=act.read_timeout_s,
+            query=query,
+        )
     act.render(act.read(answer))
 
 
@@ -5046,6 +5238,7 @@ APPLY = Act(
     method="POST",
     path=_apply_path,
     read_timeout_s=APPLY_READ_TIMEOUT_S,
+    narrates=True,
     answers=ConfigReloadResult,
     refusal=UNREADABLE_APPLY,
     render=_printed(_apply_listing),
@@ -5094,6 +5287,7 @@ IMPORT = Act(
     body=_document_body,
     sends=DomainConfig,
     read_timeout_s=IMPORT_READ_TIMEOUT_S,
+    narrates=True,
     answers=AppliedDocument,
     refusal=UNREADABLE_WRITE,
     render=_imported,
