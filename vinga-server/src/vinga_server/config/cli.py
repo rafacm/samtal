@@ -59,7 +59,7 @@ from datetime import datetime
 from enum import Enum
 from importlib import metadata
 from pathlib import Path
-from typing import Annotated, Any, get_args, get_origin
+from typing import Annotated, Any, Literal, get_args, get_origin
 from urllib.parse import quote, urlencode, urlunsplit
 
 import httpx
@@ -2058,9 +2058,22 @@ def _server_config(args: Invocation) -> ServerConfig:
 def _show_everything(document: Mapping[str, object]) -> str:
     """The whole domain configuration in one document, in the shape the
     YAML file has today, with the stored secrets listed as masks
-    underneath it."""
-    notes = _all_secret_notes(document)
-    return _yaml(document["config"]) + ("\n" + "\n".join(notes) + "\n" if notes else "")
+    underneath it.
+
+    Read through the gate every rendering of this document reads through,
+    which is what keeps a section that is not one out of here as a
+    traceback with the answer inside it.
+
+    The shapes preserve what they read rather than projecting it. This
+    rendering IS the document: a shape that flattened a body would print
+    a configuration nobody has, so what the gate adds is that the
+    sections are the mappings the registry says they are, and the bodies
+    under them travel through undescribed exactly as they do in the
+    answer.
+    """
+    config, secrets = _halves(document)
+    notes = _all_secret_notes(_sections(config), secrets)
+    return _yaml(config) + ("\n" + "\n".join(notes) + "\n" if notes else "")
 
 
 # Export
@@ -2125,10 +2138,25 @@ _SECRET_HOLDER: dict[str, entities.EntityDescriptor] = {
     if kind.secret_slots is not None
 }
 
+# And the closed set of kinds a stored location may name, as a shape the
+# gate can read a location's `kind` against. Built from the mapping
+# above rather than written beside it, so a kind that gains secret slots
+# is admitted here by existing.
+#
+# A shape and not a lookup with a guard, because a subscript is what
+# this used to be: `_SECRET_HOLDER[kind]` raised a `KeyError` whose one
+# argument was the kind the answer supplied, which is a value nobody has
+# vouched for leaving the boundary inside an exception. Read as a shape
+# it meets the one fixed sentence instead, exactly as every other
+# unreadable answer does.
+HOLDER_KIND = Literal[tuple(_SECRET_HOLDER)]
+
 
 def _exported(document: Mapping[str, object]) -> str:
-    """The whole stored configuration as one applicable document."""
-    return EXPORT_HEADER + _yaml(document["config"]) + _secret_commands(document["secrets"])
+    """The whole stored configuration as one applicable document, read
+    through the gate `show` reads it through and for the same reasons."""
+    config, secrets = _halves(document)
+    return EXPORT_HEADER + _yaml(config) + _secret_commands(secrets)
 
 
 def _secret_commands(secrets: Sequence[Mapping[str, object]]) -> str:
@@ -2160,8 +2188,22 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
     and refuse. The marker is the shape an operator has to use to write
     such a name in the first place, so the exported command is the
     command they typed.
+
+    The kind is read as the closed set of kinds that hold a secret, so a
+    location naming one this client does not have meets the fixed
+    sentence rather than a `KeyError` carrying the name it supplied.
+
+    The identity and the slot are the one thing in these renderings that
+    does not go through the display door, and deliberately. What this
+    builds is a command an operator pastes to address the entity it
+    names, so a spelling bounded at a hundred and twenty characters or
+    stripped of its edges would address a different entity or none.
+    `shlex.quote` is what makes the line safe to paste, and the write
+    path refuses a control character in a name, so what is left is an
+    answer that did not come from this API, whose export is not a
+    document to run either way.
     """
-    holder = _SECRET_HOLDER[str(stored["kind"])]
+    holder = _SECRET_HOLDER[_understood(HOLDER_KIND, stored["kind"], UNREADABLE_READ)]
     return [
         *PROGRAM.split(),
         holder.name,
@@ -2208,15 +2250,29 @@ def _print_entity(envelope: Mapping[str, object]) -> None:
     print(_yaml(body) + ("\n" + "\n".join(notes) + "\n" if notes else ""), end="")
 
 
-def _all_secret_notes(document: Mapping[str, object]) -> list[str]:
+def _all_secret_notes(
+    read: Mapping[str, object], secrets: Sequence[Mapping[str, object]]
+) -> list[str]:
     """Every stored secret in the whole-configuration view, each named by
     its location and marked when it shadows a reference written for the
-    same slot."""
-    bodies = _bodies(document["config"])
+    same slot.
+
+    Every field of a location goes through the display door on its way
+    to a line. The three are strings by the shape the API declares them
+    with, and a string is not a safe thing: a slot name carrying an
+    escape sequence steers the terminal from inside a comment exactly as
+    one anywhere else does.
+
+    Looked up as they arrived and printed through the door, the same two
+    readings the tree gives an entity name: the body a location points
+    at is filed under the identity the store wrote.
+    """
+    bodies = _bodies(read)
     notes = [
-        f"#   {stored['kind']} {stored['identity']} {stored['slot']}: {MASK}"
+        f"#   {printable(str(stored['kind']))} {printable(str(stored['identity']))} "
+        f"{printable(str(stored['slot']))}: {MASK}"
         + _shadow_note(bodies.get((stored["kind"], stored["identity"]), {}), stored["shadows"])
-        for stored in document["secrets"]
+        for stored in secrets
     ]
     return [SECRETS_HEADING, *notes] if notes else []
 
@@ -2229,12 +2285,21 @@ def _secret_notes(body: Mapping[str, object], secrets: Mapping[str, object]) -> 
     return [SECRETS_HEADING, *notes] if notes else []
 
 
-def _shadow_note(body: Mapping[str, object], shadows: str | None) -> str:
+def _shadow_note(body: Mapping[str, object], shadows: object) -> str:
     """What a stored secret displaces, when the entity also carries a
     reference for the same slot. Ciphertext wins, and making that
-    visible is what keeps the precedence from being silent."""
-    reference = _reference_value(body, shadows) if shadows else None
-    return f"  (used instead of {shadows}: {reference})" if reference else ""
+    visible is what keeps the precedence from being silent.
+
+    Both halves of the note come out of the answer, so both are
+    rendered rather than interpolated: the key through the display door,
+    and the value the entity writes under it through the same rule a
+    body's values are rendered by anywhere else, so a structure there is
+    named rather than opened.
+    """
+    reference = _reference_value(body, str(shadows)) if shadows else None
+    if not reference:
+        return ""
+    return f"  (used instead of {printable(str(shadows))}: {_short(reference)})"
 
 
 def _reference_value(body: Mapping[str, object], key: str) -> object:
@@ -2249,17 +2314,20 @@ def _reference_value(body: Mapping[str, object], key: str) -> object:
     return nested.get(name) if isinstance(nested, Mapping) else None
 
 
-def _bodies(config: Mapping[str, object]) -> dict[tuple[str, str], Mapping[str, object]]:
+def _bodies(read: Mapping[str, object]) -> dict[tuple[str, str], Mapping[str, object]]:
     """The masked body of every entity that can hold a stored secret,
-    keyed the way a secret location names it."""
+    keyed the way a secret location names it.
+
+    Walks the sections already read as their shapes rather than the
+    answer's own mapping, so the two levels of a provider section and
+    the one of an MCP section are what the registry says they are.
+    """
     bodies = {
         ("provider", entities.provider_identity(stage, name)): body
-        for stage, entries in config["providers"].items()
+        for stage, entries in read["providers"].items()
         for name, body in entries.items()
     }
-    bodies.update(
-        (("mcp_server", name), body) for name, body in config["mcp_servers"].items()
-    )
+    bodies.update((("mcp_server", name), body) for name, body in read["mcp_servers"].items())
     return bodies
 
 

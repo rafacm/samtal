@@ -353,7 +353,7 @@ def without(section: str) -> dict[str, object]:
     return body
 
 
-UNWALKABLE = [
+BAD_SECTIONS = [
     # A section that is a list where a mapping belongs, one that is a
     # scalar, and one that is not there at all: the three shapes #347's
     # round found for a count, now for every section the tree reads.
@@ -395,8 +395,12 @@ UNWALKABLE = [
         document(devices={"aa:bb:cc:dd:ee:ff": {"agent": ANSWERED}}),
         id="a-binding-is-a-mapping",
     ),
-    # The document's other half, which the tree reads to name the slots
-    # a stored secret fills.
+]
+
+# The document's other half, read by every rendering: the tree names the
+# slots a stored secret fills, `show` writes each location under the
+# document, and `export` renders each as the command that enters it.
+BAD_SECRETS = [
     pytest.param(document(secrets=[ANSWERED]), id="a-secret-row-is-a-scalar"),
     pytest.param(
         document(secrets=[{"kind": "provider", "identity": ANSWERED}]),
@@ -405,33 +409,126 @@ UNWALKABLE = [
     pytest.param(document(secrets=ANSWERED), id="secrets-is-a-scalar"),
 ]
 
+UNWALKABLE = BAD_SECTIONS + BAD_SECRETS
 
-@pytest.mark.parametrize("body", UNWALKABLE)
-def test_a_document_the_tree_cannot_walk_is_quoted_nowhere(
+# A location naming a kind this client has no command for, which only
+# `export` reads: the tree and `show` name a location and look its body
+# up with a `.get`, and `export` renders the command that enters it, so
+# it is the one that has to turn a kind into a noun.
+#
+# It used to do that with a subscript, so what left the boundary was a
+# `KeyError` whose one argument was the value the answer supplied: not a
+# traceback with a value behind it, but a traceback that IS the value.
+UNKNOWN_KIND = document(
+    secrets=[{"kind": ANSWERED, "identity": "llm.brain", "slot": "api_key", "shadows": None}]
+)
+
+
+def refusal(
+    command: str,
     body: object,
     run,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """One fixed sentence, and never a `TypeError` or a `KeyError` out
-    of the boundary.
+    """One rendering of an unreadable document, and the whole surface it
+    is refused across.
 
-    The whole listing is printed at once, so a refusal leaves stdout
-    empty rather than half a tree: what an operator gets is the sentence
-    or the artifact, never the two spliced together.
+    Each of these commands prints its output at once, so a refusal
+    leaves stdout empty rather than half an artifact: what an operator
+    gets is the sentence or the document, never the two spliced
+    together.
     """
     answering(monkeypatch, body)
     capsys.readouterr()
 
     with caplog.at_level(0):
-        assert run("list") == 1
+        assert run(command) == 1
 
     printed = capsys.readouterr()
     assert printed.out == ""
     assert printed.err == cli.UNREADABLE_READ + "\n"
     assert "Traceback" not in printed.err
     for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
+        assert ANSWERED not in surface
+
+
+@pytest.mark.parametrize("body", UNWALKABLE)
+@pytest.mark.parametrize("command", ["list", "show"])
+def test_a_document_a_rendering_cannot_walk_is_quoted_nowhere(
+    command: str,
+    body: object,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The two renderings that walk into the document: the tree reads
+    every section to print a line per entry, and `show` reads the
+    provider and MCP sections to say what each stored credential
+    displaces."""
+    refusal(command, body, run, monkeypatch, capsys, caplog)
+
+
+@pytest.mark.parametrize("body", [*BAD_SECRETS, pytest.param(UNKNOWN_KIND, id="unknown-kind")])
+def test_an_export_refuses_the_half_it_reads(
+    body: object,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`export` walks into the secrets half and nothing else, so this is
+    the half it refuses, kind and all."""
+    refusal("export", body, run, monkeypatch, capsys, caplog)
+
+
+def test_an_unknown_secret_kind_leaves_nothing_on_the_chain() -> None:
+    """The case the fixed sentence matters most for: what it replaces
+    put the answer's own value into the exception's arguments, where
+    anything walking the chain would find it."""
+    with pytest.raises(ConfigError) as caught:
+        cli.EXPORT_ALL.render(cli.EXPORT_ALL.read(UNKNOWN_KIND))
+
+    assert str(caught.value) == cli.UNREADABLE_READ
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert ANSWERED not in chain(caught.value)
+
+
+@pytest.mark.parametrize("body", BAD_SECTIONS)
+def test_an_export_prints_back_a_section_it_never_walks_into(
+    body: object,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one rendering that does not read the sections, and the
+    decision rather than the oversight.
+
+    What `export` prints is the document itself, dumped as YAML, plus
+    the commands for the credentials beside it. It dereferences neither
+    a section nor an entry, so there is nothing in there for it to
+    stumble over, and refusing to hand an operator their configuration
+    back over a section this command never looks at would be a gate
+    doing harm rather than work.
+
+    Which is why the sentinel is on stdout here and only here: it is the
+    answer being printed back, which is the whole job. It is still
+    nowhere else, and no traceback is raised over it.
+    """
+    answering(monkeypatch, body)
+    capsys.readouterr()
+
+    with caplog.at_level(0):
+        assert run("export") == 0
+
+    printed = capsys.readouterr()
+    assert printed.out.startswith(cli.EXPORT_HEADER)
+    assert printed.err == ""
+    for surface in (printed.err, logged(caplog), both_formats(caplog)):
         assert ANSWERED not in surface
 
 
@@ -469,7 +566,7 @@ NOT_A_DOCUMENT = [
 
 
 @pytest.mark.parametrize("body", NOT_A_DOCUMENT)
-@pytest.mark.parametrize("act", ["LIST", "COUNTS"])
+@pytest.mark.parametrize("act", ["LIST", "COUNTS", "SHOW_ALL", "EXPORT_ALL"])
 def test_a_whole_document_renderer_refuses_what_is_not_one(act: str, body: object) -> None:
     """Every renderer of the whole configuration, handed the answer
     directly, which is what says each reads it rather than trusting the
@@ -659,6 +756,100 @@ def test_a_mapping_inside_a_list_is_not_opened_either(
     assert "token" not in printed
     # Named rather than dropped: the line says a structure is there.
     assert "{...}" in printed or "[...]" in printed
+
+
+def shadowing(reference: object, **location: object) -> dict[str, object]:
+    """A document whose one MCP server carries a reference-bearing
+    header, and one stored credential filed against it."""
+    return document(
+        mcp_servers={"house": {"transport": "stdio", "headers": {"Authorization": reference}}},
+        secrets=[
+            {
+                "kind": "mcp_server",
+                "identity": "house",
+                "slot": "headers.Authorization",
+                "shadows": "headers.Authorization",
+            }
+            | location
+        ],
+    )
+
+
+def test_a_stored_location_cannot_steer_the_terminal_from_a_comment(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`show` writes every stored credential's location under the
+    document as a comment, and a comment is a line on a terminal like
+    any other. The four fields are strings by the shape the API declares
+    them with, which says nothing about what is in one.
+    """
+    answering(
+        monkeypatch,
+        document(
+            secrets=[
+                {
+                    "kind": STEERING,
+                    "identity": STEERING,
+                    "slot": STEERING,
+                    "shadows": None,
+                }
+            ]
+        ),
+    )
+    capsys.readouterr()
+
+    assert run("show") == 0
+
+    printed = capsys.readouterr().out
+    assert "\x1b" not in printed
+    assert "#   ?[31mred ?[31mred ?[31mred: " in printed
+
+
+def test_the_reference_a_stored_secret_displaces_is_rendered_not_interpolated(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The shadow note carries two values off the answer: the key the
+    location names, and what the entity writes under it. The second is a
+    body's value, so it is rendered by the rule a body's values are
+    rendered by rather than interpolated."""
+    answering(
+        monkeypatch,
+        document(
+            mcp_servers={"house": {"transport": "stdio", STEERING: STEERING}},
+            secrets=[
+                {
+                    "kind": "mcp_server",
+                    "identity": "house",
+                    "slot": "headers.Authorization",
+                    "shadows": STEERING,
+                }
+            ],
+        ),
+    )
+    capsys.readouterr()
+
+    assert run("show") == 0
+
+    note = capsys.readouterr().out.splitlines()[-1]
+    assert note.endswith("(used instead of ?[31mred: ?[31mred)")
+    assert "\x1b" not in note
+
+
+def test_a_shadowed_reference_that_is_a_structure_is_not_opened(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A mapping where a reference belongs is named on the note, not
+    opened onto it. The document above the notes prints it as the YAML
+    it is, which is that rendering's whole job; the note is a line about
+    the document and holds one value's worth of room."""
+    answering(monkeypatch, shadowing({"leak": ANSWERED}))
+    capsys.readouterr()
+
+    assert run("show") == 0
+
+    note = capsys.readouterr().out.splitlines()[-1]
+    assert note.endswith("(used instead of headers.Authorization: {...})")
+    assert ANSWERED not in note
 
 
 def test_a_grant_written_as_an_object_reads_as_one(
