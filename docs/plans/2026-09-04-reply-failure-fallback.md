@@ -175,6 +175,14 @@ decoder can read, and closing that would mean buffering sentences
 that have already been promised to TTS, stalling live speech on
 every ordinary `{`; the event is what keeps the residue visible.
 
+**A withheld sentence enters nothing.** The record's `reply` is
+what the user heard, assembled solely from what was spoken, and no
+raw generated-text channel exists; the withheld bytes therefore
+enter neither the leg, nor `spoken`, nor the working history and
+assistant turns, nor the `TurnRecord`, nor any event payload or
+log line, and the sentinel case in the tests proves every one of
+those absences.
+
 **Nothing replaces a withheld sentence unless nothing else spoke.**
 Mid-reply, a withheld sentence is dropped and its event emitted;
 the surrounding answer speaks, which is the issue's own
@@ -385,6 +393,13 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    nor `TurnRecord`, with a sentinel test across device, both log
    formats, event payloads, stored records and subsequent model
    history.
+
+   *Resolution*: accepted in full. The wrong sentence in the test
+   plan is replaced: a withheld sentence enters nothing, the
+   design section says so against the record's own semantics, and
+   the sentinel case asserts absence from the device, both log
+   formats, event payloads, the stored record and its legs, and
+   the next round's request history.
 
 3. **P1: the proposed characterization changes would violate the
    DeviceGone constraint.** The two "ends quietly" pins drive
