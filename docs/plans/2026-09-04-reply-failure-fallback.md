@@ -339,7 +339,11 @@ Existing assets carry the shapes; nothing they pin is restated.
   spoken; JSON whose keys are not any offered tool's spoken; prose
   about JSON spoken); a scripted reply mixing a leaked call with a
   real sentence speaks only the real one and emits
-  `sentence_withheld`; a reply that is only a leaked call speaks
+  `sentence_withheld`; both caller paths of the centralized helper
+  are driven, one case whose call is newline-terminated mid-stream
+  so the sentence exits through `splitter.push`, and one whose
+  call is the reply's unterminated tail so it exits through
+  `flush`; a reply that is only a leaked call speaks
   the fallback with `nothing_sayable`. Withheld bytes reach no
   retained surface: a sentinel-bearing withheld sentence, with
   recording enabled and a following scripted round, is asserted
@@ -567,6 +571,12 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
     a newline-terminated case through `push` and an EOF-tail case
     through `flush`, or centralize guard plus emission behind one
     helper and test both callers.
+
+    *Resolution*: accepted via the centralization arm, which
+    finding 1's resolution already made the design (guard plus
+    emission behind one helper in `runtime/speech.py`), and the
+    test plan now drives both caller paths, a newline-terminated
+    case through `push` and an unterminated tail through `flush`.
 
 11. **P2: pin-before-reshaping coverage is incomplete.** No
     existing test asserts the filler sends no `sentence_start`,
