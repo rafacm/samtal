@@ -151,6 +151,32 @@ def unwelcome() -> dict[str, object]:
     }
 
 
+# What a server that says why the token is empty answers (#369)
+#
+# Siblings of the three above rather than edits to them. Those three are
+# the OLD-server bodies, byte for byte, which is what keeps the
+# fallback-to-the-token-rule reading covered by every case that uses
+# them; these carry the word, and a case that is about the word says so
+# by which helper it calls.
+
+
+def admitted_without_a_token(**overrides: object) -> dict[str, object]:
+    """Admitted, and this deployment issues no device tokens at all: the
+    reply the whole of #369 is about."""
+    return {**unwelcome(), "access": board.ACCESS_OPEN, **overrides}
+
+
+def turned_away(**overrides: object) -> dict[str, object]:
+    """Not admitted, said in the reply rather than left to be inferred
+    from an empty token."""
+    return {**unwelcome(), "access": board.ACCESS_DENIED, **overrides}
+
+
+def admitted_with_a_token(**overrides: object) -> dict[str, object]:
+    """Admitted, and the credential beside it is what to present."""
+    return {**admitted(), "access": board.ACCESS_TOKEN, **overrides}
+
+
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """One command run the way the entry point runs it, against a
@@ -309,6 +335,95 @@ def test_a_board_with_no_token_and_no_code_names_the_trap(
     assert "not serving yet" in captured.out
 
 
+# Why the token is empty, read off the reply rather than guessed (#369)
+#
+# The two empty tokens are the same bytes, so the word beside them is
+# the only thing that can tell an admitted board on a deployment issuing
+# none from a board nothing resolves. A reply that carries no word, or
+# one this client has never heard of, is read by the rule that was here
+# before it, which is what an old image gets.
+
+
+def test_a_deployment_that_issues_no_tokens_admits_this_board(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The whole of #369: `auth.enabled: false` with something for this
+    board to reach answers an empty token and the word for why, and this
+    board is admitted on it.
+
+    Held to going red by dropping the word from the reading: the body is
+    byte for byte the unwelcome one apart from that field, so a client
+    reading the token alone reports the state that costs an evening.
+    """
+    far_side(answering(body=admitted_without_a_token()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    captured = capsys.readouterr()
+    assert "is admitted" in captured.out
+    assert "may not speak" not in captured.out
+
+
+def test_a_deployment_that_says_it_turned_this_board_away_is_believed(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half of the same field, and the state it names is the
+    one the empty token has always meant."""
+    far_side(answering(body=turned_away()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    assert "may not speak" in capsys.readouterr().out
+
+
+def test_a_credential_named_in_the_reply_is_carried_and_never_printed(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The third word, on the reply a deployment with device
+    authentication on sends."""
+    far_side(answering(body=admitted_with_a_token()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    captured = capsys.readouterr()
+    assert "is admitted" in captured.out
+    assert DEVICE_TOKEN not in captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (unwelcome(), "may not speak"),
+        (admitted(), "is admitted"),
+        ({**unwelcome(), "access": "sometime-in-the-future"}, "may not speak"),
+        ({**admitted(), "access": "sometime-in-the-future"}, "is admitted"),
+    ],
+    ids=[
+        "an older server, no token",
+        "an older server, a token",
+        "a word this client does not know, no token",
+        "a word this client does not know, a token",
+    ],
+)
+def test_a_reply_this_client_has_no_word_for_is_read_by_the_token_alone(
+    run, far_side, capsys: pytest.CaptureFixture[str], body: dict, expected: str
+) -> None:
+    """The fallback, both ways, and it is yesterday's rule rather than a
+    lesser one: a server too old to say why a token is empty is read
+    exactly as it was before the field existed.
+
+    An unrecognized word is read as no word at all, which is
+    conservative compatibility rather than a promise that a future
+    admission mode survives it: such a mode would read as the state
+    below, which is the safe half of being wrong.
+    """
+    far_side(answering(body=body))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    assert expected in capsys.readouterr().out
+
+
 # The firmware block, which the capability table claims is read
 #
 # The claim is tested in the milestone that makes it, which is the
@@ -395,6 +510,35 @@ HOSTILE: tuple[tuple[str, Callable[[httpx.Request], httpx.Response], str], ...] 
         "an activation beside a token",
         answering(body={**admitted(), "activation": activating()["activation"]}),
         board.CONTRADICTORY_REPLY,
+    ),
+    # The word for the token against what stands beside it, every row of
+    # the matrix (#369). No server decision site can emit any of them:
+    # the token and the word come from one call, and a board being
+    # claimed is by definition not yet admitted.
+    (
+        "a credential named where the token is empty",
+        answering(body={**unwelcome(), "access": board.ACCESS_TOKEN}),
+        board.CONTRADICTORY_ACCESS,
+    ),
+    (
+        "no credential named where a token stands",
+        answering(body={**admitted(), "access": board.ACCESS_OPEN}),
+        board.CONTRADICTORY_ACCESS,
+    ),
+    (
+        "a board turned away with a token in its hand",
+        answering(body={**admitted(), "access": board.ACCESS_DENIED}),
+        board.CONTRADICTORY_ACCESS,
+    ),
+    (
+        "an admission beside a board that is still being claimed",
+        answering(body={**activating(), "access": board.ACCESS_OPEN}),
+        board.CONTRADICTORY_ACCESS,
+    ),
+    (
+        "a credential named beside a board that is still being claimed",
+        answering(body={**activating(), "access": board.ACCESS_TOKEN}),
+        board.CONTRADICTORY_ACCESS,
     ),
     (
         "a token that is a number",
@@ -487,6 +631,10 @@ def test_every_refusal_of_a_hostile_reply_repeats_nothing_of_it(
     for answer in (
         answering(body=admitted(url=f"wss://board:{PASTED}@voice.example/xiaozhi/v1/")),
         answering(body=admitted(token=PASTED, version=9)),
+        # And the word for the token, which is far-side bytes like the
+        # two above it: a value shaped like a credential, in the field a
+        # newer server states the admission in (#369).
+        answering(body={**admitted(token=PASTED, version=9), "access": PASTED}),
         answering(text=json.dumps({"websocket": PASTED})),
         answering(status=500, text=PASTED),
         answering(status=307, text=PASTED, location=f"https://elsewhere.invalid/{PASTED}"),
@@ -506,6 +654,45 @@ def test_every_refusal_of_a_hostile_reply_repeats_nothing_of_it(
         }
         assert [name for name, text in surfaces.items() if PASTED in text] == []
         assert [name for name, text in surfaces.items() if DEVICE_TOKEN in text] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{**admitted(), "access": PASTED}, {**unwelcome(), "access": PASTED}],
+    ids=["a reply this client admits", "a reply this client turns away"],
+)
+def test_a_word_for_the_token_this_client_does_not_know_reaches_no_surface(
+    run,
+    far_side,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    body: dict,
+) -> None:
+    """The same four surfaces, on the replies this client ACCEPTS.
+
+    The inventory above is about refusals, which quote nothing by
+    construction. This is the harder half: an unknown word is read as an
+    older server and the command goes on to report a state, so the value
+    survives to a point where something could print it. It may not. Like
+    the token and the URL it explains, it is far-side bytes, and this
+    one is shaped like a credential so that the assertion is about
+    something.
+    """
+    far_side(answering(body=body))
+    with caplog.at_level(logging.DEBUG):
+        caplog.clear()
+        assert run("simulator", "check-in", URL) == 0
+    captured = capsys.readouterr()
+    with pytest.raises(ConfigError) as caught:
+        cli._parsed(["simulator", "check-in", URL, "--mac", "not-a-mac"], cli.DISPATCHED)  # noqa: SLF001
+    surfaces = {
+        "stdout": captured.out,
+        "stderr": captured.err,
+        "logs": logged(caplog),
+        "chain": chain(caught.value),
+    }
+
+    assert [name for name, text in surfaces.items() if PASTED in text] == []
 
 
 @pytest.mark.parametrize("field", ["code", "message", "challenge"])
@@ -950,13 +1137,54 @@ def test_the_conversation_verb_refuses_a_board_that_may_not_speak(
     `check-in` reports these two states and exits 0, because reporting
     the state a board is in IS the answer. `run` was asked to hold a
     conversation and cannot, so the same replies are a refusal here.
+
+    The unwelcome body is the old-server one, byte for byte, and the
+    turned-away one is the same state said out loud by a server that can
+    (#369). Both refuse, because what changed is how the state is read
+    and not what it means.
     """
-    for answer in (answering(body=activating()), answering(body=unwelcome())):
+    for answer in (
+        answering(body=activating()),
+        answering(body=unwelcome()),
+        answering(body=turned_away()),
+    ):
         far_side(answer)
 
         assert run("simulator", "run", URL) == 1
 
         assert capsys.readouterr().err.strip() == cli.CANNOT_CONVERSE
+
+
+def test_the_conversation_verb_goes_on_where_the_deployment_issues_no_tokens(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The behavior half of #369, at the seam that used to stop it.
+
+    A deployment with device authentication off admits this board and
+    hands it an empty token, and the classification in front of the
+    socket refused it for exactly that. Here it goes past the
+    classification and opens the socket, which is as far as a unit case
+    can take it: the address is a loopback port nothing listens on, so
+    the refusal is the socket's and not the reading's.
+
+    Held to going red by the reading alone: without the word, this body
+    is `Unwelcome` and the command leaves with `CANNOT_CONVERSE` before
+    anything is opened.
+    """
+    far_side(
+        answering(
+            body=admitted_without_a_token(
+                websocket={"url": "wss://127.0.0.1:9/xiaozhi/v1/", "token": "", "version": 1}
+            )
+        )
+    )
+
+    assert run("simulator", "run", URL) == 1
+
+    captured = capsys.readouterr()
+    assert "admitted this board" in captured.out
+    assert cli.CANNOT_CONVERSE not in captured.err
+    assert captured.err.strip().startswith("cannot open a conversation with ")
 
 
 def test_the_conversation_verb_opens_no_socket_to_an_address_with_a_credential_in_it(
