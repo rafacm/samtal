@@ -51,6 +51,14 @@ LEAK = '{"name": "remember", "arguments": {"text": "I like tea"}}'
 SENTINEL = "sk-test-1d0c7a6b-never-a-real-credential"
 LEAKED_SECRET = json.dumps({"name": "remember", "arguments": {"text": SENTINEL}})
 
+# The same call with an ordinary sentence break inside its argument,
+# which is what a model asked to remember two things writes. The
+# punctuation rule used to cut here, into two fragments that were each
+# no longer a call, and both were spoken (#391's first finding).
+SPLIT_SECRET = json.dumps(
+    {"name": "remember", "arguments": {"text": f"{SENTINEL}. Store it"}}
+)
+
 
 async def phrases(config: Config) -> dict[str, Any]:
     """The fallback phrases a boot would have cached for this world.
@@ -311,6 +319,51 @@ async def test_a_withheld_sentence_reaches_no_retained_surface(
     assert all(
         SENTINEL not in str(turn.content) for turns, _, _ in script.seen for turn in turns
     )
+
+
+async def test_a_call_whose_argument_holds_a_sentence_break_is_still_withheld(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The compact call the splitter used to cut in half.
+
+    `. ` inside a JSON string is a sentence ending followed by
+    whitespace, so the splitter handed the guard two fragments, neither
+    of which decodes and both of which are ordinary text as far as
+    every rule downstream is concerned: synthesized, displayed, put in
+    the history and stored. That is the no-leak contract broken by a
+    single-line compact call, which is not the multiline bound the
+    module states.
+
+    The same six surfaces the whole-sentence case asserts, because it
+    is the same claim: the fragments must be nowhere, and what the user
+    hears is the answer beside them.
+    """
+    spy = SpyStore()
+    script = ScriptedLlm([f"{SPLIT_SECRET}\nAll set.\n", "And then this."])
+    session = await speaking_session(scripts={"poet": script}, conversations=spy)
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+        await drive_reply(session, UTTERANCE)
+
+    assert wire(session).announced() == ["All set.", "And then this."]
+    assert SENTINEL not in json.dumps(wire(session).messages())
+    assert SENTINEL not in both_formats(caplog)
+    assert all(
+        SENTINEL not in json.dumps(fields_of(record), default=str)
+        for record in caplog.records
+        if getattr(record, "event", None) is not None
+    )
+    assert all(SENTINEL not in repr(record) for _, record in spy.records)
+    assert [record.reply for _, record in spy.records] == ["All set.", "And then this."]
+    assert all(
+        SENTINEL not in str(turn.content) for turns, _, _ in script.seen for turn in turns
+    )
+    # One sentence went, not two fragments, and it is named as the call
+    # it was.
+    withheld = only(caplog, "sentence_withheld")
+    assert fields_of(withheld)["tool"] == "remember"
+    assert fields_of(withheld)["characters"] == len(SPLIT_SECRET)
 
 
 async def test_no_audio_is_ever_made_of_a_withheld_sentence() -> None:
