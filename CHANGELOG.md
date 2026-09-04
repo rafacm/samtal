@@ -167,6 +167,42 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- **A reply's length cap can be configured at last** (#277).
+  `max_tokens` contains the word `token`, and the rule that refuses an
+  inline secret in a provider option matches that word anywhere in a
+  key, so writing the cap was refused on every surface and for every
+  provider type: the `anthropic` and `openai_compatible` builders read
+  an option no entry could carry, the built-in default of 1024 silently
+  always won, and the refusal advised writing `max_tokens_env`, which
+  nothing reads. Every operator-facing reference documented the field
+  as writable with no caveat, so the only way to find out was to
+  measure a reply. The rule now carries a bounded exemption, exact and
+  case-sensitive, for that one name: the cap installs from a file, over
+  the API and from the command line, it reaches both builders and the
+  request they send, it is shown rather than masked on every read and
+  in every export, and both LLM example fragments document it. Nothing
+  else moved. `MAX_TOKENS` and `Max_Tokens` are spellings nothing
+  declares and are still refused, and so are `max_token`, `tokens`,
+  `max_tokens_backup` and every other name carrying one of the words
+  the rule is built from; an MCP server's env key, an MCP header or a
+  URL query parameter called `max_tokens` is still treated as a
+  credential, because those are named by whoever runs the server or the
+  endpoint and have no declared reader to earn an exemption.
+
+  **Deployments upgrade past a credential slot that is withdrawn.**
+  Because the slot check read the same rule,
+  `vinga provider secret set <stage> <entry> max_tokens` was accepted
+  and stored an encrypted value in a slot no read, no build and no
+  request ever consulted. That command is refused from this release on,
+  with the sentence any other name that is not a credential slot meets.
+  A stored row would otherwise be verified at every boot, listed as
+  stored-secret metadata, and rendered into the foot of `vinga export`
+  as a command the `vinga import` that same document prescribes now
+  refuses, which would break the documented export-and-reapply
+  recovery. So a forward migration on the domain chain deletes exactly
+  those rows at the first start after upgrading. Nothing that was ever
+  read is lost, sibling credentials on the same entry are untouched,
+  and a deployment that never entered one has nothing to delete.
 - **The simulator holds a conversation on a deployment that issues no
   device tokens** (#369). With `server.auth.enabled: false`, a default
   agent set and the store applied, the server admitted the simulated

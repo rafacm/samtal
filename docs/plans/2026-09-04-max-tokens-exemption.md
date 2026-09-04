@@ -215,8 +215,9 @@ nothing else learns anything.
 
 ## Milestones
 
-- [ ] **M1: the exemption, the migration, the suite, and the
-  fragment lines.** `_SECRET_KEY_EXEMPT_NAMES` inside
+- [x] **[M1: the exemption, the migration, the suite, and the
+  fragment lines](2026-09-04-max-tokens-exemption-implementation.md#m1-the-exemption-the-migration-the-suite-and-the-fragment-lines)**
+  (PR TBD). `_SECRET_KEY_EXEMPT_NAMES` inside
   `secret_option_fragment`, exact and case-sensitive, with the
   earning-a-place comment; the forward domain-chain migration
   deleting exactly the provider `secrets.max_tokens` rows, with
