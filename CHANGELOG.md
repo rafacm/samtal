@@ -139,6 +139,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   its keys and whatever they held. The one depth still opened is the
   outermost list, because that is what an agent's includes and its
   grants are.
+- **`vinga export` refuses a stored location it cannot write down**
+  (#351). It renders every stored credential as the command that enters
+  it, and the identity and the slot go into that line as written,
+  because the command has to address the entity it names. Those lines
+  are `#` comments inside a YAML document, and quoting a value is what
+  makes a line safe to paste rather than safe to read: a newline in an
+  identity ended the comment, and the rest of it landed on a bare line
+  of a document whose own header says to import it. A location carrying
+  a line separator, a control character or one of the format characters
+  a terminal obeys silently (the right-to-left override among them) now
+  meets the fixed refusal before any of the document is rendered. A name
+  carrying a space, a percent sign, a character outside ASCII or a
+  leading dash still exports verbatim, which is what the refusal exists
+  to protect. The write path already refuses a control character in a
+  name, so only an answer that did not come from this API can meet
+  this.
 - **The `mcp` grants written in the object form read as structures in
   the `vinga list` tree** (#351). They used to print as a Python repr,
   which is the same rule change as above seen on a well-formed
