@@ -377,6 +377,20 @@ before the fix with `VINGA_DB_NAME=vinga uv run pytest
 tests/unit/test_config_cli.py`: the same twenty-five failures, in the
 same order, that CI's `gw3` reported.
 
+*2026-09-04: there was a third door, and this paragraph's "both doors"
+counts one too few.* Pydantic inlines a sub-model's schema, defaults
+included, into every embedding model's compiled validator at class
+creation, so a composition whose payload carried a `database` mapping
+with fields missing filled them from a stale inlined copy and booted
+against the compose instance's real `vinga` database whatever the other
+two doors agreed. It is closed, where the first two were closed, by
+[`2026-09-04-lane-database-third-door.md`](2026-09-04-lane-database-third-door.md)
+(#333): the conftest rebuilds the whole cascade rather than
+`DatabaseConfig` alone, and the pin named above grows the payload door,
+all four connection facts, and a completeness rule so a fourth door
+cannot open silently. The account of the first two doors above stays
+accurate as history.
+
 **The integration lane: a boot that no longer refuses.** The lane hung
 for seventy-three minutes and was killed with no test named. The last
 line it printed was the test before
