@@ -101,12 +101,18 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     acts for no agent at all (#83), eighty-six since a handshake
     refused by a shutdown stopped being reported as a full server
     (#318), and eighty-seven since a call whose argument types this
-    server corrected says so (#383), and ninety since a reply that failed
+    server corrected says so (#383), ninety since a reply that failed
     says so out loud, once heard and once only shown, and a failure
-    phrase that would not synthesize says so too (#384)."""
+    phrase that would not synthesize says so too (#384), and
+    ninety-two since a sentence shaped like a leaked tool call is
+    dropped rather than spoken and a reply left with nothing sayable in
+    it says the phrase for the other reason (#385). The last of those
+    shares its emit site with the two above it, which is what the
+    identity numbering under one method is for: what a driver names is
+    a path through a site rather than a line of source."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 90
+    assert len(set(claimed)) == len(claimed) == 92
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -629,6 +635,46 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
     ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._report_withheld #1": (
+        (
+            "BuiltinSentenceWithheld",
+            (
+                "agent",
+                "characters",
+                "conversation",
+                "device",
+                "event",
+                "session",
+                "source",
+                "tool",
+            ),
+        ),
+        (
+            "UnnamedSentenceWithheld",
+            (
+                "agent",
+                "characters",
+                "conversation",
+                "device",
+                "event",
+                "session",
+                "source",
+            ),
+        ),
+        (
+            "McpSentenceWithheld",
+            (
+                "agent",
+                "characters",
+                "conversation",
+                "device",
+                "entry",
+                "event",
+                "session",
+                "source",
+            ),
+        ),
+    ),
     "vinga_server.runtime.filler_runner:FillerRunner.speak_fallback #1": (
         (
             "ReplyFailedFallback",
@@ -646,6 +692,20 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.runtime.filler_runner:FillerRunner.speak_fallback #2": (
         (
             "ReplyFailedFallback",
+            (
+                "agent",
+                "audio",
+                "conversation",
+                "device",
+                "event",
+                "reason",
+                "session",
+            ),
+        ),
+    ),
+    "vinga_server.runtime.filler_runner:FillerRunner.speak_fallback #3": (
+        (
+            "NothingSayableFallback",
             (
                 "agent",
                 "audio",
