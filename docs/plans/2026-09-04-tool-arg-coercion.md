@@ -145,16 +145,25 @@ no `properties`, and nested structure below the top level. The
 bound is deliberate: device tools are flat, the measured failure is
 flat, and every widening can arrive with its own evidence.
 
-**No new event, and the reason recorded.** A coercion never turns
-a failure into a different failure; it turns a refusal the model
-cannot act on into the call the model meant, deterministically.
-The fact that the model needed it stays fully visible where the
-operator already looks: the conversation record's `arguments`
-carries the original string. An event variant would buy a second
-copy of that fact at the price of the whole catalog surface
-(declaration, driver, baseline row, regenerated `events.md`). If
-field experience later shows the record is not enough, the event
-can arrive with that evidence.
+**The coercion is a vinga-owned decision, so it emits an event.**
+The decision-reason guideline is the governing rule: a decision
+vinga owns exposes a closed reason on the structured surface, and
+the conversation record cannot substitute for it (it is a
+content-class surface, its `arguments` is null under text-off, it
+retains no schema, and an original string beside a success does
+not prove a coercion happened; a type correction can even surface
+a second constraint such as a `maximum` or an `enum`, so the
+outcome alone says nothing). A new declaration,
+`tool_arguments_coerced` on the session channel, one variant,
+emitted where the execution copy is derived and only when it
+differs from the original, carrying: the tool identified under the
+same policy `tool_call` uses (`_tool_fragment`, which names
+builtins in this server's vocabulary and identifies a far side's
+tool without repeating its bytes), and the count of coerced
+arguments. No argument values, no peer-authored property names.
+The full catalog discipline lands with it: the declaration, the
+baseline driver, the `CARRIED` row, `events.md` regenerated
+through its generator, and the README event index row.
 
 **Malformed calls stay malformed.** A claim whose `arguments` is
 `None` (the model streamed non-JSON) is answered before dispatch
@@ -235,9 +244,10 @@ today and stays that way; coercion runs only on a dict.
   hand-maintained page claims arguments pass through verbatim
   (checked: `concepts.md`, `glossary.md`, `system-overview.md`
   describe the tool loop at a higher altitude), the record and API
-  descriptions stay true by design, and no generated reference is
-  staled because no event, schema or API shape changes; CHANGELOG
-  only.
+  descriptions stay true by design, `events.md` and the README
+  event index regenerate and update for the new declaration, and
+  the CHANGELOG entry names both the coercion and the
+  `forget`-permanence consequence recorded below.
 
 ## Plan review round
 
@@ -293,6 +303,13 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    with target type/count and no argument values or peer-authored
    names, with the catalog, driver, baseline, generated-reference
    and no-leak work named.
+
+   *Resolution*: accepted in full; the no-event decision is
+   reversed. The plan now declares `tool_arguments_coerced` with
+   the `_tool_fragment` naming policy and a coerced-argument
+   count, emitted where the execution copy differs, and the
+   milestone names the catalog, driver, baseline row, `events.md`
+   and README index work.
 
 4. **P2: the never-raises contract is untested against the inputs
    most likely to escape and leak.** The matrix omits an arbitrary
