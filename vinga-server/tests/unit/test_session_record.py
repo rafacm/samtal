@@ -23,7 +23,6 @@ import pytest
 
 from tests.support.configs import (
     BOTH_MAC,
-    POET_MAC,
     POET_TONE,
     TUTOR_TONE,
     base_config,
@@ -32,19 +31,22 @@ from tests.support.configs import (
 from tests.support.device_tools import STATUS, FakeDevice
 from tests.support.providers import BrokenStreamingTts as BrokenTts
 from tests.support.providers import ScriptedLlm
+from tests.support.records import (
+    SpyStore,
+    only_record,
+    recording_session,
+    speaking_session,
+)
 from tests.support.sessions import (
     call,
     drive_reply,
     events_of,
-    session_for,
     stamp_with,
     start_reply,
     talking,
     talking_thread,
     wait_for_reply,
-    with_device,
 )
-from tests.support.sockets import QuietSocket
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server.config import Config
@@ -52,7 +54,6 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
-from vinga_server.device.session import DeviceSession
 from vinga_server.memory.store import MemoryScope, MemoryStore
 from vinga_server.providers import (
     AsrProvider,
@@ -75,98 +76,6 @@ from vinga_server.tools.mcp import McpServers
 # transcript: 640 bytes at 16 kHz, which is the 0.02 s the record
 # reports as the utterance's duration.
 UTTERANCE = b"\x00\x00" * 320
-
-
-class SpyStore:
-    """Where the store will stand, keeping what it is handed.
-
-    It implements the producer half the runtime is given, session id and
-    all, so the binding the factory does is exercised rather than assumed.
-    """
-
-    def __init__(self) -> None:
-        self.records: list[tuple[str, TurnRecord]] = []
-
-    def record_turn(self, session_id: str, record: TurnRecord) -> None:
-        self.records.append((session_id, record))
-
-
-class Speaking:
-    """The reply's speaking step, stubbed down to what these tests need.
-
-    The synthesis is drained rather than abandoned, so the first-audio
-    measurement is a real one taken off a real provider; nothing reaches
-    a device, so no audio is paced and a reply takes as long as its
-    scripts do."""
-
-    def __init__(self) -> None:
-        self.said: list[str] = []
-        self.spoke = asyncio.Event()
-
-    async def __call__(self, synthesis: Any, resampler: Any, into: list[str]) -> None:
-        async for _ in synthesis.chunks():
-            pass
-        into.append(synthesis.sentence)
-        self.said.append(synthesis.sentence)
-        self.spoke.set()
-
-
-def speaking_session(
-    conversations: Any,
-    config: Config | None = None,
-    mac: str = POET_MAC,
-    scripts: dict[str, ScriptedLlm] | None = None,
-    memory: MemoryStore | None = None,
-    mcp_servers: McpServers | None = None,
-    stages: dict[str, Any] | None = None,
-) -> tuple[DeviceSession, Speaking]:
-    """A session whose speaking is stubbed down to what these tests
-    need, on a known device, built the way every other session in these
-    suites is.
-
-    The stub is white-box and the only reach-in this file keeps besides
-    the two below it. What a recorded turn holds is decided sentence by
-    sentence as each one's synthesis finishes, and the public route to a
-    spoken sentence is the audio the device is paced: running it would
-    make every one of these tests wait out a real reply's playback to
-    read a field about how the reply was recorded. `Speaking` drains the
-    same synthesis a device would, so the measurements a record carries
-    are real ones off a real provider, and nothing is paced.
-    """
-    session = session_for(
-        config if config is not None else base_config(),
-        mac,
-        scripts,
-        memory=memory,
-        websocket=cast(Any, QuietSocket()),
-        mcp_servers=mcp_servers,
-        conversations=conversations,
-        stages=stages,
-    )
-    with_device(session, mac)
-    speaking = Speaking()
-    session.runtime._speak = speaking  # type: ignore[method-assign]
-    return session, speaking
-
-
-def recording_session(
-    config: Config | None = None,
-    mac: str = POET_MAC,
-    scripts: dict[str, ScriptedLlm] | None = None,
-    memory: MemoryStore | None = None,
-    mcp_servers: McpServers | None = None,
-    stages: dict[str, Any] | None = None,
-) -> tuple[DeviceSession, SpyStore, Speaking]:
-    """A session whose turns are recorded, built the way every other
-    session in these suites is."""
-    spy = SpyStore()
-    session, speaking = speaking_session(spy, config, mac, scripts, memory, mcp_servers, stages)
-    return session, spy, speaking
-
-
-def only_record(spy: SpyStore) -> TurnRecord:
-    assert len(spy.records) == 1, f"expected one record, got {len(spy.records)}"
-    return spy.records[0][1]
 
 
 def both_records(spy: SpyStore) -> tuple[TurnRecord, TurnRecord]:
