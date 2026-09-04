@@ -283,6 +283,11 @@ amendments.
    under the old predicate the mask would read as a keep marker
    and succeed.
 
+   *Resolution*: accepted in full; the display bullet now carries
+   the direct keep-marker pin (numeric store, mask resubmit, typed
+   refusal, stored integer unchanged) beside the untouched generic
+   control.
+
 5. **P2: no test proves a configured value reaches either
    builder.** The defect was the default always winning, yet the
    planned tests stop at `.options`. Add factory-level tests for
