@@ -1887,6 +1887,12 @@ UNRESOLVED = "the change was refused; it would leave these references unresolved
 
 REFUSED_DOCUMENT = "REFUSED_DOCUMENT"
 
+# The same trick for a config file the loader will read: the word is
+# replaced by a file whose `log_level` is the planted credential, which
+# is what a paste into the wrong key looks like and what the validator
+# behind that key used to quote back.
+REFUSED_CONFIG = "REFUSED_CONFIG"
+
 # A path with nothing at it, carrying the planted credential. A config
 # path is typed, which makes it the last place a refusal may repeat, so
 # the row below is a leak case as much as a wording case: the whole
@@ -2051,6 +2057,19 @@ REFUSALS: tuple[Refusal, ...] = (
         CONFIG_NOT_FOUND.format(source=CONFIG_FROM_FLAG),
         False,
     ),
+    # The other half of the same door: a file that is there and holds a
+    # value one of its keys refuses. The value is the planted
+    # credential, which is what a paste into the wrong key looks like,
+    # and this row is what says it reaches neither the sentence, nor a
+    # log record, nor the chain the refusal travels on.
+    Refusal(
+        ("ota-url",),
+        ("ota-url", "--config", REFUSED_CONFIG),
+        f"invalid config in {CONFIG_FROM_FLAG}:\n"
+        "  - server.log_level: is not a logging level; expected one of: DEBUG, INFO, "
+        "WARNING, ERROR, CRITICAL. What was set is not quoted back",
+        False,
+    ),
     Refusal(("info",), ("info", "extra"), USAGE, False),
     Refusal(("list",), ("list", "extra"), USAGE, False),
     Refusal(("show",), ("show", "extra"), USAGE, False),
@@ -2101,6 +2120,8 @@ def refusing(argv: Sequence[str], directory: Path) -> tuple[str, ...]:
     return tuple(
         written(directory, "refused.yaml", {"nonsense_section": {"note": PLANTED}})
         if word == REFUSED_DOCUMENT
+        else written(directory, "refused-config.yaml", {"server": {"log_level": PLANTED}})
+        if word == REFUSED_CONFIG
         else word
         for word in argv
     )
