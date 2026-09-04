@@ -320,3 +320,107 @@ Existing assets carry the shapes; nothing they pin is restated.
   paragraph and the event surfaces; `system-overview.md`'s step
   list gains the guard clause only if its current wording claims
   every sentence is spoken, confirmed during implementation.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-04, against commit `d1c05512`; the reviewer ran
+about 17 minutes. Verdict: ready after the P1/P2 amendments.
+
+1. **P1: the proposed predicate does not catch the failure class.**
+   The observed payload `{"volume":"100"}` carries no `name`, and
+   the splitter's cutting rules mean a compact call followed by
+   prose reaches the guard as one non-JSON sentence while
+   pretty-printed JSON arrives as non-JSON fragments. Define how
+   complete JSON values are isolated (mixed prose and multiline
+   forms included), how argument-only objects are narrowly matched
+   against the offered `input_schema`s (matching cannot require
+   successful validation, since the observed value had the wrong
+   type), resolve ambiguous schema matches, and test the observed
+   payload directly.
+
+2. **P1: retaining the withheld model text contradicts the no-leak
+   rule and the record semantics.** The record's `reply` is what
+   the user heard, assembled solely from `spoken`; no raw
+   generated-text channel exists. Withheld bytes must enter
+   neither `leg`, `spoken`, the working history, assistant turns
+   nor `TurnRecord`, with a sentinel test across device, both log
+   formats, event payloads, stored records and subsequent model
+   history.
+
+3. **P1: the proposed characterization changes would violate the
+   DeviceGone constraint.** The two "ends quietly" pins drive
+   socket disappearance translated to `DeviceGone`, which #384
+   requires to stay silent regardless of configuration. Leave both
+   pins silent under the default-on configuration and add separate
+   general-exception cases for enabled fallback and disabled
+   silence.
+
+4. **P1: a failed boot synthesis unnecessarily removes the
+   required display fallback.** The display message needs no PCM
+   and no working TTS provider. Retain the configured phrase when
+   synthesis fails: a terminal failure still sends the display
+   message and closes with `tts stop`, audio becomes optional, and
+   telemetry distinguishes audio delivery from display-only
+   degradation without carrying the phrase.
+
+5. **P1: `spoken` cannot determine whether the whole reply said
+   nothing.** `_speak_reply` clears `spoken` after every completed
+   leg, so an earlier leg's speech followed by a withheld final
+   leg reads as empty. Introduce a reply-wide fact that survives
+   leg clearing, and test both handover orders.
+
+6. **P1: one `sentence_withheld` variant cannot safely express the
+   promised tool fragment.** `_tool_fragment` returns three
+   concrete types and the catalog permits one concrete value type
+   per field; `tool_call` uses separate variants for exactly this
+   distinction. Declare source-specific variants selected by the
+   existing classifier, or omit the fragment for one metadata-only
+   variant, and prove with a sentinel-bearing far-side tool name
+   that nothing reaches logs or payloads.
+
+7. **P2: cancellation during fallback playback is contradictory.**
+   "Never raises" would swallow a barge-in's `CancelledError`.
+   Require `CancelledError` to propagate, `DeviceGone` swallowed,
+   ordinary failures sanitized and swallowed, and test
+   cancellation after playback has begun with `tts stop` still
+   attempted exactly once.
+
+8. **P2: independent filler and fallback caching does not fit the
+   current generation and reload result.** `Fillers`' single clip
+   mapping and its `resynthesized`/`reused`/`disabled` lists
+   cannot honestly describe per-kind outcomes. Settle the cache
+   structure in the plan: per-kind outcomes, generation wiring,
+   reload response and OpenAPI changes, the diff surface, and the
+   `config/entities.py` `NestedShape`.
+
+9. **P2: fallback synthesis and playback failures have no honest
+   telemetry surface.** `FillerDisabled`'s meaning is latency
+   masking; reusing it would be semantic drift, and a new bare log
+   line contradicts "the UNTYPED set is not grown". Declare a
+   fallback-specific cache-failure event and either a typed
+   playback-failure event or the exact new UNTYPED
+   channel/template, with sentinel-planting tests over record
+   internals and both renderings.
+
+10. **P2: the two sentence decision sites are not independently
+    pinned.** Compact JSON at EOF exercises only `flush`. Require
+    a newline-terminated case through `push` and an EOF-tail case
+    through `flush`, or centralize guard plus emission behind one
+    helper and test both callers.
+
+11. **P2: pin-before-reshaping coverage is incomplete.** No
+    existing test asserts the filler sends no `sentence_start`,
+    and the proposed failure-order test lists only control
+    messages. Add the explicit filler pin first, and assert the
+    full failure order: `stt`, `tts start`, the fallback
+    `sentence_start`, one or more frames, then `tts stop`.
+
+12. **P2: default-on boot synthesis creates an unbounded
+    upgrade-time operation.** Startup awaits the whole cache build
+    before serving, synthesis has no deadline, and an upgrading
+    deployment cannot pre-stage the new field because old models
+    forbid it. Define a bounded startup policy, test a TTS stream
+    that never completes, and document the unavoidable
+    first-upgrade synthesis with its latency and billing
+    consequence.
