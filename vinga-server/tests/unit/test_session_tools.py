@@ -29,7 +29,7 @@ from tests.support.configs import (
     registry_config,
 )
 from tests.support.device_tools import VOLUME, FakeDevice
-from tests.support.events import events, only
+from tests.support.events import events, fields_of, only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
 from tests.support.records import only_record, recording_session
@@ -1304,9 +1304,25 @@ async def test_a_corrected_call_says_so_and_names_the_board_nothing(
 
     coerced = only(caplog, "tool_arguments_coerced")
     assert (coerced.source, coerced.coerced) == ("device", 1)  # type: ignore[attr-defined]
-    assert not hasattr(coerced, "tool") and not hasattr(coerced, "entry")
-    assert "40" not in coerced.getMessage()
-    assert "volume" not in coerced.getMessage()
+    # The whole sentence past the session id, so the board's tool name,
+    # the property's name and the value are all absent by exhaustion
+    # rather than by three substring checks: a session id is random hex
+    # and a check for "40" in it is a test that fails one run in nine.
+    assert coerced.getMessage().endswith(
+        "device tool was called with 1 argument(s) whose types the schema "
+        "declares otherwise, converted for the call"
+    )
+    # And the payload's keys, for the same reason: neither name has a
+    # field to ride, and a device call names no tool and no entry.
+    assert set(fields_of(coerced)) == {
+        "agent",
+        "conversation",
+        "coerced",
+        "device",
+        "event",
+        "session",
+        "source",
+    }
 
 
 async def test_a_builtin_corrected_is_named_and_a_call_that_needed_nothing_is_silent(
