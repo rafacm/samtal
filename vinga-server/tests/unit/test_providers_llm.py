@@ -343,6 +343,70 @@ async def test_the_cap_on_a_reply_is_the_one_the_kit_names() -> None:
     assert built._max_tokens == DEFAULT_MAX_TOKENS
 
 
+# The configured cap, which until #277 could not be configured at all
+#
+# `max_tokens` contains the fragment `token`, so the shared secret-key
+# heuristic refused the option on every write surface: both builders
+# read a key no entry could carry, and the default above always won.
+# That is a claim about the value reaching the provider, so it is
+# asserted where the value arrives rather than at `.options`.
+
+CONFIGURED_MAX_TOKENS = 2048
+
+
+async def test_a_configured_cap_reaches_the_anthropic_provider() -> None:
+    """The untyped builder's half. `anthropic` declares no options
+    model, so its reader takes the key off the entry's pass-through
+    extras, which is exactly what the heuristic used to empty."""
+    built = await build_entry(
+        "llm",
+        "claude",
+        provider_config(
+            type="anthropic",
+            model="claude-sonnet-5",
+            max_tokens=CONFIGURED_MAX_TOKENS,
+        ),
+    )
+
+    assert isinstance(built, AnthropicLlm)
+    assert built._max_tokens == CONFIGURED_MAX_TOKENS
+    # Named as not being the default, because the default winning
+    # silently is the defect itself: an assertion that could be
+    # satisfied by it would be asserting nothing.
+    assert CONFIGURED_MAX_TOKENS != DEFAULT_MAX_TOKENS
+
+
+async def test_a_configured_cap_reaches_the_openai_compatible_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The typed builder's half, and the one case taken to the wire.
+
+    Two halves, for the reason the passthrough cases have two: a
+    deployment's client is built inside the provider and handed to
+    nobody, so what a factory-built entry sends is read off the
+    transport rather than off the object. A factory that dropped the
+    option would fail the first; a provider that held it and composed
+    the default would fail the second.
+    """
+    sent: dict[str, object] = recorded(monkeypatch)
+
+    built = await build_entry(
+        "llm",
+        "local",
+        provider_config(
+            type="openai_compatible",
+            base_url="http://localhost:11434/v1",
+            model="qwen3:8b",
+            max_tokens=CONFIGURED_MAX_TOKENS,
+        ),
+    )
+
+    assert isinstance(built, OpenAiCompatibleLlm)
+    assert built._max_tokens == CONFIGURED_MAX_TOKENS
+    assert await spoken(built) == []
+    assert sent["max_tokens"] == CONFIGURED_MAX_TOKENS
+
+
 async def test_an_option_this_repository_never_heard_of_reaches_the_endpoint() -> None:
     """The hatch taking effect. `top_p` is nobody's declared option here
     and every server speaking this dialect takes one, so it is written
