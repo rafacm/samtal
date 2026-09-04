@@ -325,11 +325,26 @@ def test_the_constants_are_exactly_the_members_of_the_alias() -> None:
 
 def test_a_row_whose_kind_is_outside_the_set_fails() -> None:
     """Doctored the way a typo arrives: one message row's kind
-    misspelled, which the message pin would silently stop counting."""
+    misspelled, which the message pin would silently stop counting.
+
+    One row, and one in the middle of the table rather than at either
+    end, because that is what the bite has to prove. Doctoring every
+    message row would be passed by an invariant that looked at a single
+    row and called the set closed, so the mistyped row is a needle: the
+    assertion is claimed to find it wherever it sits, and here it sits
+    behind the prose rows and in front of the read side.
+    """
+    abort = capabilities.named_message(
+        ("abort", capabilities.NONE_DECLARED, capabilities.NONE_DECLARED), "sending"
+    )
     mistyped = tuple(
-        replace(row, kind="messsage") if row.kind == capabilities.MESSAGE else row
+        replace(row, kind="messsage")
+        if row.kind == capabilities.MESSAGE and row.what == abort
+        else row
         for row in capabilities.rows()
     )
+    # The needle is in the haystack, once, with every other row intact.
+    assert [row.what for row in mistyped if row.kind == "messsage"] == [abort]
 
     with pytest.raises(AssertionError):
         every_kind_is_one_of_the_declared_two(mistyped)
