@@ -246,6 +246,35 @@ def test_a_recorded_secret_shaped_option_fails_closed() -> None:
     assert views.provider_record(entry)["session_token"] == MASK
 
 
+def test_the_exempted_option_is_shown_and_recorded_as_its_value() -> None:
+    """The display half of #277. `is_secret_option` drives the mask on
+    both read paths, so exempting `max_tokens` from it shows the cap
+    everywhere at once, which is correct: it is how long a reply may run
+    and not a credential.
+
+    The record is the half that matters most, because it outlives the
+    read: a manifest and a session row keep what a record carries, and
+    a cap displaced by eight asterisks there would be a configuration
+    nobody could read back off a stored run. The credential-shaped
+    sibling is asserted beside it, so this is the exemption showing
+    rather than the mask having stopped working.
+    """
+    entry = ProviderConfig.model_construct(type="anthropic", api_key_env=None, egress=None)
+    object.__setattr__(
+        entry, "__pydantic_extra__", {"max_tokens": 2048, "session_token": PASTED}
+    )
+
+    body = views.entity_body(entities.descriptor("provider"), entry)
+    recorded = views.provider_record(entry)
+
+    assert body["max_tokens"] == 2048
+    assert recorded["max_tokens"] == 2048
+    assert body["session_token"] == MASK
+    assert recorded["session_token"] == MASK
+    assert PASTED not in str(body)
+    assert PASTED not in str(recorded)
+
+
 def test_a_kind_that_holds_no_secret_is_shown_with_an_empty_mapping(
     store: ConfigStore,
 ) -> None:

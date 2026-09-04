@@ -228,6 +228,103 @@ def test_a_mask_under_a_key_that_is_not_secret_shaped_is_a_value(
     assert store.read_provider("llm", "claude").entry.model_extra["note"] == MASK
 
 
+# The option the marker rule stopped reaching (#277)
+
+
+LOCAL = {
+    "type": "openai_compatible",
+    "base_url": "http://localhost:11434/v1",
+    "model": "qwen3:8b",
+    "egress": False,
+}
+
+# A cap that is not the builders' default, so a case asserting the value
+# arrived cannot be passing on the default the defect used to leave.
+CONFIGURED = 2048
+
+
+def test_the_exempted_option_reads_back_unmasked_and_resubmits(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """`max_tokens` is a reply-length cap rather than a credential, so
+    the read shows it, and the round trip is the ordinary one: the
+    entity half of a read is a write of it, with no marker in the
+    middle."""
+    assert (
+        client.put("/providers/llm/local", json={**LOCAL, "max_tokens": CONFIGURED}).status_code
+        == 200
+    )
+    envelope = client.get("/providers/llm/local").json()
+    assert envelope["entity"]["max_tokens"] == CONFIGURED
+
+    again = client.put("/providers/llm/local", json=envelope["entity"])
+
+    assert again.status_code == 200
+    assert client.get("/providers/llm/local").json() == envelope
+    assert store.read_provider("llm", "local").entry.model_extra["max_tokens"] == CONFIGURED
+
+
+def test_the_mask_over_the_exempted_option_is_a_value_and_not_a_marker(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """The reshaping the exemption does to the marker rule, pinned
+    directly rather than left to the generic control above.
+
+    What a read hides and what a write restores are one predicate, so
+    moving `max_tokens` out of it moves both ends at once: eight
+    asterisks under that key are eight asterisks, and the type that
+    declares the field refuses them by name. Under the old predicate
+    this same request read as keep-what-is-stored and answered 200,
+    which is what makes this a pin rather than a restatement.
+    """
+    assert (
+        client.put("/providers/llm/local", json={**LOCAL, "max_tokens": CONFIGURED}).status_code
+        == 200
+    )
+
+    response = client.put("/providers/llm/local", json={**LOCAL, "max_tokens": MASK})
+
+    assert response.status_code == 422
+    body = response.json()
+    assert refusal_body(body, 422).startswith("invalid providers.llm.local:")
+    # The field is one the type declares, so the pointer addresses it.
+    assert paths(body) == ["/max_tokens"]
+    # And nothing of the refused write landed: the integer is as it was.
+    assert store.read_provider("llm", "local").entry.model_extra["max_tokens"] == CONFIGURED
+
+
+def test_the_exempted_option_exports_as_its_value_and_imports_back(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The export half of the same claim. A credential is not in an
+    exported body at all and is named as the command that enters it; a
+    cap is a body value and travels as itself, which is what makes an
+    export of a store carrying one applicable back onto it."""
+    assert (
+        run(
+            "provider", "set", "llm", "local",
+            "type=openai_compatible",
+            "base_url=http://localhost:11434/v1",
+            "model=qwen3:8b",
+            "egress=false",
+            f"max_tokens={CONFIGURED}",
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert run("export") == 0
+    exported = capsys.readouterr().out
+
+    assert f"max_tokens: {CONFIGURED}" in exported
+    assert MASK not in exported
+
+    assert run("import", "-f", "-", stdin=exported) == 0
+    assert {line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()} == {
+        "unchanged"
+    }
+
+
 # A mask with nothing behind it
 
 
