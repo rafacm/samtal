@@ -105,8 +105,10 @@ from vinga_server.config.loader import (
     # The other two of the same shape, and the same reason: the boot
     # path reads YAML off a file nobody validated exactly as this
     # module reads it off a fragment, so the sentence for a source that
-    # will not parse and the locator that is the one thing a refusal
-    # may take from the parser are defined once, below both readers.
+    # will not parse, the family that failure can arrive as and the
+    # locator that is the one thing a refusal may take from the parser
+    # are defined once, below both readers.
+    UNPARSEABLE,
     YAML_NOT_QUOTED,
     ConfigError,
     load_environment_file,
@@ -3177,14 +3179,9 @@ def _yaml(data: object) -> str:
 # that happened to agree.
 #
 # What is caught is wider than `YAMLError`, which is the other half of
-# the same fix. The constructors that turn a scalar into a Python value
-# raise the ordinary exceptions when the scalar is out of range: an
-# integer of five thousand digits leaves as CPython's own `ValueError`
-# about the digit limit, an impossible date leaves as `ValueError` from
-# `datetime`, and two thousand nested lists leave as `RecursionError`
-# out of the composer. None of them is a `YAMLError`, so all three used
-# to reach an operator as a traceback with the source in it.
-_UNPARSEABLE = (yaml.YAMLError, ValueError, ArithmeticError, RecursionError)
+# the same fix, and it is `loader.UNPARSEABLE`: the boot path reads a
+# file through the same parser, so the family, the sentence and the
+# locator are one module's and are imported above.
 
 # What the inline form calls the thing it could not read. Its own
 # source name rather than a path, because there is no file: the value
@@ -3207,7 +3204,7 @@ def _parsed_yaml(text: str, source: str) -> object:
     parsed: object = None
     try:
         parsed = yaml.safe_load(text)
-    except _UNPARSEABLE as exc:
+    except UNPARSEABLE as exc:
         problem = f"invalid YAML in {source}{stopped_at(exc)}. {YAML_NOT_QUOTED}"
     if problem is not None:
         raise ConfigError(problem)

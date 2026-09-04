@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.support.configs import load_config_from_data
 from vinga_server.config import Config, ConfigError, load_file_config
@@ -526,6 +527,61 @@ def test_a_file_that_will_not_parse_says_only_where_the_parser_stopped(
     assert PARSER_SENTINEL not in refusal
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+# The failures that are not `YAMLError` at all.
+#
+# `yaml.safe_load` documents that exception, and its constructors raise
+# the ordinary ones on a scalar they cannot build: an arm that catches
+# the documented family alone lets these past as a traceback carrying
+# the whole source. The sentinel rides beside each one, since what a
+# traceback would print is the file.
+UNCONSTRUCTABLE = [
+    pytest.param(
+        f"server:\n  port: {'1' * 5000}\n  note: {PARSER_SENTINEL}\n",
+        id="a-scalar-the-constructor-refuses",
+    ),
+    pytest.param(
+        f"note: {PARSER_SENTINEL}\nwhen: 2026-99-99\n", id="a-date-nothing-has"
+    ),
+    pytest.param("[" * 2000 + "]" * 2000, id="a-document-nested-past-the-stack"),
+]
+
+
+@pytest.mark.parametrize("text", UNCONSTRUCTABLE)
+def test_a_scalar_the_parser_cannot_build_is_refused_not_raised(
+    tmp_path: Path, text: str
+) -> None:
+    """The other half of a no-leak parse boundary: what is caught.
+
+    A shape the sentence answers and the arm does not catch is a
+    traceback, and these three are the ones the documented exception
+    misses. None of them carries a mark, so the sentence is the fixed
+    one with no locator in it.
+    """
+    path = planted_path(tmp_path)
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(path)
+
+    refusal = str(caught.value)
+    assert refusal == f"invalid YAML in {CONFIG_FROM_FLAG}. {YAML_NOT_QUOTED}"
+    assert PARSER_SENTINEL not in refusal
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_both_yaml_readers_catch_one_family(tmp_path: Path) -> None:
+    """The CLI's fragment boundary and the boot path read the same
+    parser, so what either of them treats as unparseable is one tuple:
+    two of them would be the drift that left the boot path catching
+    `YAMLError` alone while the fragment path caught four families."""
+    from vinga_server.config import cli
+    from vinga_server.config.loader import UNPARSEABLE
+
+    assert cli.UNPARSEABLE is UNPARSEABLE
+    assert yaml.YAMLError in UNPARSEABLE
 
 
 def test_a_top_level_that_is_not_a_mapping_is_refused_without_the_path(
