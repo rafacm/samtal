@@ -18,11 +18,24 @@ comes back.
 whole, as it arrives, because a sentence has already been promised to
 TTS by the time it exists: the splitter cuts at a newline, so a
 pretty-printed call arrives as a handful of fragments no decoder can
-read, and each of them speaks. Closing that would mean buffering
-sentences the lookahead has already started synthesizing, which stalls
-live speech on every ordinary `{` in a reply, so the residue is left
-visible through the event instead of paid for at every sentence
-boundary of every reply.
+read, and each of them speaks. Closing that would mean holding
+sentences across newlines, which is where the model's own formatting
+says one thing ended, so the residue is left visible through the event
+instead.
+
+**What the splitter does hold, and what bounds it.** A compact call is
+one line and reaches here whole, which it did not always: the
+punctuation rule cut `{"a":"Milk. And eggs"}` at the `. ` inside the
+argument into two fragments that were each ordinary text, and both
+were spoken (#391). `text.py` now stands the punctuation rule down
+while a brace is open, counting braces outside JSON strings, which is
+the smallest rule that keeps a compact object in one piece for this to
+read. It is bounded three ways, because a sentence held there is a
+sentence not yet being synthesized: a newline cuts whatever is open,
+`flush` releases everything at the end of the stream, and
+`MAX_HELD_FOR_A_BRACE` caps the span, so an unmatched `{` in prose or
+a quotation mark that opens a string nothing closes costs a bounded
+delay rather than the rest of the reply.
 
 **And the cost of the argument-only prong.** Matching an object's key
 set against a tool's declared properties withholds a JSON example whose
