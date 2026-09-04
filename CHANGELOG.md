@@ -36,22 +36,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   that would rather keep the silence sets `fallback: {enabled: false}`,
   on `agent_defaults` or per agent, and its failed turns go back to
   being what they were, message for message. Being on by default also
-  means **the first start after this upgrade synthesizes one phrase per
-  agent** through whatever TTS provider is configured, before the server
-  begins serving: one provider call per agent, a few seconds of startup,
-  and on a metered voice a few seconds of billed synthesis. There is no
-  way to stage an opt-out before that first start, because a
-  configuration written against the previous models refuses the unknown
-  key. Synthesis is bounded per phrase, so a provider that hangs delays
-  the start by seconds rather than indefinitely, and a phrase that will
-  not synthesize degrades to the display alone with a
-  `fallback_degraded` event naming the agent; that turn still shows its
-  sentence and still closes with the `tts stop` a device waits on. After
-  the first start the cost does not recur: an agent whose `fallback`
-  section and whose voice are both unchanged keeps the clip it had
-  across a `vinga apply`, and the two kinds of cached clip are staled
-  apart, so switching the latency mask on or off never re-synthesizes a
-  failure phrase.
+  means **every server start synthesizes one phrase for every agent that
+  has not switched it off**, through whatever TTS provider is
+  configured, before the server begins serving: one provider call per
+  agent, a few seconds of startup, and on a metered voice a few seconds
+  of billed synthesis, paid again at every restart, redeploy and
+  container replacement rather than once at the upgrade. Nothing is
+  cached across processes, and there is no way to stage an opt-out
+  before the first start after upgrading, because a configuration
+  written against the previous models refuses the unknown key.
+  Synthesis is bounded per phrase, so a provider that hangs delays a
+  start by seconds rather than indefinitely, and a phrase that will not
+  synthesize degrades to the display alone with a `fallback_degraded`
+  event naming the agent; that turn still shows its sentence and still
+  closes with the `tts stop` a device waits on. Inside one running
+  process the cost does not recur: an agent whose `fallback` section and
+  whose voice are both unchanged keeps the clip it had across a `vinga
+  apply`, and the two kinds of cached clip are staled apart, so
+  switching the latency mask on or off never re-synthesizes a failure
+  phrase.
 
 - **The OTA reply says why a device token is empty** (#369). Two
   unrelated answers left the wire looking identical: a board this
