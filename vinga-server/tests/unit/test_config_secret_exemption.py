@@ -34,11 +34,12 @@ the process holds.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
+import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -374,41 +375,182 @@ def test_the_env_reference_spelling_keeps_its_own_validation(store: ConfigStore)
 
 
 # The wider rule, at the doors that read it
+#
+# `mcp_secret_fragment` and `is_url_credential_parameter` read a tuple
+# of their own, over names this repository never chose: an MCP server's
+# env and headers are keyed by whatever the server calls them, and a URL
+# query parameter is named by the vendor whose endpoint it addresses. So
+# no name there can meet the second condition an exemption is earned by,
+# and `max_tokens` is a credential-shaped name at all three doors.
+#
+# Held to the same discipline as the narrow half above rather than to a
+# weaker one, and for the same reason: these refusals are about a value
+# that most likely IS a credential, and a refusal is a surface. Each
+# case therefore runs on all three surfaces an operator reaches them
+# from, with the sentinel asserted absent from the exception, its chain,
+# its structured problems, the response body and headers, both log
+# formats and both streams.
 
 
-@pytest.mark.parametrize("spelling", [EXEMPT, EXEMPT.upper()], ids=["lower", "upper"])
-@pytest.mark.parametrize("group", ["env", "headers"], ids=["env", "headers"])
-def test_the_exempted_name_is_still_a_secret_in_an_mcp_entry(
-    store: ConfigStore, group: str, spelling: str
+class Wider(NamedTuple):
+    """One wider-rule refusal, and the three ways in: the route a
+    request reaches it by, the repository call under it that composes
+    the same refusal, and the command words the CLI writes it with.
+
+    `entity` is what every one of these refusals names and the only
+    semantic token they share, which is what keeps the terminal case
+    from passing on a command that failed for some unrelated reason.
+    """
+
+    what: str
+    path: str
+    argv: tuple[str, ...]
+    fragment: dict[str, object]
+    write: Callable[[ConfigStore, dict[str, object]], None]
+    entity: str
+
+
+def _mcp(group: str, key: str) -> dict[str, object]:
+    """One MCP entry carrying the sentinel under `key`.
+
+    The transport is the one the group belongs to, because an entry that
+    is wrong twice would be answered twice, and a case about a
+    credential-shaped key must not be riding on a refusal about where
+    headers may be written.
+    """
+    if group == "headers":
+        return {
+            "transport": "streamable_http",
+            "url": "https://example.invalid/mcp",
+            "headers": {key: SENTINEL},
+        }
+    return {"transport": "stdio", "command": "uvx", "env": {key: SENTINEL}}
+
+
+def _addressed(spelling: str) -> dict[str, object]:
+    return {
+        "type": "openai_compatible",
+        "model": "qwen3:8b",
+        "egress": False,
+        "base_url": f"https://host/v1?{spelling}={SENTINEL}",
+    }
+
+
+WIDER = [
+    Wider(
+        f"an mcp {group} key named {spelling}",
+        "/mcp-servers/home",
+        ("mcp-server", "set", "home"),
+        _mcp(group, spelling),
+        lambda store, fragment: store.set_mcp_server("home", fragment),
+        "mcp_servers.home",
+    )
+    for group in ("env", "headers")
+    for spelling in (EXEMPT, EXEMPT.upper())
+] + [
+    Wider(
+        f"a provider address with a {spelling} query parameter",
+        "/providers/llm/local",
+        ("provider", "set", "llm", "local"),
+        _addressed(spelling),
+        lambda store, fragment: store.set_provider("llm", "local", fragment),
+        "providers.llm.local",
+    )
+    for spelling in (EXEMPT, EXEMPT.upper())
+]
+
+WIDER_IDS = [case.what for case in WIDER]
+
+
+@pytest.mark.parametrize("case", WIDER, ids=WIDER_IDS)
+def test_the_exempted_name_is_still_a_credential_to_the_wider_rule(
+    store: ConfigStore, capsys: pytest.CaptureFixture[str], case: Wider
 ) -> None:
-    """An MCP server's env and headers are keyed by whatever somebody
-    else called them, so `max_tokens` there is not this repository's
-    option under a builder that reads it; it is a name with no declared
-    reader at all, and the wider tuple keeps refusing it."""
+    """At the repository, on the exception itself.
+
+    An exception is a surface of its own: anything that walks one reads
+    its message, its repr, its cause and its context, and the API's own
+    `problems` ride on it. The two streams are asserted because a
+    repository refusal is raised rather than printed, so what the write
+    path puts on a terminal is nothing at all.
+    """
     with pytest.raises(ConfigError) as caught:
-        store.set_mcp_server(
-            "home", {"transport": "stdio", "command": "uvx", group: {spelling: SENTINEL}}
-        )
+        case.write(store, case.fragment)
 
-    assert SENTINEL not in str(caught.value)
+    refusal = caught.value
+    assert SENTINEL not in str(refusal)
+    assert SENTINEL not in repr(refusal)
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+    for carried in refusal.problems:
+        assert SENTINEL not in carried.path
+        assert SENTINEL not in carried.message
+
+    streams = capsys.readouterr()
+    assert SENTINEL not in streams.out
+    assert SENTINEL not in streams.err
 
 
-@pytest.mark.parametrize("spelling", [EXEMPT, EXEMPT.upper()], ids=["lower", "upper"])
-def test_the_exempted_name_is_still_a_credential_url_parameter(
-    store: ConfigStore, spelling: str
+@pytest.mark.parametrize("case", WIDER, ids=WIDER_IDS)
+def test_a_wider_rule_refusal_leaks_nothing_over_the_api(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    case: Wider,
 ) -> None:
-    """And the third reader, on the shape that carries a credential
-    under a key admitting to nothing: a provider's own address."""
-    with pytest.raises(ConfigError) as caught:
-        store.set_provider(
-            "llm",
-            "local",
-            {
-                "type": "openai_compatible",
-                "model": "qwen3:8b",
-                "egress": False,
-                "base_url": f"https://host/v1?{spelling}={SENTINEL}",
-            },
-        )
+    """And over HTTP, where the same refusal has four more places to
+    carry a value: the sentence, every pointer, every message, and the
+    log in both formats this server writes."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(case.path, json=case.fragment)
 
-    assert SENTINEL not in str(caught.value)
+    assert response.status_code == 422
+    body = response.json()
+    assert SENTINEL not in body["detail"]
+    for error in body["errors"]:
+        assert SENTINEL not in error["path"]
+        assert SENTINEL not in error["message"]
+    assert SENTINEL not in response.text
+    assert SENTINEL not in str(response.headers)
+
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    for record in caplog.records:
+        assert SENTINEL not in logs.JsonFormatter().format(record)
+        assert SENTINEL not in text.format(record)
+
+    streams = capsys.readouterr()
+    assert SENTINEL not in streams.out
+    assert SENTINEL not in streams.err
+
+
+@pytest.mark.parametrize("case", WIDER, ids=WIDER_IDS)
+def test_a_wider_rule_refusal_leaks_nothing_from_the_command_line(
+    run,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    case: Wider,
+) -> None:
+    """And the surface an operator most often writes one from, which is
+    the one place a value that got past the two above would be printed
+    at a terminal.
+
+    The fragment goes in on stdin, which is how a whole entry is
+    written, so what the command holds is the credential the operator
+    pasted, and the refusal it prints is the repository's own sentence
+    reaching a terminal rather than a body.
+    """
+    with caplog.at_level(logging.DEBUG):
+        code = run(*case.argv, "-f", "-", stdin=yaml.safe_dump(case.fragment))
+
+    assert code != 0
+    streams = capsys.readouterr()
+    assert SENTINEL not in streams.out
+    assert SENTINEL not in streams.err
+    # And the refusal really is the one this case is about, so a command
+    # that failed for some other reason cannot pass this vacuously.
+    assert case.entity in streams.err
+
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    for record in caplog.records:
+        assert SENTINEL not in logs.JsonFormatter().format(record)
+        assert SENTINEL not in text.format(record)
