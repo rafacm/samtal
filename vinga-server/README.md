@@ -2188,6 +2188,50 @@ in time, or at all, degrades to the display alone, with a
 sentence and still closes with its `tts stop`, and only the audio is
 lost.
 
+## When a model writes a tool call into its speech
+
+A reply is spoken sentence by sentence, and every sentence is spoken
+except one kind: a sentence shaped like a call to a tool this reply
+actually offered. Some models, small local ones especially, write their
+calls out as ordinary prose instead of issuing them, and read aloud
+that is JSON in the assistant's voice on the one user-facing surface
+with no filter on what a model produced.
+
+The check is narrow, and it is anchored to the tools of the reply it is
+in rather than to "looks like JSON": someone asking an agent to explain
+a JSON snippet is a real conversation and gets an answer. A sentence is
+withheld when it contains a complete JSON object that either names one
+of the offered tools, in its own `name` or in the `name` under a
+`function` key, or whose keys all fall inside the properties one
+offered tool declared. The second is the shape the field actually
+produces, where the name never made it out and only the arguments did
+(`{"volume":"100"}`), so nothing about it can be matched by name; keys
+are compared and values never are, since the observed one had the wrong
+type for the schema it belonged to.
+
+The sentence goes whole and the reply carries on. It is not spoken, not
+shown, not added to the conversation this server keeps, and not stored,
+and no event or log line carries a byte of it: what says it happened is
+a `sentence_withheld` event, carrying its length in characters and
+which tool it was shaped like, under the same naming rule `tool_call`
+follows. A reply left with nothing at all to say, every sentence of it
+withheld, says the fallback phrase above with the reason
+`nothing_sayable`, because the alternative is the silence that phrase
+exists to end.
+
+**One bound, stated rather than hidden.** The test is on each sentence
+as it arrives, because a sentence has already been handed to the voice
+by then. Sentences are cut at newlines, so a pretty-printed call
+arrives as a handful of fragments no JSON decoder can read, and those
+fragments are spoken. Closing that would mean holding sentences back to
+see what follows them, which puts a stall in front of live speech at
+every ordinary `{` in every reply. The residue is left visible through
+the event instead: an operator seeing `sentence_withheld` repeatedly,
+or hearing the fragments, is reading a fact about the model this
+deployment configured. The same event is what makes the cost of the
+key-matching rule visible, since an agent reading out a JSON example
+whose keys mirror an offered tool is withheld too.
+
 ## Limits
 
 Three numbers bound what one server holds, and none is visible in normal

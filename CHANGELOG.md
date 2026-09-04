@@ -9,6 +9,38 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **A leaked tool call is never spoken** (#385). Some models, small
+  local ones especially, write a tool call out as ordinary prose
+  instead of issuing it, and vinga read it out loud: JSON in the
+  assistant's voice, on the one user-facing surface with no filter on
+  what a model produced. Each sentence of a reply is now tested before
+  it is spoken, and one shaped like a call to a tool that reply
+  actually offered is dropped whole. The check is narrow on purpose and
+  anchored to the offered tools rather than to "looks like JSON", so an
+  agent asked to explain a JSON snippet still answers: a sentence goes
+  only when it contains a complete JSON object that names an offered
+  tool, in its own `name` or in the `name` under a `function` key, or
+  whose keys all fall inside the properties one offered tool declared.
+  That second form is the shape the field produced, which carries no
+  name at all, so keys are compared and values never are.
+
+  A withheld sentence enters nothing: not the speaker, not the display,
+  not the conversation this server keeps, not the stored turn, and no
+  event or log line carries a byte of it. A new `sentence_withheld`
+  event says it happened, carrying the sentence's length in characters
+  and which tool it was shaped like, under the same naming rule
+  `tool_call` follows. A reply left with nothing at all to say says the
+  fallback phrase from the entry below, under the second reason
+  `reply_fallback` now carries, `nothing_sayable`.
+
+  **One bound is stated rather than closed.** Sentences are cut at
+  newlines, so a pretty-printed call arrives as fragments no JSON
+  decoder can read and those fragments are still spoken; closing that
+  would mean holding sentences back from a voice they have already been
+  handed to, stalling live speech at every ordinary brace in every
+  reply. The event is what keeps the residue visible, and repeated
+  records of it are a fact about the model a deployment chose.
+
 - **A failed reply says so, out loud and on the display** (#384, #343).
   A reply that failed terminally was a deliberately silent turn: the
   failure arm logged one class name and nothing reached the speaker or
