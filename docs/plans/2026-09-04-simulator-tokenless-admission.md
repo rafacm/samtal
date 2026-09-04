@@ -292,8 +292,10 @@ simulator's `read()` applies it, and no third place re-derives it.
   (the reply shape) and `CHANGELOG.md`; no generated reference
   changes because the OTA reply is not in the OpenAPI document.
   Releasable alone: the field is additive and nothing reads it yet.
-- [ ] **M2: the simulator reads it, and the sentences stop
-  contradicting each other.** `board.read()` applies the field with
+- [x] **[M2: the simulator reads it, and the sentences stop
+  contradicting each other](2026-09-04-simulator-tokenless-admission-implementation.md#m2-the-simulator-reads-it-and-the-sentences-stop-contradicting-each-other).**
+  (PR TBD)
+  `board.read()` applies the field with
   the fallback and contradiction rules above; the four sentences
   repaired, the inline tail named; the capability row updated; the simulator and
   integration tests above; `docs/reference/cli.md` regenerated;
