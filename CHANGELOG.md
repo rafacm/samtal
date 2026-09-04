@@ -9,6 +9,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The OTA reply says why a device token is empty** (#369). Two
+  unrelated answers left the wire looking identical: a board this
+  deployment has nothing to admit, and a board that is admitted on a
+  deployment with device authentication turned off, which issues no
+  tokens to anyone. Both were answered with `websocket.token: ""`, byte
+  for byte, so anything reading the reply had to guess which it was,
+  and the device simulator guessed the only way the reply allowed, as
+  "not admitted". The reply now carries a closed `access` field beside
+  the token: `token` (admitted, and the non-empty token beside it is
+  the credential), `open` (admitted, and this deployment issues no
+  device tokens) or `denied` (not admitted, which is why the token is
+  empty). The token and the word for it are decided in one place, so
+  they cannot disagree, and being unresolved wins over the auth setting
+  because turning authentication off does not give a board an agent to
+  reach. The field is top level rather than a member of `websocket`,
+  which is the boundary stock firmware ignores: it parses exactly
+  `activation`, `mqtt`, `websocket`, `server_time` and `firmware` and
+  reads no other top-level key, while it writes every member of
+  `websocket` into NVS, where a key added would have left a stray entry
+  on every board. Nothing reads the field yet.
 - **The two long waits say so at a terminal** (#297). `vinga import`
   waits on a transaction nothing bounds and `vinga apply` waits up to a
   minute for a server to build a new world, and both used to leave an

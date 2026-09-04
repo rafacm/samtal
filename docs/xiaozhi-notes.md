@@ -189,6 +189,31 @@ on real hardware is kept beside the fact it validates.
   `Client-Id`, answers the question before touching the hardware. A
   plain `GET` on the same URL returns a human-readable line naming the
   WebSocket URL, which smoke-tests routing without revealing anything.
+- **vinga's reply says why the token is empty, in a top-level `access`
+  field.** The empty token has two meanings the wire could not tell
+  apart: a board this deployment has nothing to admit, and a board that
+  is admitted on a deployment issuing no device tokens at all
+  (`server.auth.enabled: false`, where the server mints nothing for
+  anyone). The field is a closed set of three, decided where the token
+  is: `token` means admitted and the non-empty token beside it is the
+  credential, `open` means admitted with no credential to hand out, and
+  `denied` means not admitted, which is why there is nothing in the
+  token. Being unresolved wins over the auth setting: a board no agent
+  covers reads `denied` whether authentication is on or off.
+- **The `access` field is additive at the one boundary stock firmware
+  ignores.** The parser reads exactly `activation`, `mqtt`,
+  `websocket`, `server_time` and `firmware`
+  ([the ceremony section below](#activation-the-6-digit-code-ceremony)
+  records that), so an unknown top-level key reaches no firmware code
+  path at all, which is the same ground the `server` block has stood on
+  since it was added. It is deliberately not a member of `websocket`:
+  the firmware writes every key of that object into NVS (observed on
+  hardware, `token` arriving and being persisted between the two
+  milestones of
+  [the v1 implementation record](plans/2026-08-02-samtal-server-v1-implementation.md)),
+  so a key added there would leave a stray NVS entry on every stock
+  board instead of being invisible. The compatibility floor is
+  therefore untouched, and no board's behavior changes.
 - **Probing the WebSocket route with `curl` needs `--http1.1`.** curl
   negotiates HTTP/2 by default, where a WebSocket upgrade is not a valid
   handshake, so the request arrives as an ordinary `GET` and a WS-only
