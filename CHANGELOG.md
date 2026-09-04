@@ -40,6 +40,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   never quotes the value. Write time only, exactly like the provider's
   rule, so a deployment that already has such a row still boots, still
   reads it and can still edit it out.
+- **A URL's query is read for `auth` as well as for `token`** (#279):
+  what counted as a credential in a query parameter was the set of six
+  words a provider option is held to, and none of them is a substring of
+  `auth` or of `authorization`. So `?auth=...` was stored as written on
+  an MCP server and on a provider alike, printed wherever an address is
+  shown, and left in place in the record built from a stored one: the
+  three readers of that rule agreed with each other and all three were
+  wrong. They now read one predicate over the wider set of names, the
+  one an MCP server's headers and env are already held to, on the
+  grounds that a query parameter is named by the vendor whose endpoint
+  it addresses rather than by this project.
+  **Operator-visible:** a provider `base_url` or an MCP `url` carrying
+  `?auth=` or `?authorization=` is refused at the write where it used to
+  be accepted; write the address on its own and name the variable
+  holding the credential (`api_key_env` for a provider, a `$NAME` header
+  for an MCP server). A stored one still boots and still reads, and a
+  displayed address no longer shows the parameter.
 
 ## 2026-09-03
 
