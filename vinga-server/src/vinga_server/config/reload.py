@@ -365,16 +365,18 @@ class ConfigReload:
             # to a prompt from reloading a local model.
             providers = await self._built(previous, composed)
             try:
-                # Synthesized here, in the phase that can only refuse,
-                # and deliberately not able to refuse: an agent whose
-                # voice would not speak applies with no clip and runs
-                # with the mask off, because a filler is a latency mask
-                # and a posture where a text-to-speech hiccup blocked a
-                # prompt fix would invert what matters. Every clip whose
-                # effective section and whose voice are what they were is
-                # the object it already was, and the voice is this
-                # candidate's now: an entry the build above made again is
-                # a different one, so its agents are spoken again in it.
+                # Both kinds of cached speech, synthesized here, in the
+                # phase that can only refuse, and deliberately not able
+                # to refuse: an agent whose voice would not speak applies
+                # with the mask off and its failure phrase shown rather
+                # than spoken, because a posture where a text-to-speech
+                # hiccup blocked a prompt fix would invert what matters.
+                # Every clip whose effective section and whose voice are
+                # what they were is the object it already was, and the
+                # voice is this candidate's now: an entry the build above
+                # made again is a different one, so its agents are spoken
+                # again in it. The two kinds ask that question of their
+                # own sections, so neither stales the other.
                 fillers = await build_agent_fillers(
                     composed.config, providers.world.agents, previous
                 )
@@ -390,7 +392,10 @@ class ConfigReload:
                 raise
             return _Candidate(
                 generation=replace(
-                    composed, fillers=fillers.clips, providers=providers.world
+                    composed,
+                    fillers=fillers.clips,
+                    providers=providers.world,
+                    fallbacks=fillers.fallbacks,
                 ),
                 prompts=_reassembled(previous.config, composed.config),
                 fillers=fillers,
@@ -513,6 +518,9 @@ class ConfigReload:
                 resynthesized=list(candidate.fillers.resynthesized),
                 reused=list(candidate.fillers.reused),
                 disabled=list(candidate.fillers.disabled),
+                fallback_resynthesized=list(candidate.fillers.fallback_resynthesized),
+                fallback_reused=list(candidate.fillers.fallback_reused),
+                fallback_degraded=list(candidate.fillers.fallback_degraded),
             ),
             providers=ProvidersReload(
                 built=list(candidate.providers.built),

@@ -2300,6 +2300,7 @@ This index is the other half: what exists, and when it fires.
 | `memory_unwritable` | a change an agent asked for could not be stored, so nothing was changed |
 | `memory_cleanup_failed` | the memory of conversations that are gone could not be removed, so the next sweep takes it |
 | `filler_disabled` | filler synthesis failed for one agent, so latency masking is off for it |
+| `fallback_degraded` | the phrase a failed reply says would not synthesize for one agent, so its failed turns are shown on the display and not spoken |
 | `capture_started` | a session is being recorded |
 | `capture_declined` | a session is not being recorded, and why |
 | `capture_limit` | a recording reaches its per-session ceiling |

@@ -624,8 +624,15 @@ async def test_a_synthesis_failure_reaches_the_response_body_and_the_rendering()
         "resynthesized": [],
         "reused": [],
         "disabled": ["assistant"],
+        "fallback_resynthesized": [],
+        "fallback_reused": [],
+        # The same broken voice loses the failure phrase's audio too,
+        # under its own outcome: the agent still shows what a failed
+        # reply says, so this is not the mask going off.
+        "fallback_degraded": ["assistant"],
     }
     assert "  disabled: assistant" in cli._apply_listing(body)
+    assert "  fallback_degraded: assistant" in cli._apply_listing(body)
 
 
 async def test_an_agent_defaults_filler_edit_reaches_an_inheriting_agent() -> None:

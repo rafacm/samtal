@@ -1313,10 +1313,23 @@ class _Unreadable:
 
 
 async def drive_filler_disabled(_: Path) -> None:
+    await build_agent_fillers(*_a_voiceless_world())
+
+
+async def drive_fallback_degraded(_: Path) -> None:
+    """The same broken voice, kept as its own driver because it is its
+    own event: one build reports the mask going off and the failure
+    phrase losing its audio separately, and a driver names one path."""
+    await build_agent_fillers(*_a_voiceless_world())
+
+
+def _a_voiceless_world() -> tuple[Any, dict[str, Any]]:
+    """A world whose talking agent has a voice that refuses, which is
+    what makes both halves of the build degrade."""
     config = masked_config()
     providers = dict(built_world(config).agents)
     providers["poet"] = dataclass_replace(providers["poet"], tts=cast(Any, BrokenTts()))
-    await build_agent_fillers(config, providers)
+    return config, providers
 
 
 def drive_onboarding_key_mismatch(directory: Path) -> None:
@@ -1732,6 +1745,11 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
         "device_bindings_unreadable",
     ),
     Driver((FILLER_BUILD, "build_agent_fillers", 1), drive_filler_disabled, "filler_disabled"),
+    Driver(
+        (FILLER_BUILD, "build_agent_fillers", 2),
+        drive_fallback_degraded,
+        "fallback_degraded",
+    ),
     Driver((KEYS, "_log_mismatch", 1), drive_onboarding_key_mismatch, "onboarding_key_mismatch"),
     Driver((KEYS, "_log_mismatch", 2), drive_onboarding_key_unshaped, "onboarding_key_unshaped"),
     Driver((ORIGIN, "log_banner", 1), drive_onboarding_banner_off, "onboarding_banner"),

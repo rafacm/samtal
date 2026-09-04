@@ -375,12 +375,13 @@ async def _build_composition(
         # unwinds through it, and a writer started later would be one
         # more window where a refusal leaves a thread behind.
         conversations.start()
-    # The filled pauses, in each agent's own voice. Synthesized here
-    # rather than beside the providers because synthesis is async, and
-    # before the generation below because they are part of the world it
-    # is: startup is still before the first conversation, which is what
-    # "ahead of time" means. An agent whose synthesis fails runs with
-    # the feature off rather than failing the boot.
+    # The filled pauses and the failure phrases, in each agent's own
+    # voice. Synthesized here rather than beside the providers because
+    # synthesis is async, and before the generation below because they
+    # are part of the world it is: startup is still before the first
+    # conversation, which is what "ahead of time" means. An agent whose
+    # synthesis fails runs with the mask off, or says its failure on the
+    # display alone, rather than failing the boot.
     fillers = await build_agent_fillers(config, engines.world.agents)
     # The world new work binds, and the only place it is replaced. The
     # boot's configuration, the credentials loaded with it, the engines
@@ -399,6 +400,7 @@ async def _build_composition(
             # that replaced them or at the end of the process, and the
             # cleanup registered above becomes the no-op it says it is.
             engines.installed(),
+            fillers.fallbacks,
         )
     )
     # And the close at the other end of the process, registered here so

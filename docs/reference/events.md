@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 62 events in 88 variants. What was
+This document is that surface written down: 63 events in 89 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -250,6 +250,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `memory_unwritable` | `vinga_server.memory.store` | WARNING | 1 |
 | `memory_cleanup_failed` | `vinga_server.memory.store` | WARNING | 1 |
 | `filler_disabled` | `vinga_server.filler` | WARNING | 1 |
+| `fallback_degraded` | `vinga_server.filler` | WARNING | 1 |
 | `capture_started` | `vinga_server.capture` | INFO | 1 |
 | `capture_declined` | `vinga_server.capture` | WARNING | 3 |
 | `capture_limit` | `vinga_server.capture` | INFO | 1 |
@@ -1934,6 +1935,29 @@ agent %s: filler synthesis failed, latency masking is off for this agent (%s)
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `error` | `CLASS_NAME` | yes | no |  |  |
+
+### `fallback_degraded`
+
+The phrase a failed reply says would not synthesize for one agent, so its
+failed turns are shown on the display and not spoken. Separate from
+`filler_disabled`, whose meaning is that latency masking is off.
+
+#### Variant 1: `vinga_server.filler` at WARNING
+
+```text
+agent %s: the failure phrase would not synthesize, its failed replies are shown and not spoken (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `agent` (`IDENTIFIER`) | no |  |  |
+| 2 | `error` (`CLASS_NAME`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  | The class of what the voice or its transport raised, `TimeoutError` where the synthesis outran the build's own deadline. The class alone, like every other failure vocabulary here: a message from near a response body is not this server's to write down. |
 
 ### `capture_started`
 

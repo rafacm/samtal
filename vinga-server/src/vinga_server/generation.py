@@ -46,15 +46,15 @@ from dataclasses import dataclass, field
 
 from vinga_server.config import Config
 from vinga_server.config.secrets import SecretStore
-from vinga_server.filler import FillerClips
+from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.providers import Provider, ProviderWorld, disposed
 
 
 @dataclass(frozen=True, eq=False)
 class Generation:
     """One world this server serves: a validated configuration snapshot,
-    the stored credentials loaded beside it, and the filled pauses
-    synthesized for it.
+    the stored credentials loaded beside it, and the speech synthesized
+    for it ahead of time.
 
     The first two travel together for the reason `config.boot.BootConfig`'s
     do: the credentials are needed exactly where the configuration is
@@ -71,6 +71,14 @@ class Generation:
     session: a conversation's masking does not change under it
     mid-turn. Empty is a deployment where no agent masks its latency,
     which is the default.
+
+    `fallbacks` is the other kind of clip the same module builds, here
+    for exactly the reasons `fillers` is and bound at the same instant:
+    what a failed reply says is a configured phrase in a configured
+    voice, and a conversation says the phrase it opened with. Empty is a
+    world built before anything synthesized, which is what a test that
+    is not about failure phrases hands in; a served world holds one per
+    agent that has not switched the section off.
 
     `providers` is here for the reason the clips are, one step further
     again: the engines a conversation speaks through are what this
@@ -104,6 +112,7 @@ class Generation:
     secrets: SecretStore
     fillers: Mapping[str, FillerClips] = field(default_factory=dict)
     providers: ProviderWorld = field(default_factory=ProviderWorld)
+    fallbacks: Mapping[str, FallbackClip] = field(default_factory=dict)
 
 
 # What one apply is handed to put its world in place with: the swap
