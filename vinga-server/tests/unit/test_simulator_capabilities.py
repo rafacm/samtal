@@ -247,6 +247,25 @@ def test_both_verbs_are_claimed_and_the_third_side_is_empty() -> None:
     assert capabilities.RUN in registered
 
 
+def test_the_states_row_says_what_the_reply_is_read_by() -> None:
+    """The prose rows are written rather than derived, which is what
+    makes them the half that can go stale.
+
+    Two of them said the check-in ends in a token: the states row read a
+    board with no token as one that may not speak, and the claim row
+    promised the fourth step issued one. Neither survives a deployment
+    that issues none and admits the board anyway (#369), so both are
+    held here to the vocabulary the reply and the command now use.
+    """
+    said = {row.what for row in capabilities.rows()}
+    [states] = [row for row in said if row.startswith("the four states of the reply")]
+    assert "word for how to read the device token" in states
+
+    [claim] = [row for row in said if row.startswith("claiming this board")]
+    assert "to be admitted" in claim
+    assert "token" not in claim
+
+
 def test_the_listening_states_are_told_apart_rather_than_claimed_together() -> None:
     """The granularity the pin exists at. A type-level claim would have
     called `listen` supported and published a claim two thirds false."""

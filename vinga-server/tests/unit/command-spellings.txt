@@ -1030,17 +1030,17 @@ docs/reference/cli.md:2462  generated  vinga simulator
 docs/reference/cli.md:2477  generated  vinga simulator check-in
 docs/reference/cli.md:2480  generated  vinga simulator check-in
 docs/reference/cli.md:2486  generated  vinga ota-url
-docs/reference/cli.md:2609  generated  vinga simulator run
-docs/reference/cli.md:2612  generated  vinga simulator run
-docs/reference/cli.md:2619  generated  vinga ota-url
-docs/reference/cli.md:2742  generated  vinga schema
-docs/reference/cli.md:2745  generated  vinga schema
-docs/reference/cli.md:2759  generated  vinga reference
-docs/reference/cli.md:2762  generated  vinga reference
-docs/reference/cli.md:2770  generated  vinga openapi
-docs/reference/cli.md:2773  generated  vinga openapi
-docs/reference/cli.md:2781  generated  vinga cli-reference
-docs/reference/cli.md:2784  generated  vinga cli-reference
+docs/reference/cli.md:2611  generated  vinga simulator run
+docs/reference/cli.md:2614  generated  vinga simulator run
+docs/reference/cli.md:2621  generated  vinga ota-url
+docs/reference/cli.md:2746  generated  vinga schema
+docs/reference/cli.md:2749  generated  vinga schema
+docs/reference/cli.md:2763  generated  vinga reference
+docs/reference/cli.md:2766  generated  vinga reference
+docs/reference/cli.md:2774  generated  vinga openapi
+docs/reference/cli.md:2777  generated  vinga openapi
+docs/reference/cli.md:2785  generated  vinga cli-reference
+docs/reference/cli.md:2788  generated  vinga cli-reference
 docs/reference/conversations-schema.md:134  respell  vinga session delete
 docs/reference/conversations-schema.md:134  respell  vinga session purge
 docs/reference/domain-config.md:3  generated  vinga reference

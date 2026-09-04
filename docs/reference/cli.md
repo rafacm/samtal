@@ -2512,13 +2512,15 @@ Supported:
   - the check-in POST, with the two headers the handler reads and the body
     shape the firmware sends
   - the four states of the reply: activating, admitted, unwelcome, and a
-    refusal for anything else
+    refusal for anything else, told apart by the reply's own word for how to
+    read the device token, so a board a deployment issuing none admits is
+    admitted rather than turned away
   - no redirect is followed, which is the firmware's own behavior and the
     reason every device-facing route serves the slashless spelling directly
   - the activation poll at Activation-Version 1, in the firmware's cadence of
     ten polls three seconds apart, bounded
   - claiming this board through the configuration API with --claim, and
-    checking in again afterwards to be issued a token
+    checking in again afterwards to be admitted
   - the reply's firmware block, read and reported as a board reads it: whether
     an image was offered, and whether the version named back is the one this
     board announced
@@ -2645,13 +2647,15 @@ Supported:
   - the check-in POST, with the two headers the handler reads and the body
     shape the firmware sends
   - the four states of the reply: activating, admitted, unwelcome, and a
-    refusal for anything else
+    refusal for anything else, told apart by the reply's own word for how to
+    read the device token, so a board a deployment issuing none admits is
+    admitted rather than turned away
   - no redirect is followed, which is the firmware's own behavior and the
     reason every device-facing route serves the slashless spelling directly
   - the activation poll at Activation-Version 1, in the firmware's cadence of
     ten polls three seconds apart, bounded
   - claiming this board through the configuration API with --claim, and
-    checking in again afterwards to be issued a token
+    checking in again afterwards to be admitted
   - the reply's firmware block, read and reported as a board reads it: whether
     an image was offered, and whether the version named back is the one this
     board announced
