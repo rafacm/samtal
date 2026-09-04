@@ -210,3 +210,89 @@ today and stays that way; coercion runs only on a dict.
   descriptions stay true by design, and no generated reference is
   staled because no event, schema or API shape changes; CHANGELOG
   only.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-04, against commit `20ab4d0e`; the reviewer ran
+about 12 minutes. Verdict: ready after the P1/P2 amendments.
+
+1. **P1: the proposed `number` conversion is not lossless.**
+   `float()` converts `"9007199254740993"` to `9007199254740992.0`
+   and `"1e-4000"` to `0.0`, and accepts non-JSON spellings
+   (`"1_0"`, `"+1"`, `".5"`, `"1."`); `\d` admits Unicode digits.
+   The plan should define an explicit ASCII numeric grammar and a
+   post-conversion equivalence check rejecting precision changes,
+   overflow and underflow, and the matrix must include a large
+   inexact integer, an underflowing exponent, parser-only
+   spellings and Unicode digits.
+
+2. **P2: the dispatch seam misses the move tools and breaks an
+   existing pin.** `_run_tools` executes move tools through
+   `_moves`/`_move` before `_run_one` is reached, so coercing only
+   in `_run_one` is not "once, for every source alike"; and adding
+   a mapping parameter breaks the direct `_run_one(call, slot)`
+   reload-routing pin at `test_session_tools.py:963`. The plan
+   should derive execution-only `ToolCall` copies after reserving
+   and appending the originals to working history, before
+   `_run_tools` branches; `_run_one` then replaces only the
+   reserved claim's arguments for dispatch, without gaining a
+   schema parameter.
+
+3. **P2: rejecting all observability contradicts the
+   decision-reason rule.** A vinga-owned decision exposes a closed
+   reason on the structured surface; the conversation record is a
+   content-class surface whose `arguments` is null under text-off,
+   and it retains no schema, so an original string beside a
+   success does not prove a coercion. The rationale that coercion
+   cannot produce a different failure is also false when a type
+   correction exposes a second constraint (`maximum`, `enum`). Add
+   metadata-only observability recording that coercion occurred
+   with target type/count and no argument values or peer-authored
+   names, with the catalog, driver, baseline, generated-reference
+   and no-leak work named.
+
+4. **P2: the never-raises contract is untested against the inputs
+   most likely to escape and leak.** The matrix omits an arbitrary
+   non-numeric string for `number`, an integer beyond Python's
+   digit-conversion limit, a non-mapping `properties`, and a
+   non-mapping property entry; a conversion exception escaping
+   into `_run_one` interpolates its message, which for `float()`
+   includes the rejected string, into a stored tool result.
+   Require totality tests for those shapes including a
+   secret-shaped invalid numeric value asserted absent from every
+   exception-derived and retained surface.
+
+5. **P2: the rejected through-loop test cannot observe a refusal
+   with the current fake device.** `FakeDevice` answers success
+   for every unscripted call, so sending `"a lot"` produces
+   success, not the firmware-style refusal the test claims to pin.
+   Script a strict far-side error and assert both the unchanged
+   wire value and the error reaching the model.
+
+6. **P2: the record/history half of the split is under-pinned.**
+   The proposed session test reads the wire and the in-flight
+   turn, not the durable record or the next round. Use the
+   recording-session infrastructure, assert the completed
+   `TurnRecord` carries `"40"`, and assert the second scripted
+   round receives the original `ToolCall` unchanged.
+
+7. **P2: the typed fixture proposal duplicates an existing schema
+   fixture.** The exact integer-typed volume tool already exists
+   as `VOLUME` in `test_tools_device.py`; move it into
+   `tests/support/device_tools.py` and reuse it in both places.
+
+8. **P2: boolean coercion crosses an irreversible-operation guard
+   without a safety test.** `forget` permanently erases only when
+   `permanently is True`; after the upgrade the string `"true"`
+   deliberately changes from recoverable removal to permanent
+   erasure. Acknowledge the upgrade-visible change and add a
+   through-pipeline test proving only exact `"true"` erases
+   permanently while `"false"`, `"True"` and `"1"` stay
+   recoverable.
+
+9. **P3: `conformed` promises more than the function returns.**
+   Its result is not necessarily schema-conformant; name it for
+   what it guarantees (`with_lossless_coercions`), and say
+   "original values" rather than "the model's bytes", since the
+   provider adapters already decoded the JSON.
