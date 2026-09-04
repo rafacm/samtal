@@ -1255,9 +1255,9 @@ vinga-server/src/vinga_server/config/docgen.py:199  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:589  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:174  respell  vinga apply
 vinga-server/src/vinga_server/config/loader.py:80  respell  vinga simulator run
-vinga-server/src/vinga_server/config/models.py:1842  respell  vinga memory
-vinga-server/src/vinga_server/config/models.py:1872  respell  vinga mcp-server status
-vinga-server/src/vinga_server/config/models.py:2495  respell  config schema
+vinga-server/src/vinga_server/config/models.py:1879  respell  vinga memory
+vinga-server/src/vinga_server/config/models.py:1909  respell  vinga mcp-server status
+vinga-server/src/vinga_server/config/models.py:2532  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:949  respell  vinga ota-url
