@@ -100,18 +100,31 @@ with a docstring making this issue's argument in miniature). What
 callers stop having to know: how JSON Schema's type vocabulary maps
 onto the string-typed habits of small quantized models.
 
-**The lossless set, exactly.** Per top-level property whose schema
-entry declares a single `type` string:
+**The lossless set, exactly: an ASCII grammar plus an equivalence
+check, never a bare parser.** Python's `float()` and `int()` are
+parsers with their own dialect (`"+1"`, `".5"`, `"1."`, `"1_0"`,
+Unicode digits, `"inf"`), and `float()` silently rounds
+(`"9007199254740993"` becomes `9007199254740992.0`) and
+underflows (`"1e-4000"` becomes `0.0`), so neither defines
+"lossless". The rule is stated in two halves, and both must hold.
+Per top-level property whose schema entry declares a single
+`type` string:
 
-- `integer`: a `str` that, stripped, matches `-?\d+` becomes its
-  `int` (`"100"`, `" 100 "`, `"-7"`, and `"05"`, whose value is
-  exact even though its spelling is not canonical); a `float` whose
-  `is_integer()` holds becomes its `int` (models emit `100.0`);
-  `bool` is never touched (JSON `true` is not `1` declared).
-- `number`: a `str` that parses as a finite `float` becomes it
-  (`"1.5"`, `"100"`); `nan`/`inf` spellings are refused as not
-  being JSON numbers at all. An `int` already satisfies `number`
-  and passes untouched.
+- `integer`: a `str` that, stripped, matches the ASCII grammar
+  `-?[0-9]+` (compiled with `re.ASCII`) becomes its `int`
+  (`"100"`, `" 100 "`, `"-7"`, and `"05"`, whose value is exact
+  even though its spelling is not canonical); the conversion runs
+  inside the totality guard below, which also covers Python's
+  integer digit-conversion limit. A `float` whose `is_integer()`
+  holds becomes its `int` (models emit `100.0`); `bool` is never
+  touched (JSON `true` is not `1` declared).
+- `number`: a `str` that, stripped, matches the ASCII JSON number
+  grammar `-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?` is converted and
+  then equivalence-checked: the result must be finite and
+  `Decimal(text) == Decimal(result)` must hold, which rejects
+  precision loss, overflow and underflow rather than assuming a
+  finite parse was exact. An `int` already satisfies `number` and
+  passes untouched.
 - `boolean`: exactly the strings `"true"` and `"false"` become the
   booleans. Not `"True"`, not `"1"`, not `"yes"`: the mistake being
   undone is quoting, and anything beyond the JSON literals is
@@ -158,9 +171,14 @@ today and stays that way; coercion runs only on a dict.
   asks: the integer, number and boolean coercions above, each
   refusal (`"one hundred"`, `"100.5"` against `integer`, `"True"`,
   `"1"` against `boolean`, `true` against `integer`, non-finite
-  spellings against `number`), and the tolerance cases (empty
-  schema, no `properties`, a property with no `type`, `type` as a
-  list, an undeclared property), plus input non-mutation.
+  spellings against `number`), the grammar's own edge (parser-only
+  spellings `"+1"`, `".5"`, `"1."`, `"1_0"` and a Unicode-digit
+  string, all refused), the equivalence check's edge (a large
+  inexact integer string such as `"9007199254740993"` and an
+  underflowing exponent such as `"1e-4000"` against `number`, both
+  refused), and the tolerance cases (empty schema, no
+  `properties`, a property with no `type`, `type` as a list, an
+  undeclared property), plus input non-mutation.
 - `tests/unit/test_session_tools.py` gains the through-the-loop
   case: a device tool declared with an `integer` property (the
   fixture in `tests/support/device_tools.py` grows a typed tool
@@ -226,6 +244,13 @@ about 12 minutes. Verdict: ready after the P1/P2 amendments.
    overflow and underflow, and the matrix must include a large
    inexact integer, an underflowing exponent, parser-only
    spellings and Unicode digits.
+
+   *Resolution*: accepted in full. The lossless set is restated as
+   an ASCII grammar plus a Decimal equivalence check for `number`
+   (finite, and `Decimal(text) == Decimal(result)`), the integer
+   grammar is `re.ASCII`, and the matrix gains the large inexact
+   integer, the underflowing exponent, the parser-only spellings
+   and the Unicode-digit case, all refused.
 
 2. **P2: the dispatch seam misses the move tools and breaks an
    existing pin.** `_run_tools` executes move tools through
