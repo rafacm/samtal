@@ -826,16 +826,40 @@ is not. The affordance is the prompt and the suppressed echo; the value
 that comes out is the same either way, and nothing downstream can tell
 which path produced it.
 
+**A second example of the licensed kind**, merged (#297), and the one
+this section's licence was written in advance of: the progress line for
+the two long waits. `import` waits on a transaction with no bound at
+all and `apply` waits up to sixty seconds, and until #297 both left an
+operator watching an empty screen for the length of it. `narrated`
+draws one line on stderr while such a wait runs, carrying a fixed
+phrase and the elapsed whole seconds and nothing else, rewritten in
+place once a second by a daemon thread and erased on the way out, so
+that the answer or the refusal after it prints into an empty line.
+
+Every clause of the licence is a condition it meets rather than a claim
+made about it. The terminal is asked once, on the way in, so a run
+whose stderr is not one constructs no writer and emits no byte: the
+non-terminal bytes are identical with the feature and without it, which
+is a test that runs a command both ways and compares them, and the rest
+of the suite runs redirected and would show these carriage returns in a
+few hundred assertions about output if the check ever stopped being
+made. What the line re-presents is only what the non-terminal path
+delivers anyway, which is that the client is waiting for the API's
+answer. It carries no caller value at all, not the document's path, not
+an entry's name and not the address reached, because the no-leak
+posture applies to progress exactly as it applies to a refusal. And
+none of the four things the counterexample below rejects appears in it.
+
+Which acts narrate is a fact on the act's row, beside the bound rather
+than read off it, because the two say different things: every act has a
+bound, and only two are waits a person sits through. `events tail` is
+the deliberate absence, since there the stream is the answer rather
+than the wait.
+
 **Counterexample, constructed.** Color, spinners, emoji or ASCII art in
 anything a document is generated from. All four audited guides recommend
 some of those, and each is rejected in
 [the audit](cli-guide-audit.md) for this one reason.
-
-**Owed.** The progress line for the two long waits (`import`, which has
-no bound at all, and `apply`, which has a sixty-second one) is the
-licensed kind: on stderr, only when stderr is a terminal, and carrying
-nothing the run does not report anyway. Nothing that lands in a file,
-nothing that reaches a redirected stream.
 
 ### Prompt where there is somebody to ask, and never require it
 
@@ -985,6 +1009,11 @@ the no-leak posture; an error code and a support URL, because the
 contract is one fixed sentence carrying the fix; and the XDG spec,
 because the deployment surface is a container. Three rows are
 **deferred**, all of them `--json`, and the case is
-[above](#the---json-question-deferred). Two things are **owed**: the
-progress line, and examples on the command pages. **Tension recorded**
-is in the vocabulary and no row carries it today.
+[above](#the---json-question-deferred). One thing is **owed**: examples
+on the command pages. The second owed item was the progress line, and
+#297 merged it, which is
+[above](#output-is-deterministic-and-an-answer-cannot-steer-a-terminal);
+the audit rows that recorded it as owed still read that way,
+because that record is dated and says of itself that the guide is where
+what vinga does today is written. **Tension recorded** is in the
+vocabulary and no row carries it today.
