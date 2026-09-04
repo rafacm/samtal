@@ -219,11 +219,16 @@ simulator's `read()` applies it, and no third place re-derives it.
   unknown value falls back to the token rule, and a
   credential-shaped unknown value (a sentinel that must appear
   nowhere) joins the existing four-surface no-leak inventory:
-  stdout, stderr, logs and exception chains. The existing
+  stdout, stderr, logs and exception chains. The three existing
+  fixtures (`activating()`, `admitted()`, `unwelcome()`) stay
+  byte-unchanged as the old-server bodies, which is what keeps the
+  field-less fallback coverage real; new sibling helpers carry the
+  new-protocol bodies (`open`, explicit `denied`, and the hostile
+  combinations). The existing
   `test_the_conversation_verb_refuses_a_board_that_may_not_speak`
-  keeps its `unwelcome()` half by making that fixture an explicit
-  `"denied"` (or leaving it field-less), and a new case beside it
-  proves `run` proceeds past classification on an `"open"` body.
+  keeps its `unwelcome()` half as the old-server case, gains the
+  explicit-`denied` variant, and a new case beside it proves `run`
+  proceeds past classification on an `"open"` body.
 - **Messages** (`test_simulator_board.py`): the tail as a
   constant, with the older-server reading, the binding-view cause
   and the broadened unloaded-agent wording each asserted;
@@ -412,3 +417,9 @@ read-only, 2026-09-04, against commit `de7ff059`; the reviewer ran
    Keep `activating()`, `admitted()` and `unwelcome()`
    byte-unchanged as old-server fixtures; add separate `open` and
    explicit `denied` helpers for the new protocol cases.
+
+   *Resolution*: accepted in full. The test section now keeps the
+   three fixtures byte-unchanged as the old-server bodies and adds
+   sibling helpers for the new-protocol and hostile cases, with
+   the refusal test keeping its old-server half and gaining the
+   explicit-`denied` variant.
