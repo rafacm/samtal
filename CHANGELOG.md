@@ -9,6 +9,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The two long waits say so at a terminal** (#297). `vinga import`
+  waits on a transaction nothing bounds and `vinga apply` waits up to a
+  minute for a server to build a new world, and both used to leave an
+  operator watching an empty screen for the length of it. Each now
+  draws one line on stderr while it waits, carrying a fixed phrase and
+  the elapsed whole seconds, rewritten in place once a second and
+  erased on the way out so that the answer or the refusal after it
+  lands in an empty line. It is the interactive affordance the CLI
+  guide's determinism practice licenses, and it is bounded by that
+  licence: the terminal is asked once on the way in, so a pipe, a
+  redirect and a log file get exactly the bytes they got before, proven
+  by running a command both ways and comparing them; the line
+  re-presents only what the non-terminal path reports anyway; and it
+  carries no caller value at all, not the document's path, not an
+  entry's name and not the address reached. No colour, no spinner and
+  no emoji. `vinga events tail` is deliberately not narrated, since
+  there the stream is the answer rather than the wait.
 - **One process, one replica is the supported topology** (#316),
   recorded as an ADR. The inventory behind it: pending activation
   codes, the loaded configuration generation, session admission,
