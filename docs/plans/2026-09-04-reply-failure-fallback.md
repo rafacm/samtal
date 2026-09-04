@@ -244,10 +244,25 @@ multi-leg reply plays it.
   the test proves no far-side bytes reach payloads or logs.
 - `reply_fallback`, session channel: reason from a closed set with
   one variant per reason, filler-style: `reply_failed` (the
-  failure arm) and `nothing_sayable` (the empty-reply case). A
-  fallback skipped because the section is off or the clip is
-  absent emits nothing; absence of the feature is not a decision
-  taken.
+  failure arm) and `nothing_sayable` (the empty-reply case), each
+  carrying whether audio played or the turn degraded to
+  display-only (finding 4's distinction, a boolean, never the
+  phrase). A fallback skipped because the section is off emits
+  nothing; absence of the feature is not a decision taken.
+- `fallback_degraded`, on the filler build channel: a fallback
+  phrase whose synthesis failed at boot or reload, its own
+  declaration because `FillerDisabled`'s stated meaning is that
+  latency masking is off, which this is not. Class-name-only
+  failure vocabulary, like its sibling.
+- The runner's playback-failure line for the fallback is a new
+  UNTYPED entry with its exact channel and template
+  (`"session %s: fallback playback failed: %s"` beside the
+  filler's own line), registered in the closed UNTYPED set in
+  `test_event_baseline.py`, because the filler's template says
+  filler and reusing it would be semantic drift. The
+  failure-arm tests plant a sentinel in both the exception message
+  and its `__cause__` and inspect record internals and both
+  renderings.
 
 Both follow the full catalog discipline: declaration, baseline
 driver, `CARRIED` row, regenerated `events.md`, README event index
@@ -331,12 +346,12 @@ Existing assets carry the shapes; nothing they pin is restated.
   absent from the device (`sentence_started` and audio), from both
   log formats, from event payloads, from the stored `TurnRecord`
   and its legs, and from the next round's request history.
-- **Events**: drivers and `CARRIED` rows for both declarations;
-  `events.md` and the README index regenerate through their
-  generators; the UNTYPED set is not grown (no new bare log lines
-  on scoped channels; the runner's existing failure line pattern
-  is reused only if its message is identical, otherwise the new
-  line registers).
+- **Events**: drivers and `CARRIED` rows for all three
+  declarations (`reply_fallback`, `sentence_withheld`,
+  `fallback_degraded`); `events.md` and the README index
+  regenerate through their generators; the UNTYPED set grows by
+  exactly the one named playback-failure template and nothing
+  else, asserted by the set's own both-directions test.
 - **Message order**: the successful-turn ordering pin
   (`test_one_turn_has_the_control_message_order_the_firmware_expects`)
   stays untouched; a failure-turn ordering case pins
@@ -539,6 +554,13 @@ about 17 minutes. Verdict: ready after the P1/P2 amendments.
    playback-failure event or the exact new UNTYPED
    channel/template, with sentinel-planting tests over record
    internals and both renderings.
+
+   *Resolution*: accepted in full. `fallback_degraded` is its own
+   declaration for the cache failure, the playback failure is a
+   named new UNTYPED template registered in the closed set, the
+   `reply_fallback` variants carry the audio-versus-display-only
+   boolean, and the sentinel tests plant both the message and the
+   `__cause__`.
 
 10. **P2: the two sentence decision sites are not independently
     pinned.** Compact JSON at EOF exercises only `flush`. Require
