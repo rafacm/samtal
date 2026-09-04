@@ -24,7 +24,6 @@ nothing, and the switch that puts a deployment back where it was.
 """
 
 import asyncio
-import contextlib
 import json
 import logging
 from collections.abc import AsyncIterator, Sequence
@@ -96,6 +95,16 @@ def reply_failure(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
     matching = [record for record in caplog.records if REPORTED in record.getMessage()]
     assert len(matching) == 1, f"expected one reply failure, got {len(matching)}"
     return matching[0]
+
+
+def chain(raised: BaseException | None) -> list[BaseException]:
+    """One exception and everything reachable behind it, which is what a
+    caller catching it can print."""
+    walked: list[BaseException] = []
+    while raised is not None and raised not in walked:
+        walked.append(raised)
+        raised = raised.__cause__ or raised.__context__
+    return walked
 
 
 def rendered(record: logging.LogRecord) -> str:
@@ -515,20 +524,33 @@ async def test_a_cancellation_mid_phrase_still_attempts_the_closing_stop_once(
     """A barge-in that lands while the notice is already going out. The
     cancellation is not swallowed, so it ends the notice at once; the
     reply's own `finally` runs under it, so the closing `tts stop` is
-    still attempted, and exactly once."""
+    still attempted, and exactly once.
+
+    And it leaves carrying nothing. The provider failure that started
+    all this has the sentinel in its own message and in the failure
+    behind it, which is the shape a wrapped vendor error has, and a
+    cancellation raised while that exception was still the active one
+    would arrive at whoever catches it with the whole chain attached as
+    its `__context__`: the message this turn's log line took care not
+    to print, handed out through a different door.
+    """
     config = with_fallback(enabled=True)
     session = session_for(
         config,
         POET_MAC,
-        stages={"llm": cast(Any, Unreachable("llm", ConnectionRefusedError("no route")))},
+        stages={"llm": cast(Any, Unreachable("llm", a_bug_carrying_a_secret()))},
         fallbacks=await cached(config),
     )
     socket = CancellingSocket()
     session.websocket = cast(Any, socket)
 
     with caplog.at_level("INFO"):
-        with contextlib.suppress(asyncio.CancelledError):
+        try:
             await drive_reply(session, UTTERANCE)
+        except asyncio.CancelledError as cancelled:
+            raised: BaseException | None = cancelled
+        else:  # pragma: no cover - the socket cancels the send
+            raise AssertionError("the cancellation never left the reply")
 
     # The notice was announced and then cut: the cancellation reached
     # the send rather than being turned into a swallowed failure.
@@ -536,6 +558,13 @@ async def test_a_cancellation_mid_phrase_still_attempts_the_closing_stop_once(
                                  "log has the details."]
     assert "fallback playback failed" not in caplog.text
     assert socket.stops == 1
+    # And nothing rode out on it. The whole chain is walked rather than
+    # the first link, since `__context__` and `__cause__` each hold one
+    # and a wrapped vendor error has both.
+    for link in chain(raised):
+        assert SENTINEL not in str(link), link
+    assert SENTINEL not in caplog.text
+    assert all(SENTINEL not in rendered(record) for record in caplog.records)
 
 
 # --- and the interruption that arrives while it is being said ---------
