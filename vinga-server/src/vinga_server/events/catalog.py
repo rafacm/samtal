@@ -82,6 +82,7 @@ from vinga_server.events.values import (
     FillerSkip,
     FirmwareVersion,
     Flag,
+    Fragment,
     FromEntry,
     Grammar,
     Identifier,
@@ -1614,6 +1615,68 @@ class UnnamedToolCall(Variant):
     outcome: ToolOutcome = value(carried=False)
 
 
+@dataclass(frozen=True)
+class ToolArgumentsCoerced(Variant):
+    """A call went out with argument types this server corrected.
+
+    One variant for all four namespaces, because the decision is one
+    decision whoever runs the call, and the naming policy the three
+    `tool_call` shapes make structural is carried here by `source`
+    together with the two optional names: a builtin names itself, an
+    MCP call names the entry an operator configured, and a device tool
+    or an invented name names nothing at all.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: %s tool%s was called with %d argument(s) whose types the "
+        "schema declares otherwise, converted for the call"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "source", "named", "coerced")
+    NOTE: ClassVar[str] = (
+        "How many arguments were converted and never which or to what: "
+        "a property name is the far side's own word and a value is what "
+        "the model wrote, and neither belongs on a retained surface. "
+        "What the record keeps is the arguments as the model sent them, "
+        "which is where the two can be compared."
+    )
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    source: ToolSource = value(note="Which namespace the corrected call reached into.")
+    coerced: Count = value(
+        note=(
+            "How many of the call's arguments were converted, which is "
+            "one or more: the event is emitted only where the copy "
+            "differs from what the model sent."
+        )
+    )
+    named: Fragment = value(
+        carried=False,
+        rendered_note=(
+            "One of the three shapes of the `tool_call` naming policy, "
+            "and any of them, because one variant carries all four "
+            "sources: a builtin's own name quoted, the configured MCP "
+            "entry a call reached, or nothing at all."
+        ),
+    )
+    tool: Identifier | Absent = value(
+        default=ABSENT, note="Present for a builtin, the only tool names this server authors."
+    )
+    entry: Identifier | Absent = value(
+        default=ABSENT,
+        note="Present for an MCP call: the configured entry, never the far side's tool name.",
+    )
+
+
 # --- runtime/turntaking.py: who is talking ---------------------------
 
 
@@ -1873,6 +1936,17 @@ TOOL_CALL = declare(
         "word for it."
     ),
     variants=(BuiltinToolCall, McpToolCall, UnnamedToolCall),
+)
+
+TOOL_ARGUMENTS_COERCED = declare(
+    "tool_arguments_coerced",
+    note=(
+        "A call went out with argument types this server corrected: a "
+        "value whose string form converts to the declared type exactly "
+        "is converted once, at the dispatch (#383). How many, and never "
+        "which or to what."
+    ),
+    variants=(ToolArgumentsCoerced,),
 )
 
 BARGE_IN = declare("barge_in", note="Speech cuts a reply short.", variants=(BargeIn,))
@@ -3412,7 +3486,9 @@ __all__ = [
     "SessionLimit",
     "SessionOpen",
     "SpeakingStarted",
+    "TOOL_ARGUMENTS_COERCED",
     "TOOL_CALL",
+    "ToolArgumentsCoerced",
     "UnnamedToolCall",
     "Variant",
     "WS_CHANNEL",

@@ -700,6 +700,21 @@ async def drive_tool_call(directory: Path) -> None:
         await servers.stop_all()
 
 
+async def drive_tool_arguments_coerced(_: Path) -> None:
+    """A model that quoted a number its tool declares as one.
+
+    The fact the call names does not exist, so the store refuses it and
+    the reply carries an error result; what this path is is the
+    correction, which happens before anything is dispatched at all. A
+    builtin, so the record names its tool, which is the branch of the
+    naming policy that says a name.
+    """
+    script = ScriptedLlm([[call("update_memory", id="7", text="a fact")], "Done."])
+    await run_reply(
+        session_for(base_config(), POET_MAC, {"poet": script}), "fix that fact"
+    )
+
+
 async def drive_agent_said(_: Path) -> None:
     await run_reply(handing_over(), "get me the tutor")
 
@@ -1034,6 +1049,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
         "milestone_recorded",
     ),
     Driver((PIPELINE, "PipelineRuntime._run_one", 1), drive_tool_call, "tool_call"),
+    Driver(
+        (PIPELINE, "PipelineRuntime._for_execution", 1),
+        drive_tool_arguments_coerced,
+        "tool_arguments_coerced",
+    ),
     Driver((TURNTAKING, "TurnTaking.finish_utterance", 1), drive_barge_in_manual, "barge_in"),
     Driver(
         (TURNTAKING, "TurnTaking._gate_barge_in", 1),

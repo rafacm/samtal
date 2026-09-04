@@ -29,7 +29,7 @@ from tests.support.configs import (
     registry_config,
 )
 from tests.support.device_tools import VOLUME, FakeDevice
-from tests.support.events import events
+from tests.support.events import events, only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
 from tests.support.records import only_record, recording_session
@@ -1273,3 +1273,68 @@ async def test_only_the_quoted_json_true_forgets_a_fact_for_good(
     ]
     assert restored.is_error is erased
     assert facts(store) == ("" if erased else "- the user is vegetarian")
+
+
+async def test_a_corrected_call_says_so_and_names_the_board_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The coercion is a decision this server makes, so it is on the
+    structured surface with a closed reason rather than only implied by
+    a success (#383).
+
+    The record cannot stand in for it: its `arguments` is null under
+    text-off, it retains no schema, and a type correction can surface a
+    second constraint the far side holds, so the outcome alone says
+    nothing about what this server did. What the event carries is how
+    many arguments were converted, under the naming policy `tool_call`
+    keeps: a device tool's name is the board's vocabulary, so this one
+    names nothing at all.
+    """
+    device = a_board_with_volume()
+    await device.client.discover()
+    script = ScriptedLlm(
+        [[call("self_audio_speaker_set_volume", volume="40")], "Turned it up."]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    # White-box, for the reason the wire case above gives.
+    session._device_tools = device.client
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "turn it up")
+
+    coerced = only(caplog, "tool_arguments_coerced")
+    assert (coerced.source, coerced.coerced) == ("device", 1)  # type: ignore[attr-defined]
+    assert not hasattr(coerced, "tool") and not hasattr(coerced, "entry")
+    assert "40" not in coerced.getMessage()
+    assert "volume" not in coerced.getMessage()
+
+
+async def test_a_builtin_corrected_is_named_and_a_call_that_needed_nothing_is_silent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other branch of the naming policy, and the silence beside it.
+
+    A builtin's name is this server's own word, so the event says it.
+    The second call in the same round is exactly right already, and the
+    event fires per call where the copy differs, so one round produces
+    one record rather than one per call.
+    """
+    store = lane_memory()
+    fact_id = await store.add(MemoryScope.AGENT, "poet", "the user is vegan", agent="poet")
+    script = ScriptedLlm(
+        [
+            [
+                call("forget", id=str(fact_id)),
+                call("remember", text="the user has a dog"),
+            ],
+            "Done.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "forget the first and remember the second")
+
+    coerced = only(caplog, "tool_arguments_coerced")
+    assert (coerced.source, coerced.tool, coerced.coerced) == ("builtin", "forget", 1)  # type: ignore[attr-defined]
+    assert facts(store) == "- the user has a dog"

@@ -56,7 +56,7 @@ from tests.support.configs import (
     config_with_agent,
 )
 from tests.support.device_tools import FakeDevice
-from tests.support.events import only
+from tests.support.events import events, only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm, Unreachable
 from tests.support.sessions import (
@@ -371,6 +371,56 @@ async def test_tool_call_for_an_mcp_tool(caplog: pytest.LogCaptureFixture) -> No
     called = only(caplog, "tool_call")
     assert (called.source, called.entry) == ("mcp", "tools")  # type: ignore[attr-defined]
     assert_unnamed(called, consumer, caplog)
+
+
+# The board tool whose argument is declared a number, which is what puts
+# a model-authored string in front of a parser: `float()`'s own message
+# repeats what it rejected, and `_run_one` interpolates an exception's
+# message into the result the model reads.
+GAIN = {
+    "name": "self.audio_speaker.set_gain",
+    "description": "Set the speaker gain",
+    "inputSchema": {"type": "object", "properties": {"gain": {"type": "number"}}},
+}
+
+
+async def test_a_value_no_conversion_could_make_reaches_no_record(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The coercion at the dispatch is total, and this is what totality
+    is worth (#383).
+
+    A conversion that raised would have its message interpolated into a
+    stored tool result, and the string a numeric parser rejects is the
+    string it repeats. So the planted value is sent as a number the
+    schema declares, refused by the grammar, and hunted through the
+    result the model reads, every record of the run in both formats, and
+    the tap. What the far side received is asserted too, because a
+    sentinel that never left is a test proving nothing.
+    """
+    device = FakeDevice([{"tools": [GAIN]}])
+    await device.client.discover()
+    script = ScriptedLlm([[call("self_audio_speaker_set_gain", gain=SENTINEL)], "Done."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    # White-box: a board's tools arrive from a discovery run the edge
+    # starts over the wire, and this session has no socket.
+    session._device_tools = device.client
+    consumer = watched(session)
+    with caplog.at_level("DEBUG"):
+        spoken = await run_reply(session, "set the gain")
+
+    assert spoken == ["Done."], "the reply never ran, so this proves nothing"
+    # The value left unchanged, which is the whole of what the refusal
+    # means: the far side decides, on what the model actually sent.
+    (sent,) = [one for one in device.sent if one.get("method") == "tools/call"]
+    assert sent["params"]["arguments"] == {"gain": SENTINEL}
+    # Nothing converted, so nothing is said about a conversion either.
+    assert not events(caplog, "tool_arguments_coerced")
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert SENTINEL not in result.content
+    assert_unnamed_anywhere(caplog, consumer, SENTINEL)
 
 
 # --- what a provider answered with ------------------------------------
