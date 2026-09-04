@@ -401,21 +401,28 @@ class FillerRunner:
         this process, reported by class name and swallowed, because a
         broken notice must not cost the turn the `tts stop` that re-arms
         a device's listening.
+
+        What the record says is what happened, which is why it is
+        written after rather than before. A cache holding a clip is not
+        a clip that went out: the display send can fail, the encode can
+        raise, the device can vanish, and a barge-in can take the turn
+        between the two. So the two deliveries are tracked as they
+        happen and the record is written from what they answered: none
+        at all where nothing was delivered, and `audio` saying whether
+        the phrase was heard as well as seen. Written in a `finally`, so
+        a cancellation that lands after the display send still leaves
+        the fact that the user saw it.
         """
         cached = self._fallbacks.get(self._events.agent or "")
         if cached is None:
             return
-        self._events.emit(
-            lambda: ReplyFailedFallback(
-                agent=Identifier(self._events.agent),
-                conversation=ConversationId(self._events.conversation),
-                audio=Flag(cached.clip is not None),
-            )
-        )
+        shown = False
+        played = False
         failed: str | None = None
         try:
             await self._output.begin_speaking()
             await self._output.sentence_started(cached.phrase)
+            shown = True
             if cached.clip is not None:
                 resampler = Resampler(cached.sample_rate, self._output.output_sample_rate)
                 # Three encoder calls with no await between them, for
@@ -428,8 +435,13 @@ class FillerRunner:
                     + self._output.flush_encoder()
                 )
                 await self._output.send_audio(batch)
+                played = True
         except DeviceGone:
-            return
+            # The device left mid-notice, which ends the notice and
+            # nothing else. Nothing is reported and, where it left
+            # before the display send, nothing is recorded either: there
+            # is no turn to say the phrase went out on.
+            pass
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -438,6 +450,15 @@ class FillerRunner:
             # prints the whole chain behind it, and this runs in the arm
             # that catches whatever a provider raised.
             failed = type(exc).__name__
+        finally:
+            if shown:
+                self._events.emit(
+                    lambda: ReplyFailedFallback(
+                        agent=Identifier(self._events.agent),
+                        conversation=ConversationId(self._events.conversation),
+                        audio=Flag(played),
+                    )
+                )
         # Reported out here rather than in the arm, for the reason the
         # fire path gives: inside it the swallowed exception is still
         # the active one, and a logging call that itself failed would

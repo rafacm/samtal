@@ -101,12 +101,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     acts for no agent at all (#83), eighty-six since a handshake
     refused by a shutdown stopped being reported as a full server
     (#318), and eighty-seven since a call whose argument types this
-    server corrected says so (#383), and eighty-nine since a reply that
-    failed says so out loud and a failure phrase that would not
-    synthesize says so too (#384)."""
+    server corrected says so (#383), and ninety since a reply that failed
+    says so out loud, once heard and once only shown, and a failure
+    phrase that would not synthesize says so too (#384)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 89
+    assert len(set(claimed)) == len(claimed) == 90
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -630,6 +630,20 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ),
     ),
     "vinga_server.runtime.filler_runner:FillerRunner.speak_fallback #1": (
+        (
+            "ReplyFailedFallback",
+            (
+                "agent",
+                "audio",
+                "conversation",
+                "device",
+                "event",
+                "reason",
+                "session",
+            ),
+        ),
+    ),
+    "vinga_server.runtime.filler_runner:FillerRunner.speak_fallback #2": (
         (
             "ReplyFailedFallback",
             (

@@ -31,6 +31,7 @@ from dataclasses import replace
 from typing import Any, cast
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
 from tests.support.configs import POET_MAC, base_config
 from tests.support.events import events, only
@@ -565,6 +566,91 @@ async def test_a_cancellation_mid_phrase_still_attempts_the_closing_stop_once(
         assert SENTINEL not in str(link), link
     assert SENTINEL not in caplog.text
     assert all(SENTINEL not in rendered(record) for record in caplog.records)
+
+
+class VanishingBeforeTheNotice(OrderedSocket):
+    """A device that takes the transcript and then goes away at the
+    first message of the notice.
+
+    Filtered on the message rather than counted, because the reply this
+    drives sends the transcript before it fails: a socket that vanished
+    at the first text of all would end the reply in the arm that returns
+    in silence, and prove nothing about the notice.
+    """
+
+    async def send_text(self, text: str) -> None:
+        if json.loads(text).get("type") == "tts":
+            raise WebSocketDisconnect(1006)
+        await super().send_text(text)
+
+
+class VanishingOnFrame(OrderedSocket):
+    """A device that takes the display message and then goes away, which
+    is where the notice's audio is."""
+
+    async def send_bytes(self, data: bytes) -> None:
+        raise WebSocketDisconnect(1006)
+
+
+async def test_a_device_that_leaves_before_the_notice_lands_records_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The record says what happened, so it says nothing where nothing
+    happened. A cache holding a clip is not a phrase that went out: the
+    device can be gone by the time the notice is sent, and a record
+    written from the cache alone would claim a turn the user never had.
+    """
+    config = with_fallback(enabled=True, phrase="I could not answer that one.")
+    session = await failing_session(config, socket=VanishingBeforeTheNotice())
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    assert events(caplog, "reply_fallback") == []
+    # And a device that went away is not a failure of anything, so
+    # nothing is reported about it either.
+    assert "fallback playback failed" not in caplog.text
+
+
+async def test_a_device_that_leaves_mid_notice_records_what_it_saw(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other side of the same rule. The display message landed, so
+    the user did see the sentence, and the record says so with `audio`
+    false: what was lost is the sound, which is exactly the distinction
+    the field carries."""
+    config = with_fallback(enabled=True, phrase="I could not answer that one.")
+    session = await failing_session(config, socket=VanishingOnFrame())
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    said = only(caplog, "reply_fallback")
+    assert said.audio is False
+    assert "fallback playback failed" not in caplog.text
+
+
+async def test_a_notice_whose_audio_breaks_says_it_was_only_shown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A bug in this process between the display send and the speaker.
+    The sentence rendered, so the record is written and says the phrase
+    was seen; the failure beside it names the class and nothing else."""
+    config = with_fallback(enabled=True)
+    session = session_for(
+        config,
+        POET_MAC,
+        stages={"llm": cast(Any, Unreachable("llm", ConnectionRefusedError("no route")))},
+        fallbacks={"poet": FallbackClip(phrase="Sorry.", clip=b"\x00\x00" * 160, sample_rate=0)},
+    )
+    session.websocket = cast(Any, OrderedSocket())
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    assert only(caplog, "reply_fallback").audio is False
+    assert cast(OrderedSocket, session.websocket).announced() == ["Sorry."]
+    assert "fallback playback failed" in caplog.text
 
 
 # --- and the interruption that arrives while it is being said ---------
