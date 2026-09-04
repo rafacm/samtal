@@ -154,6 +154,44 @@ async def test_a_reply_that_is_only_a_leaked_call_says_the_fallback(
     assert ": reply failed: " not in caplog.text
 
 
+async def test_the_mask_is_waited_out_before_the_phrase() -> None:
+    """The notice waits for a clip still sounding, exactly as the
+    failure arm's does.
+
+    A reply that spoke nothing sent no batch, so the tail wait inside
+    `_send_reply_audio` was never reached and this is the first thing in
+    the turn that waits for the mask at all. Without the wait the notice
+    would talk over a filled pause and interleave the shared encoder,
+    and the settle is also what lets a barge-in confirmed during it take
+    the turn rather than be swallowed.
+
+    Read as the order the two verbs were called in. White-box in the
+    reach and exact in what it claims: what the arm promises is that it
+    settles before it speaks, and no surface outside the runner can say
+    which of two sends happened first once the pacing has had its way
+    with them.
+    """
+    session = await speaking_session(scripts={"poet": ScriptedLlm([LEAK])})
+    runner = session.runtime._filler
+    order: list[str] = []
+    settle, speak = runner.settle, runner.speak_fallback
+
+    async def watched_settle() -> None:
+        order.append("settle")
+        await settle()
+
+    async def watched_speak(reason: Any) -> None:
+        order.append("speak")
+        await speak(reason)
+
+    runner.settle = watched_settle
+    runner.speak_fallback = watched_speak
+
+    await drive_reply(session, UTTERANCE)
+
+    assert order[:2] == ["settle", "speak"]
+
+
 async def test_a_reply_that_spoke_and_withheld_says_no_phrase(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
