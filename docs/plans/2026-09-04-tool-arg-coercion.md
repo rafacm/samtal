@@ -283,7 +283,7 @@ and `"1"` behave exactly as before.
 
 ## Milestones
 
-- [ ] **M1: the coercion, wired and tested.** `tools/arguments.py`
+- [x] **[M1: the coercion, wired and tested](2026-09-04-tool-arg-coercion-implementation.md#m1-the-coercion-wired-and-tested)** (PR TBD). `tools/arguments.py`
   with `with_lossless_coercions`; the execution-only call copies
   derived in `_tool_loop` and the reserved claim's arguments
   replaced at dispatch, signatures unchanged; the
