@@ -321,6 +321,16 @@ PROGRESS_PHASE = "waiting for the server"
 # milliseconds.
 PROGRESS_CADENCE_S = 1.0
 
+# What a cadence has to be, and it is a programmer's mistake rather than
+# an operator's: no command line reaches this number, and the callers
+# are this module and the tests that drive it faster than a second.
+#
+# Zero is the value the rule exists for. An event waited on with a
+# timeout of zero answers at once, so a redraw loop asked for it would
+# spin a core and rewrite the terminal as fast as the stream took it,
+# which is the opposite of the thing being built.
+PROGRESS_CADENCE_RULE = "the progress line's cadence has to be more than zero seconds"
+
 # Said when the API answered something this client cannot read as an
 # answer. The body is deliberately not quoted: what a proxy, a gateway
 # or a captive portal returns is not this API's sanitized output, and
@@ -1567,9 +1577,13 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
     `cadence_s` is how often the line is redrawn, and it exists so that
     a test can drive several redraws without waiting seconds for them.
     None means the constant rather than no cadence, and it is read as
-    None rather than as a false value on purpose: zero is a cadence a
-    caller may legitimately ask for, and truthiness would silently turn
-    it into a second.
+    None rather than as a false value because those are two different
+    answers. Anything at or below zero is neither, and it is refused
+    where it is read: an event waited on for zero seconds answers at
+    once, so a loop asked for it would spin a core and rewrite the
+    terminal as fast as the stream took it. No command line reaches this
+    number, so the refusal is a programmer's rather than one of this
+    grammar's sentences.
 
     The first line is drawn here rather than by the writer, so that a
     wait shorter than one cadence still says what it is waiting for and
@@ -1592,6 +1606,8 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
         yield
         return
     cadence = PROGRESS_CADENCE_S if cadence_s is None else cadence_s
+    if cadence <= 0:
+        raise ValueError(PROGRESS_CADENCE_RULE)
     started = time.monotonic()
     line = _ProgressLine()
     line.draw(0)
