@@ -376,7 +376,8 @@ residue's visibility.
 From `vinga-server/`:
 
 - `uv run ruff check .` clean.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5393 passed,
+- `uv run mypy`: no issues found in 5 source files.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5400 passed,
   19 skipped.
 - `uv run pytest tests/integration -q`: 239 passed.
 - `python3 scripts/check_doc_links.py .` from the repository root: 185
