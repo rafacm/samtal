@@ -1524,6 +1524,15 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
     shutting down mid-wait is not held open by a line it was drawing,
     and the wait itself is bounded by the request's own timeout rather
     than by anything here.
+
+    **A writer that cannot be started changes nothing about the
+    command.** An interpreter out of thread stacks raises from `start`,
+    and this catches it, takes the line it had already drawn back off
+    the screen and runs the request with no narration at all. The
+    affordance is best effort by nature, and the alternative is what
+    this had before: a traceback out of a boundary that catches two
+    exception classes, a line left standing, and a request never made
+    over a progress line that could not be drawn.
     """
     if not narrates or not _stderr_at_a_terminal():
         yield
@@ -1543,8 +1552,16 @@ def narrated(narrates: bool, cadence_s: float | None = None) -> Iterator[None]:
         while not stop.wait(cadence):
             drawn[0] = _narrate(int(time.monotonic() - started))
 
-    writer = threading.Thread(target=narrate_until_stopped, daemon=True)
-    writer.start()
+    try:
+        writer = threading.Thread(target=narrate_until_stopped, daemon=True)
+        writer.start()
+    except RuntimeError:
+        # An interpreter that will not give out another thread, which is
+        # the one thing here that can fail loudly. Everything else on
+        # this path is a write, and a write that fails says nothing.
+        _erase(drawn[0])
+        yield
+        return
     try:
         yield
     finally:
