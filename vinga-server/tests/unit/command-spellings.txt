@@ -833,6 +833,9 @@ docs/plans/2026-09-03-two-clock-verb-rename.md:591  historical  vinga reload
 docs/plans/2026-09-03-two-clock-verb-rename.md:592  historical  vinga apply
 docs/plans/2026-09-03-two-clock-verb-rename.md:603  historical  vinga import
 docs/plans/2026-09-03-two-clock-verb-rename.md:606  historical  vinga import
+docs/plans/2026-09-04-reply-failure-fallback-implementation.md:152  historical  config reference
+docs/plans/2026-09-04-reply-failure-fallback-implementation.md:152  historical  config openapi
+docs/plans/2026-09-04-reply-failure-fallback-implementation.md:152  historical  config cli-reference
 docs/plans/2026-09-04-reply-failure-fallback.md:280  historical  vinga events
 docs/plans/2026-09-04-reply-failure-fallback.md:439  historical  vinga events
 docs/plans/2026-09-04-simulator-tokenless-admission-implementation.md:181  historical  vinga-server config cli-reference
