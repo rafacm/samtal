@@ -57,6 +57,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   holding the credential (`api_key_env` for a provider, a `$NAME` header
   for an MCP server). A stored one still boots and still reads, and a
   displayed address no longer shows the parameter.
+- **A config file that will not read is refused without naming it**
+  (#291). The boot loader echoed the submitted `--config` path and the
+  operating system's own wording, quoted the path again in its YAML and
+  invalid-config sentences, and chained the library exception that
+  holds the filename. It now answers the way the `-f` write does: an
+  ordered table of failure class to fixed sentence (not there, cannot
+  be read, not UTF-8 text, could not be read), the YAML locator and
+  nothing else off the parser, and every refusal built inside its
+  handler and raised after it, so no exception chain carries the path
+  or the buffer. What a refusal names instead is the door the path came
+  through, `--config` or `VINGA_CONFIG`, which is what its reader goes
+  and changes. A config file of bytes rather than text was not caught
+  at all and left as a traceback retaining what it could not decode;
+  that arm is closed too.
 
 ## 2026-09-03
 
