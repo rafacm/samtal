@@ -310,6 +310,52 @@ def test_the_highest_qualifying_tag_wins_over_lexical_order(tmp_path: Path) -> N
     assert "release v9.0.0" not in body
 
 
+def test_the_three_part_spelling_wins_a_tie_with_the_two_part(
+    tmp_path: Path,
+) -> None:
+    """v1.2 and v1.2.0 name the same numbers; the tie has to be stated."""
+    repo = upstream(tmp_path, "acme__thing")
+    pinned = head_of(repo)
+    commit(repo, {"watched/one.txt": "second\n"}, "the release commit")
+    git(repo, "tag", "v1.2")
+    git(repo, "tag", "v1.2.0")
+    manifest, clones = stage(tmp_path, [("acme/thing", repo, pinned, ["watched/"])])
+    done, out = report(tmp_path, manifest, clones)
+    assert done.returncode == 0, done.stderr
+    body = out.read_text(encoding="utf-8")
+    assert "release v1.2.0" in body
+    assert "release v1.2 " not in body
+
+
+def test_leading_zero_tags_are_not_releases(tmp_path: Path) -> None:
+    """They would compare equal to their unpadded twins on the numbers."""
+    repo = upstream(tmp_path, "acme__thing")
+    pinned = head_of(repo)
+    commit(repo, {"watched/one.txt": "second\n"}, "move the wire")
+    for tag in ("v01.2.0", "v1.02", "v1.2.03"):
+        git(repo, "tag", tag)
+    manifest, clones = stage(tmp_path, [("acme/thing", repo, pinned, ["watched/"])])
+    done, out = report(tmp_path, manifest, clones)
+    assert done.returncode == 0, done.stderr
+    body = out.read_text(encoding="utf-8")
+    assert "No tag matches the release policy" in body
+    assert "### release" not in body
+
+
+def test_a_zero_component_is_still_a_release(tmp_path: Path) -> None:
+    repo = upstream(tmp_path, "acme__thing")
+    pinned = head_of(repo)
+    commit(repo, {"watched/one.txt": "second\n"}, "move the wire")
+    git(repo, "tag", "v0.10.0")
+    git(repo, "tag", "v0.9.0")
+    manifest, clones = stage(tmp_path, [("acme/thing", repo, pinned, ["watched/"])])
+    done, out = report(tmp_path, manifest, clones)
+    assert done.returncode == 0, done.stderr
+    body = out.read_text(encoding="utf-8")
+    assert "release v0.10.0" in body
+    assert "release v0.9.0" not in body
+
+
 def test_repositories_are_reported_in_the_manifests_own_order(tmp_path: Path) -> None:
     first = upstream(tmp_path, "one")
     second = upstream(tmp_path, "two")
