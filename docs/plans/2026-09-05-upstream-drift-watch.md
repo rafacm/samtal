@@ -275,7 +275,7 @@ record that owns the reasoning) rather than a promise change.
 
 ## Milestones
 
-- [x] **[M1: the manifest, the check, and the drift workflow.](2026-09-05-upstream-drift-watch-implementation.md#m1-the-manifest-the-check-and-the-drift-workflow)** (PR TBD)
+- [x] **[M1: the manifest, the check, and the drift workflow.](2026-09-05-upstream-drift-watch-implementation.md#m1-the-manifest-the-check-and-the-drift-workflow)** (PR [#405](https://github.com/rafacm/vinga/pull/405))
   `docs/upstream-watch.yaml` with the issue's candidate paths at the
   currency table's pinned SHAs; `scripts/upstream_watch.py`
   with the agreement check wired into the docs workflow and the
