@@ -226,12 +226,12 @@ record that owns the reasoning) rather than a promise change.
   header's rule keeps additions tied to maintained sections; the
   one-issue update discipline means even a noisy period is one page,
   not a pile.
-- **Upstream renames a watched path.** `git diff --name-status`
-  against a path that no longer exists still reports the deletion
-  side; the report shows the rename as a delete plus untracked new
-  path, and triage's read-the-source step catches it. The manifest
-  header names this as the reason a drift report can undercount and
-  why the loop re-reads rather than trusts.
+- **Upstream renames a watched path.** Only the deletion side is
+  dependable: a destination outside the watched pathspec is
+  invisible to the diff, so the report shows a delete and nothing
+  else, and locating the replacement is a human triage step. The
+  manifest header names this as the reason a drift report can
+  undercount and why the loop re-reads rather than trusts.
 - **Issue-update races or a renamed label.** The workflow creates
   the label if missing (`gh label create --force`), and the
   open-or-update search is by label plus state, so a manually closed
@@ -352,6 +352,9 @@ so it rides, per the queue decision's condition.
    reports untracked files and an out-of-scope destination is
    invisible; only the deletion side is dependable. Say so, and
    leave locating the replacement to triage.
+
+   *Resolution*: accepted in full; the risk text now claims only
+   the deletion side and hands the replacement to triage.
 
 9. **P2: the verification is nondeterministic and does not exercise
    issue management.** A dry run against live upstream proves one
