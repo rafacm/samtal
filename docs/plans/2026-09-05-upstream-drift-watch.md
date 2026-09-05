@@ -56,10 +56,18 @@ with a bug pending, so: the manifest carries, per upstream
 repository, the clone URL, the pinned SHA, the read date, and the
 watched paths; the notes' table keeps its sentence-level context and
 its SHA cells, and the docs workflow's link-check job gains a small
-check (`scripts/check_upstream_watch.py`, stdlib only, in the shape
-of `check_doc_links.py`) asserting the SHA printed in the notes'
-table equals the manifest's for each repository, so bumping one
-without the other turns the docs lane red rather than lying quietly.
+check (in the shape of `check_doc_links.py`) holding the two to
+full agreement in both directions: the set of repositories is
+identical (a row missing from either side, or duplicated in
+either, is its own failure), each repository's full SHA matches,
+and each repository's read date matches the table's "Clone read"
+cell, so bumping any cell of one without the other turns the docs
+lane red rather than lying quietly. The table is deliberately not
+generated from the manifest: a generated region inside a research
+note would cross the authority taxonomy (generated references are
+`docs/reference/`'s class, and the notes are evidence with prose
+context around the cells), and full bidirectional checking makes
+disagreement equally impossible without moving the page's class.
 The manifest is YAML because the repository's own tooling reads YAML
 everywhere else, and it lives under `docs/` because it is a
 documentation-process artifact: what it pins is what the
@@ -296,6 +304,12 @@ so it rides, per the queue decision's condition.
    checked. Render the table from the manifest, or check repository
    identity, full SHA and read date in both directions, including
    missing and duplicate rows.
+
+   *Resolution*: accepted, second option, strengthened as asked:
+   the check covers repository identity, full SHA and read date,
+   both directions, with missing and duplicate rows as their own
+   failures; the generated-table alternative is declined with the
+   authority-taxonomy reason stated in place.
 
 6. **P2: highest `v*` tag is not a reliable latest release.** It
    can select prereleases or unrelated tags, and nothing defines
