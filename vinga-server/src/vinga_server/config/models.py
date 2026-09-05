@@ -366,25 +366,44 @@ class LimitsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Concurrent conversations. Each one holds an ASR, an LLM stream, and
-    # a TTS engine, so this is a resource bound and not a licence check.
-    max_sessions: int = Field(default=8, ge=1)
+    max_sessions: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "How many conversations this server holds at once. Each one holds an "
+            "ASR, an LLM stream and a TTS engine, so this is a resource bound and "
+            "not a licence check. A device refused for capacity reconnects on its "
+            "next wake word."
+        ),
+    )
 
-    # One session's maximum life, in seconds. An hour by default.
-    max_session_s: float = Field(default=3600.0, gt=0)
+    max_session_s: float = Field(
+        default=3600.0,
+        gt=0,
+        description=(
+            "One session's maximum life, in seconds. An hour by default. The "
+            "firmware treats a close as the end of a conversation and reconnects "
+            "on the next wake word, so a session closed here is invisible in "
+            "normal use."
+        ),
+    )
 
-    # How long a realtime session may go without a conversation before
-    # the server hangs up, in seconds, counted from the end of the last
-    # utterance or the end of the last reply, whichever came later. Two
-    # minutes by default: long enough to think, read something out, or
-    # answer the door, short enough that walking away does not leave a
-    # mic streaming for the rest of the hour.
-    #
-    # Only realtime sessions, because only they stream continuously; an
-    # auto-mode device stops listening after each reply and re-arms per
-    # turn, and is bounded by max_session_s as before. There is no off
-    # switch: a deployment that wants none sets it near max_session_s.
-    idle_timeout_s: float = Field(default=120.0, gt=0)
+    idle_timeout_s: float = Field(
+        default=120.0,
+        gt=0,
+        description=(
+            "How long a realtime session may go without a conversation before the "
+            "server hangs up, in seconds. Counted from the end of the last "
+            "utterance or the end of the last reply, whichever came later, so "
+            "arriving audio does not reset it. Two minutes by default: long enough "
+            "to think, read something out, or answer the door, short enough that "
+            "walking away does not leave a mic streaming for the rest of the hour. "
+            "Realtime sessions only, because only they stream continuously; an "
+            "auto-mode device stops listening after each reply and re-arms per "
+            "turn, and is bounded by `max_session_s` as before. There is no off "
+            "switch: a deployment that wants none sets this near `max_session_s`."
+        ),
+    )
 
 
 class CaptureConfig(BaseModel):
@@ -410,28 +429,57 @@ class CaptureConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # The switch. Off by default, so a section left in a config file
-    # records nothing until somebody says it should.
-    enabled: bool = False
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether sessions are recorded to disk. Off by default, so a section "
+            "left in a configuration file records nothing until somebody says it "
+            "should. With it on, every session writes three files (a stereo WAV "
+            "with the microphone on channel 0 and the reply on channel 1, a JSONL "
+            "decision track whose offsets index into it, and a JSON manifest of "
+            "what the capture was made against), a warning says so at startup, and "
+            "each recorded session names its file."
+        ),
+    )
 
-    # Where captures are written. Must be on the data volume: a
-    # deployment's container root is read-only. Required even when
-    # disabled, so turning capture on is one word rather than one word
-    # and remembering where it writes.
-    dir: Path
+    dir: Path = Field(
+        description=(
+            "Where captures are written. It has to be on the data volume, since a "
+            "deployment's container root is read-only. Required even when capture "
+            "is disabled, so turning capture on is one word rather than one word "
+            "and remembering where it writes."
+        ),
+    )
 
-    # Stop capturing a session after this many seconds. A bound on one
-    # file, not on the conversation, which carries on uncaptured.
-    max_session_s: float = Field(default=900.0, gt=0)
+    max_session_s: float = Field(
+        default=900.0,
+        gt=0,
+        description=(
+            "Stop capturing a session after this many seconds. A bound on one "
+            "file, not on the conversation, which carries on uncaptured."
+        ),
+    )
 
-    # Total budget for the directory. Whole captures are pruned, oldest
-    # first, when it is exceeded.
-    max_total_mb: float = Field(default=2000.0, gt=0)
+    max_total_mb: float = Field(
+        default=2000.0,
+        gt=0,
+        description=(
+            "Total budget for the capture directory, in megabytes. Whole captures "
+            "are pruned, oldest first, when it is exceeded. Stereo 16 kHz is "
+            "64 kB/s, so 2000 MB is around nine hours."
+        ),
+    )
 
-    # Refuse to start a capture when the volume has less free than this.
-    # The byte budget above does not protect the volume on its own: the
-    # model caches share it and grow underneath.
-    min_free_mb: float = Field(default=1000.0, ge=0)
+    min_free_mb: float = Field(
+        default=1000.0,
+        ge=0,
+        description=(
+            "Refuse to start a capture when the volume has less free than this, in "
+            "megabytes. The byte budget above does not protect the volume on its "
+            "own: the model caches share it and grow underneath, and capture must "
+            "not be what fills it."
+        ),
+    )
 
 
 class DatabaseConfig(BaseModel):
@@ -464,10 +512,43 @@ class DatabaseConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    host: str = "127.0.0.1"
-    port: int = Field(default=5432, ge=1, le=65535)
-    name: str = "vinga"
-    user: str = "vinga"
+    host: str = Field(
+        default="127.0.0.1",
+        description=(
+            "The host the Postgres instance is reached on. `VINGA_DB_HOST` "
+            "overrides it, and that is the documented spelling. The default is the "
+            "development instance `docker compose up -d --wait` starts from the "
+            "repository root, so a checkout runs with no configuration at all."
+        ),
+    )
+    port: int = Field(
+        default=5432,
+        ge=1,
+        le=65535,
+        description=(
+            "The port the Postgres instance listens on. `VINGA_DB_PORT` overrides "
+            "it, and that is the documented spelling."
+        ),
+    )
+    name: str = Field(
+        default="vinga",
+        description=(
+            "The database this server keeps both of its halves in. `VINGA_DB_NAME` "
+            "overrides it, and that is the documented spelling. The domain "
+            "configuration lives in this database's `domain` schema, the "
+            "conversation record in a `record` schema and each agent's memory in a "
+            "`memory` schema beside it, so one instance is one deployment's whole "
+            "state."
+        ),
+    )
+    user: str = Field(
+        default="vinga",
+        description=(
+            "The role the server connects as. `VINGA_DB_USER` overrides it, and "
+            "that is the documented spelling. The password has no key on this "
+            "model at all: it is `VINGA_DB_PASSWORD` and only that."
+        ),
+    )
 
 
 class ConversationsConfig(BaseModel):
@@ -478,9 +559,9 @@ class ConversationsConfig(BaseModel):
     conversation text on disk, so nothing here can turn it on by
     accident. The section has to exist and the flag has to say so.
 
-    No connection of its own. The record lives in the `conversations`
-    schema of the database `database` above names, beside the domain
-    half's `domain` schema: the same instance, the same backup and the
+    No connection of its own. The record lives in the `record` schema of
+    the database `database` above names, beside the domain half's
+    `domain` schema: the same instance, the same backup and the
     same credentials, with a read-only role scoped to this schema alone
     so that an analyst reads what was said without reaching the stored
     secrets next door.
@@ -502,39 +583,72 @@ class ConversationsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # The switch. Off by default, so a section left in a config file
-    # records nothing until somebody says it should.
-    enabled: bool = False
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether what was said is recorded to the database. Off by default, so "
+            "a section left in a configuration file records nothing until somebody "
+            "says it should: with this off no writer is started and no row is ever "
+            "written. The tables exist either way, because the schema is migrated "
+            "at every boot. Audio never enters it; `server.capture` is the "
+            "recording, and this is the record."
+        ),
+    )
 
-    # Store the structured events and every measured number (durations,
-    # token counts, timings). With this off, no events rows land and the
-    # numeric columns on turns and tool invocations are null.
-    metrics: bool = True
+    metrics: bool = Field(
+        default=True,
+        description=(
+            "Store the structured events and every measured number: durations, "
+            "token counts, timings. With this off, no events rows land and the "
+            "numeric columns on turns and tool invocations are null."
+        ),
+    )
 
-    # Store conversation text, and tool names, arguments and results.
-    # With this off, rows still land with the content columns null, so
-    # timing analysis survives the stricter setting.
-    text: bool = True
+    text: bool = Field(
+        default=True,
+        description=(
+            "Store conversation text, and tool names, arguments and results. With "
+            "this off, rows still land with the content columns null, so timing "
+            "analysis survives the stricter setting."
+        ),
+    )
 
-    # Prune sessions older than this many days, whole sessions at a time.
-    # 0 keeps everything, which is a deliberate choice rather than a
-    # default: a store with no policy retains forever. The same number
-    # the store itself defaults to, which its own tests pin.
-    retention_days: int = Field(default=90, ge=0)
+    # The default is the number the store itself defaults to, which its
+    # own tests pin: this model and that one may not drift apart.
+    retention_days: int = Field(
+        default=90,
+        ge=0,
+        description=(
+            "Prune sessions older than this many days, whole sessions at a time, "
+            "at startup and at each session close. 0 keeps everything, which is a "
+            "deliberate choice rather than a default: a store with no policy "
+            "retains forever."
+        ),
+    )
 
-    # Whether an agent can find one of its past threads by description
-    # and carry on with it. Off by default, so a deployment that records
-    # conversations does not thereby start reading them back: what a
-    # device says next is answered out of the session it is in unless
-    # somebody asks for more.
-    resumption: bool = False
+    resumption: bool = Field(
+        default=False,
+        description=(
+            "Whether an agent can find one of its own past threads by description "
+            "and carry on with it. Off by default, so a deployment that records "
+            "conversations does not thereby start reading them back: what a device "
+            "says next is answered out of the session it is in unless somebody "
+            "asks for more. It reads what the two switches above wrote, so it is "
+            "refused at boot with `enabled` off or with `text` off."
+        ),
+    )
 
-    # How much of a resumed thread is rebuilt into the model's context,
-    # in tokens. Approximate by design: what the hydrator counts is
-    # characters over a fixed estimate, and what it drops is whole stored
-    # turns, oldest first, so a reply is never rebuilt without the
-    # utterance it answered.
-    resumption_budget_tokens: int = Field(default=6000, ge=512)
+    resumption_budget_tokens: int = Field(
+        default=6000,
+        ge=512,
+        description=(
+            "How much of a resumed thread is rebuilt into the model's context, in "
+            "tokens. Approximate by design: what the hydrator counts is characters "
+            "over a fixed estimate, and what it drops is whole stored turns, "
+            "oldest first, so a reply is never rebuilt without the utterance it "
+            "answered."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_resumption(self) -> "ConversationsConfig":
