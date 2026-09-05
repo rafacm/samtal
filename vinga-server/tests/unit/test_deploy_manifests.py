@@ -79,6 +79,12 @@ STARTUP_FLOOR_S = 180
 # process exiting.
 GRACE_MARGIN_S = 5
 
+# Where the Ingress says not to log request lines. ingress-nginx's own
+# spelling, since the manifest is written against that controller and
+# says so; what it stands for is the property, which an operator on
+# another controller owes under whatever name it uses.
+ACCESS_LOG = "nginx.ingress.kubernetes.io/enable-access-log"
+
 # An environment name that carries a credential. Anything matching this
 # in an applicable manifest has to arrive from a Secret rather than as a
 # literal.
@@ -403,6 +409,19 @@ def test_the_ingress_routes_exactly_the_device_paths(ingress: Any) -> None:
     )
     for path in withheld:
         assert path not in routed, f"{path} is routed to the internet"
+
+
+def test_the_ingress_logs_no_request_lines(ingress: Any) -> None:
+    """The same leak the server refuses at the origin, refused at the
+    edge. An access line is a request line, and both routed paths carry
+    a secret in theirs: the OTA path is the deployment's secret segment,
+    and `/x/<key>/` is the key that stands in front of the endpoint
+    issuing device tokens. `serving.py` turns uvicorn's access log off
+    for precisely this, and a proxy in front that logs would put back
+    what the server took out."""
+    setting = ingress["metadata"]["annotations"].get(ACCESS_LOG)
+    assert setting is not None, f"the Ingress no longer sets {ACCESS_LOG}"
+    assert str(setting).strip().lower() == "false", f"{ACCESS_LOG} is {setting!r}"
 
 
 def test_the_production_compose_publishes_the_servers_port(compose: Any) -> None:

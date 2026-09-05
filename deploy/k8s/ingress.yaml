@@ -36,11 +36,30 @@
 #                  deployment.yaml. Boards onboarded through /x/ need
 #                  neither.
 #
+# Access logging is off here, and that is a leak control rather than a
+# preference. The server keeps uvicorn's access log off deliberately
+# (`serving.py`): an access line is a request line, and two of this
+# server's request lines are things nothing may print. The OTA path
+# carries the deployment's secret segment, and the short onboarding
+# route is `/x/<key>/`, where the key is what stands in front of the
+# endpoint that issues device tokens, so a log of the path is a log of
+# the key; a rejected attempt is attacker-controlled text besides, and
+# a near miss of a real key is a hint at the real key
+# (`onboarding/keys.py`). A proxy in front that logs request lines
+# recreates at the edge exactly the leak the server refuses at the
+# origin. What an operator reads instead is the structured events,
+# which name the device, the agent and the outcome and are written by
+# handlers that know which of their values may be said out loud.
+#
+# An operator on another controller owes the same property, by whatever
+# name that controller gives it, and owes it again for any legacy OTA
+# rule they add: that path is a secret segment in a URL, and it is in
+# every request line that reaches it.
+#
 # The annotations below are ingress-nginx's spellings. Every controller
-# has its own name for the same two facts, so an operator running
-# something else translates the two timeouts rather than reverse
-# engineering what they were for; the guide's Kubernetes lane says what
-# each one buys.
+# has its own name for the same three facts, so an operator running
+# something else translates them rather than reverse engineering what
+# they were for; the guide's Kubernetes lane says what each one buys.
 #
 # TLS is not an annotation but this resource's own contract: `spec.tls`
 # names a certificate Secret the operator provisions and that is never a
@@ -67,6 +86,12 @@ metadata:
     # long-lived connection is not cut by whichever of the two happens
     # to expire first.
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # No access log for this Ingress, for the reason the header gives at
+    # length: both routed paths carry a secret in the request line, and
+    # the server refuses to print its own for exactly that reason. The
+    # agreement test asserts this annotation is here and false, so it
+    # cannot be dropped in passing.
+    nginx.ingress.kubernetes.io/enable-access-log: "false"
 spec:
   ingressClassName: nginx
   tls:
