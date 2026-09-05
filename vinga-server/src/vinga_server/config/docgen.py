@@ -415,7 +415,7 @@ def _options_tables(model: type[BaseModel], parent: str = "") -> list[str]:
     """
     lines = [*_table(model), ""]
     for name, info in model.model_fields.items():
-        nested = _nested_model(info.annotation)
+        nested = nested_model(info.annotation)
         if nested is None:
             continue
         below = f"{parent}{name}"
@@ -424,15 +424,22 @@ def _options_tables(model: type[BaseModel], parent: str = "") -> list[str]:
     return lines
 
 
-def _nested_model(annotation: object) -> type[BaseModel] | None:
+def nested_model(annotation: object) -> type[BaseModel] | None:
     """The model a field holds one of, or None for a field that holds a
     value. A union is looked through, so an optional section is found the
-    way a required one is."""
+    way a required one is.
+
+    Public, because walking a model graph is not this document's private
+    business: it is how the tables below recurse and how anything else
+    that has to visit every model reachable from a root, a coverage
+    check included, finds the ones a field only points at. Reaching for
+    an underscore to do it would be a test pinning a detail; this is the
+    name a caller reaches instead."""
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation
     if get_origin(annotation) in (Union, UnionType, Annotated):
         for argument in get_args(annotation):
-            found = _nested_model(argument)
+            found = nested_model(argument)
             if found is not None:
                 return found
     return None
@@ -631,7 +638,7 @@ def _help_fields(model: type[BaseModel], prefix: str = "") -> list[str]:
             break_on_hyphens=False,
         )
     for field_name, info in model.model_fields.items():
-        nested = _nested_model(info.annotation)
+        nested = nested_model(info.annotation)
         if nested is not None:
             lines += _help_fields(nested, f"{prefix}{field_name}.")
     return lines
