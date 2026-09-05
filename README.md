@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/vinga-logo.png" alt="vinga logo" width="40%">
+<img src="assets/vinga-logo-circle.svg" alt="vinga logo" width="25%">
 
 # vinga 💬
 

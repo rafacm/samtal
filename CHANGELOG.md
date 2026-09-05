@@ -109,6 +109,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **vinga has a face.** The README header's generated illustration
+  gives way to a drawn mark: a white rounded V with dark oval eyes
+  and an open smiling mouth with a lilac tongue, on an orchid-purple
+  circle. The mark is hand-written SVG with PNG renders beside it, in
+  two variants: `assets/vinga-logo-circle.svg` for floating in
+  content (the README header now uses it) and
+  `assets/vinga-logo-rounded-square.svg` for full-bleed icon slots
+  such as favicons and avatars. The old `assets/vinga-logo.png` is
+  deleted; nothing referenced it any more.
+
 - **The README front page leads with the mix.** The identity record
   applied to the shopfront. A new "What is vinga?" opener: a
   self-hostable home for voice agents, where agents live on the server

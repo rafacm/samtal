@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
+  <title id="title">Vinga — rounded-square logo</title>
+  <desc id="desc">A white rounded V mascot with dark oval eyes and a smiling mouth with a lilac tongue, on an orchid-purple rounded square. The outer canvas is transparent.</desc>
+  <rect x="1" y="1" width="1252" height="1252" rx="100" fill="#94199e"/>
+  <path fill="#fff" d="M260 232 H392 C437 232 472 257 487 299 L618 692 Q624 702 630 692 L766 302 C780 258 815 232 860 232 H994 C1059 232 1104 291 1077 355 L795 966 C769 1023 725 1054 675 1054 H575 C522 1054 478 1025 452 972 L180 367 C148 297 187 232 260 232 Z"/>
+  <g fill="#252830">
+    <ellipse cx="446.5" cy="570.5" rx="37.5" ry="67.5"/>
+    <ellipse cx="802.5" cy="570.5" rx="37.5" ry="67.5"/>
+    <path id="mouth" d="M520 732 Q627 740 731 732 C744 730 748 739 747 751 C742 817 692 866 625 866 C559 866 511 819 505 752 C504 739 508 731 520 732 Z"/>
+  </g>
+  <path fill="#d276fb" d="M542 831 C564 809 594 796 625 796 C657 796 688 809 708 831 C686 854 658 866 625 866 C593 866 565 854 542 831 Z"/>
+</svg>
