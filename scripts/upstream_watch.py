@@ -104,7 +104,11 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # or any other tag shape is not a release for this purpose, because
 # "latest tag" over an unconstrained set selects whatever upstream
 # happened to push last.
-TAG_RE = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
+#
+# No leading zeros, which is semver's rule and here is a determinism
+# rule: `v01.2.0` and `v1.2.0` would compare equal on their numbers,
+# and "highest" would then mean "whichever git listed first".
+TAG_RE = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$")
 
 # A ceiling on any one git call. A clone that stops to ask a runner
 # for a password would otherwise hold the job until the job's own
@@ -445,12 +449,28 @@ def latest_release_tag(repo: Path, name: str):
         raise Refusal(f"{name}: git could not list its tags")
     best = None
     for line in done.stdout.splitlines():
-        m = TAG_RE.match(line.strip())
+        tag = line.strip()
+        m = TAG_RE.match(tag)
         if not m:
             continue
-        key = (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+        # The order is major, minor, patch, and then the two-or-three
+        # part distinction, because `v1.2` and `v1.2.0` name the same
+        # numbers and something has to break the tie the same way every
+        # week. The three-part form wins: it is the more specific
+        # spelling of the same release, and a project that ships both
+        # is telling you which one it means to be current.
+        #
+        # The tag text is the last component so the ordering is total
+        # even if the syntax above is ever widened.
+        key = (
+            int(m.group(1)),
+            int(m.group(2)),
+            int(m.group(3) or 0),
+            1 if m.group(3) is not None else 0,
+            tag,
+        )
         if best is None or key > best[0]:
-            best = (key, line.strip())
+            best = (key, tag)
     return None if best is None else best[1]
 
 
