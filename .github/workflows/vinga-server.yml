@@ -369,6 +369,19 @@ jobs:
             exit 1
           fi
 
+      # And the server half's, generated from the same models by the
+      # same command with the other half named. It is the page that says
+      # what a deployment can configure, so a copy that can drift from
+      # the models would document a server this repository does not
+      # build.
+      - name: Check the committed server reference is current
+        run: |
+          uv run vinga-server config reference server > "$RUNNER_TEMP/server-config.md"
+          if ! diff -u ../docs/reference/server-config.md "$RUNNER_TEMP/server-config.md"; then
+            echo "::error::docs/reference/server-config.md is stale; regenerate it with: uv run vinga-server config reference server > ../docs/reference/server-config.md"
+            exit 1
+          fi
+
       # And the conversation store's schema reference, generated from
       # the SQLAlchemy metadata under the same rule: the committed copy
       # is a cache of what the tables say, and one that can drift from
