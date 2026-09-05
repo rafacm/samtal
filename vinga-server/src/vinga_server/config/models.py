@@ -416,11 +416,11 @@ class LimitsConfig(BaseModel):
 class CaptureConfig(BaseModel):
     """Recording sessions to disk for offline analysis.
 
-    Off by default and off unless said otherwise, the same shape as
-    `auth.enabled`. This writes room audio to disk, which is the
-    opposite of what the rest of the project promises, so nothing here
-    can turn it on by accident: the section has to exist and the flag
-    has to say so.
+    Off by default and off unless said otherwise. This writes room audio
+    to disk, which is the opposite of what the rest of the project
+    promises, so nothing here can turn it on by accident: the section
+    has to exist and the flag has to say so. Writing the section is not
+    consent, and neither is leaving it in place.
 
     The flag rather than the section's presence is what switches it,
     because the field workflow is to record, then stop, and the
@@ -561,8 +561,8 @@ class DatabaseConfig(BaseModel):
 class ConversationsConfig(BaseModel):
     """Recording what was said into a database that can be queried.
 
-    Off by default and off unless said otherwise, the same shape as
-    `capture.enabled` and for the same kind of reason: this keeps
+    Off by default and off unless said otherwise, the shape
+    `capture.enabled` has and for the same kind of reason: this keeps
     conversation text on disk, so nothing here can turn it on by
     accident. The section has to exist and the flag has to say so.
 
