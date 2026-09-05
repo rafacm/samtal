@@ -1266,9 +1266,9 @@ vinga-server/src/vinga_server/config/docgen.py:206  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:616  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:174  respell  vinga apply
 vinga-server/src/vinga_server/config/loader.py:84  respell  vinga simulator run
-vinga-server/src/vinga_server/config/models.py:2375  respell  vinga memory
-vinga-server/src/vinga_server/config/models.py:2405  respell  vinga mcp-server status
-vinga-server/src/vinga_server/config/models.py:3028  respell  config schema
+vinga-server/src/vinga_server/config/models.py:2379  respell  vinga memory
+vinga-server/src/vinga_server/config/models.py:2409  respell  vinga mcp-server status
+vinga-server/src/vinga_server/config/models.py:3032  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:949  respell  vinga ota-url
@@ -1509,7 +1509,7 @@ vinga-server/tests/unit/test_mcp_status_reflection.py:113  respell  vinga-server
 vinga-server/tests/unit/test_mcp_status_reflection.py:170  respell  vinga-server config agent preview assistant
 vinga-server/tests/unit/test_onboarding_banner.py:81  respell  vinga-server config ota-url
 vinga-server/tests/unit/test_server_event_pins.py:293  respell  vinga-server config ota-url
-vinga-server/tests/unit/test_server_reference.py:53  respell  vinga-server config reference server
+vinga-server/tests/unit/test_server_reference.py:54  respell  vinga-server config reference server
 vinga-server/tests/unit/test_simulator_conversation.py:1  respell  vinga simulator run
 vinga-server/tests/unit/test_tools_mcp.py:648  respell  config mcp-server status
 vinga-server/tests/unit/test_tools_mcp.py:1101  respell  vinga-server config mcp-server status

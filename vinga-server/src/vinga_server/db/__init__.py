@@ -71,6 +71,7 @@ from sqlalchemy import URL, Engine, create_engine, event, make_url, text
 
 from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
 from vinga_server.config.models import (
+    DATABASE_ENV_NAMES,
     DATABASE_PASSWORD_ENV,
     DATABASE_URL_ENV,
     DatabaseConfig,
@@ -128,14 +129,19 @@ URL_REFUSED = (
     f"authority and can carry another in its query"
 )
 
+# The five names are the ones `DatabaseConfig` declares rather than five
+# more literals: this sentence is what an operator reads when nothing
+# opens, so a name it spells wrong is a name they would go and set.
 UNREACHABLE = (
-    "cannot open the vinga database. Nothing of the connection is repeated here, "
-    "because a database URL carries credentials in its authority and in its query: "
-    "check that the instance VINGA_DB_HOST and VINGA_DB_PORT name is running and "
-    "reachable, that VINGA_DB_NAME exists on it, and that VINGA_DB_USER and "
-    "VINGA_DB_PASSWORD are the credentials it expects. Set VINGA_DB_URL to override "
-    "all five at once. The development instance starts with "
-    "`docker compose up -d --wait`"
+    f"cannot open the vinga database. Nothing of the connection is repeated here, "
+    f"because a database URL carries credentials in its authority and in its query: "
+    f"check that the instance {DATABASE_ENV_NAMES['host']} and "
+    f"{DATABASE_ENV_NAMES['port']} name is running and "
+    f"reachable, that {DATABASE_ENV_NAMES['name']} exists on it, and that "
+    f"{DATABASE_ENV_NAMES['user']} and "
+    f"{PASSWORD_ENV} are the credentials it expects. Set {URL_ENV} to override "
+    f"all five at once. The development instance starts with "
+    f"`docker compose up -d --wait`"
 )
 
 # What a boot that may not create a schema it is missing is told, and
