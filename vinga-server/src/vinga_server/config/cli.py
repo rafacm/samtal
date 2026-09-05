@@ -132,6 +132,7 @@ from vinga_server.config.responses import (
     PROBLEM_TITLES,
     Acknowledgement,
     AppliedDocument,
+    Applies,
     AssembledPrompt,
     ConfigDiff,
     ConfigDocument,
@@ -3317,6 +3318,66 @@ DIFF_SECTIONS: dict[str, type[BaseModel]] = {
     name: _section(field.annotation) for name, field in ConfigDiff.model_fields.items()
 }
 
+# What this client does about a boundary the API states
+#
+# The API says which boundary a write is waiting at, in tokens it
+# publishes and never in a command (#386): what installs a stored
+# configuration is a verb of a client's grammar, and a client is a
+# program the server neither ships nor versions, so an image built
+# before a rename would otherwise name a command the CLI beside it no
+# longer has. This side owns the grammar, so this side names the
+# command, and the spelling is then inside the command-spellings
+# census's reach: a rename that missed it fails a test in this
+# checkout rather than reaching an operator through an old image.
+#
+# One command crosses one of the four boundaries, and this is it. The
+# other three are crossed by a device asking, a process starting and a
+# server reading the store at boot, none of which is something a
+# command of this grammar does. Written once and read by the three
+# renderings below, so the diff's head and the advice under a write
+# cannot come to spell it differently: that command is `vinga apply`.
+INSTALLS = f"{PROGRAM} apply"
+
+# What this client has to say about each set of boundaries a write can
+# be waiting at, printed under the server's own sentence.
+#
+# Keyed by the whole set rather than by a token, because what to do
+# about `reload` and `check-in` together is one thing to say rather
+# than two sentences in a row: the install crosses the first and the
+# device crosses the second by itself.
+#
+# The keys are the sets there is something to run about, which is the
+# whole of what a table like this may claim. A write waiting only at
+# `check-in`, `restart` or `store-boot` is answered by the server's
+# sentence and nothing else, because no command of this grammar crosses
+# those; so is a set this client cannot name at all, which is what a
+# boundary from a server newer than this one arrives as, the empty
+# tuple `_declared` reads it down to. The rule either way is the same
+# one: an unknown state is quoted, never guessed at.
+REMEDIES: dict[frozenset[Applies], str] = {
+    frozenset({Applies.RELOAD}): (
+        f"`{INSTALLS}` installs the stored configuration on the running server, and "
+        f"`{PROGRAM} diff` lists everything pending."
+    ),
+    frozenset({Applies.RELOAD, Applies.CHECK_IN}): f"`{INSTALLS}` installs the stored agents.",
+}
+
+
+def _announced(sentence: str, applies: Sequence[object]) -> str:
+    """What one write is waiting at, as an operator reads it: the
+    server's sentence, and this client's advice under it where there is
+    any.
+
+    Two lines rather than one, and in that order, because they are two
+    voices: the first is what the server says is true of the write and
+    the second is what this client would do about it. A set with no
+    remedy prints the sentence alone, which is also what an older
+    server's silence and a newer server's word both arrive as.
+    """
+    remedy = REMEDIES.get(frozenset(applies))
+    return sentence if remedy is None else f"{sentence}\n{remedy}"
+
+
 # What the label on a block means, said once at the head rather than
 # per block: three boundaries and no fourth, and which one a kind's
 # changes converge at is the answer's own.
@@ -3325,10 +3386,11 @@ DIFF_SECTIONS: dict[str, type[BaseModel]] = {
 # them, `reload` included: it names the mechanism truthfully, and a
 # client generated from the contract reads the same word this does
 # (#371). What the head explains is which command crosses each of them,
-# and for `reload` that command is `vinga apply`.
+# and the one command there is comes from the constant above rather
+# than from a second spelling written out here.
 DIFF_INTRO = (
     "# what the stored configuration would change on the running server. `applies`\n"
-    f"# says when a change of that kind reaches a conversation: `reload` when `{PROGRAM} apply`\n"
+    f"# says when a change of that kind reaches a conversation: `reload` when `{INSTALLS}`\n"
     "# next installs the stored configuration, `check-in` as a device next asks, and\n"
     "# `restart` at the next server start."
 )
@@ -4438,19 +4500,30 @@ def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
     # output an empty import has would have been read after the notice
     # it came before.
     sys.stdout.flush()
-    return tuple(
-        dict.fromkeys(
-            # Whole, for the reason a prompt and the onboarding URL are
-            # printed whole: a boundary sentence cut at a bound would
-            # lose the command it ends with, which is the half an
-            # operator acts on. What the bound is never for is the other
-            # half of this function, which has no exceptions: nothing an
-            # answer carries steers a terminal.
-            printable(str(entry["notice"]), UNBOUNDED)
-            for entry in entries
-            if entry["notice"] is not None
-        )
-    )
+    # Keyed on whichever half is doing the work, which is the same rule
+    # the rendering keeps one level up: a set this client knows is
+    # spoken by this client, and a set it does not is quoted from the
+    # server. So two entries waiting at one boundary are one line
+    # however their sentences read, and two entries from a server older
+    # than the vocabulary, which both carry the empty set, are told
+    # apart by the only half either of them has. Keying on the set
+    # alone would have collapsed an ordinary stored entry and a device
+    # binding from such a server into one, and half of what an operator
+    # is waiting on would have gone unsaid.
+    announced: dict[object, str] = {}
+    for entry in entries:
+        if entry["notice"] is None:
+            continue
+        # Whole, for the reason a prompt and the onboarding URL are
+        # printed whole: a boundary sentence cut at a bound would lose
+        # the state it ends with, which is what an operator reads it
+        # for. What the bound is never for is the other half of this
+        # function, which has no exceptions: nothing an answer carries
+        # steers a terminal.
+        sentence = printable(str(entry["notice"]), UNBOUNDED)
+        applies = tuple(entry["applies"])
+        announced.setdefault(applies or sentence, _announced(sentence, applies))
+    return tuple(announced.values())
 
 
 def _entry_name(entry: Mapping[str, object]) -> str:
@@ -4470,17 +4543,24 @@ def _entry_name(entry: Mapping[str, object]) -> str:
 
 
 def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
-    """One write acknowledged: what it did, and when it takes effect.
+    """One write acknowledged: what it did, when it takes effect, and
+    what this client would do about that.
 
-    Both are the API's own words, carried through unchanged: what an act
-    did and which boundary it lands at are decided where the write
-    happens, and this is where they are read out.
+    The first two are the API's own words, carried through unchanged:
+    what an act did and which boundary it lands at are decided where the
+    write happens, and this is where they are read out. The third is
+    this client's, composed from the boundaries beside the sentence,
+    because the command that crosses one is a fact of this grammar and
+    not of the server's (#386).
     """
     print(f"wrote {acknowledgement['wrote']}")
     # Flushed first, so the notice lands after the line it is about
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
-    print(acknowledgement["notice"], file=sys.stderr)
+    print(
+        _announced(str(acknowledgement["notice"]), tuple(acknowledgement["applies"])),
+        file=sys.stderr,
+    )
 
 
 # The acts
