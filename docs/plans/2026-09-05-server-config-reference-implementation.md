@@ -164,3 +164,96 @@ Run from `vinga-server/`, against the development Postgres on 5432, with
   `docs/reference/cli.md` and `docs/reference/api-openapi.json` are
   untouched by this milestone, which is what M1 predicted, since these
   descriptions render nowhere yet.
+
+### PR review round
+
+External review of the branch as pushed to PR #400, at `64a1d35d`:
+backend codex (codex-cli 0.153.0), model gpt-5.6-sol, 2026-09-05,
+runtime 6m30s. Four findings, three P2 and one P3, verdict as received:
+mergeable after the listed fixes. All four were confirmed against the
+sources before being fixed; none rejected.
+
+All four are the same shape, and it is worth naming: **a docstring
+sentence that was true when nobody read it.** These paragraphs have sat
+in the module for months as comments a reader skims past. M1 turns them
+into published prose, which is what made four wrong sentences worth
+finding, and the review found them the milestone before the page that
+would have printed them.
+
+1. **P2: the onboarding docstring contradicts the field below it.**
+   `OnboardingConfig`'s docstring said the key is "never stored and
+   never written here" and "rotates only when the secret does", one
+   paragraph above a `key` field that stores one in the file precisely
+   so that it survives a rotation. Fix: qualify the paragraph as the
+   unset case and say what `key` pins.
+
+   *Resolution* (`ddf5dbe6`): accepted in full. The paragraph now says
+   it is describing the normal, unset case, where nothing about the key
+   is stored and it moves only when the secret does. A second paragraph
+   names `key` as the one exception and what pinning buys: the boards
+   already provisioned keep reaching the URL they were given while the
+   new secret takes over everything else.
+
+2. **P2: "no secret is ever written here" is false for two paths.**
+   `ServerConfig`'s docstring made the claim unqualified, and
+   `docs/xiaozhi-notes.md` records the opposite in a heading of its own:
+   the OTA URL is the one field an operator can put a secret into,
+   because a stock board can present nothing but a MAC at its first
+   call, so the token issuer is protected by its path. A pinned
+   `onboarding.key` stands in front of the same endpoint. Fix: restrict
+   the claim to credentials and name the two path fields.
+
+   *Resolution* (`05a5d05f`): accepted in full. The claim says
+   credentials now, and names the three that are named rather than held
+   (the API's bearer token, the device-auth secret, the database
+   password) beside the two that have no key at all. A second paragraph
+   names `ota_path`'s random segment and `onboarding.key`, says why
+   they are sensitive without looking it, ties that to their refusals
+   never quoting them back, and gives the two environment spellings
+   that keep them out of a committed file.
+
+3. **P2: one exception named where the contract has two.** The
+   docstring said a domain change is an apply except for a device
+   binding. The recorded contract has two kinds applying at check-in,
+   `devices` and `default_agent`: the comparison's boundary table in
+   `tests/unit/test_config_cli_rendering.py` labels both, and the
+   domain reference says the same in prose. Fix: name both with the
+   check-in timing.
+
+   *Resolution* (`3e0d857e`): accepted in full. The sentence names both
+   kinds and says what check-in means here: a running server re-reads
+   them as a device asks for them, so the change reaches that board at
+   its next check-in with nothing asked of the server at all.
+
+4. **P3: capture's default compared to a flag that defaults the other
+   way.** `CaptureConfig`'s docstring said it is off by default "the
+   same shape as `auth.enabled`", and `auth.enabled` is on by default,
+   so the comparison said the opposite of what it meant. Fix: compare
+   with `conversations.enabled` or drop the comparison, keeping the
+   pair coherent rather than circular.
+
+   *Resolution* (`07023243`): accepted, second option, since
+   `ConversationsConfig` already points at capture and pointing back
+   would have been the circle. `CaptureConfig` states the shape itself,
+   being the first of the two models to have it: the section has to
+   exist and the flag has to say so, and neither writing the section
+   nor leaving it in place is consent. `ConversationsConfig`'s sentence
+   is reworded by one phrase to read as a pointer at where the rule is
+   stated.
+
+#### Verification after the review round
+
+Run from `vinga-server/`, against the development Postgres on 5432.
+
+- `uv run ruff check .`: `All checks passed!`
+- The four touched suites together
+  (`test_config.py`, `test_config_docgen.py`, `test_config_examples.py`,
+  `test_command_spellings.py`): `240 passed in 10.88s`.
+- The four generated-artifact freshness pins, run by name:
+  `4 passed`. `git status` shows no generated file changed, which is the
+  claim M1 makes and which docstring and description edits cannot move:
+  nothing renders them yet.
+- The census manifest went stale again, and only from line shifts: the
+  three `respell` rows in `models.py` moved by twenty lines as the
+  docstrings grew. Regenerated the standard way in this record's own
+  commit.
