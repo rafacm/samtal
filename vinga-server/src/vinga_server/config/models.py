@@ -1408,10 +1408,10 @@ UNRECOGNIZED_KEY_REFUSED = "an unrecognized key is not permitted"
 
 
 def safe_location(
-    model: type[BaseModel], location: Sequence[object]
+    model: type[BaseModel], location: Sequence[object], *, stored: bool = False
 ) -> tuple[tuple[object, ...], bool]:
-    """The longest prefix of a pydantic error location made only of
-    names this repository declared, and whether anything was dropped.
+    """The longest prefix of a pydantic error location this repository
+    may say, and whether anything was dropped.
 
     Walked against the model rather than matched against a list of
     words, because what makes a segment safe is that the schema has it:
@@ -1421,21 +1421,40 @@ def safe_location(
     conservative reading: once a segment is the caller's, everything
     under it is addressed relative to a key that cannot be printed, so
     the honest answer is the nearest parent this repository can name.
+
+    `stored` says where the location came from, and it is the whole of
+    what decides a mapping key (#382). A caller's fragment is text
+    somebody typed a moment ago and nothing has accepted, so a key in it
+    is not said. A location in the STORED half addresses rows the
+    repository is holding, and the key of an entity map there is the
+    identity a write already accepted and the store's own refusals
+    already print in full: `agents.<name>` is the vocabulary the write,
+    the API and this deployment's documents all speak, and a boot
+    refusal saying less about a stored world than the write that stored
+    it is the incoherence this parameter removes.
+
+    Every segment goes out through `without_url_credential`, which is
+    the same door every DISPLAY of a stored identity passes (#381,
+    `views._shown_identity`): a name written before the addressability
+    rule can carry a credential, and a refusal is printed, logged and
+    kept. It is applied to every segment rather than to the ones
+    believed to need it, because that is the shape that stays right when
+    a new kind of segment is admitted; on a name this repository
+    declared it is the identity function.
     """
     safe: list[object] = []
     reached: object = model
     for part in location:
-        reached = _declared(reached, part)
+        reached = _declared(reached, part, stored=stored)
         if reached is None:
             return tuple(safe), True
-        safe.append(part)
+        safe.append(without_url_credential(part) if isinstance(part, str) else part)
     return tuple(safe), False
 
 
-def _declared(annotation: object, part: object) -> object | None:
+def _declared(annotation: object, part: object, *, stored: bool) -> object | None:
     """What one location segment reaches inside an annotation when the
-    segment is a name this repository declared, and None when it is
-    not."""
+    segment is one this repository may say, and None when it is not."""
     annotation = _unwrapped(annotation)
     origin = get_origin(annotation)
     if origin is UnionType or origin is Union:
@@ -1446,7 +1465,7 @@ def _declared(annotation: object, part: object) -> object | None:
         # to the position or the field above it, which is the last thing
         # both branches agree on anyway.
         for branch in get_args(annotation):
-            found = _declared(branch, part)
+            found = _declared(branch, part, stored=stored)
             if found is not None:
                 return found
         return None
@@ -1456,10 +1475,44 @@ def _declared(annotation: object, part: object) -> object | None:
     if origin in (list, tuple, set, frozenset) and isinstance(part, int):
         arguments = get_args(annotation)
         return arguments[0] if arguments else None
-    # A mapping's keys, and anything a scalar cannot be indexed into.
-    # Note which side of the line a mapping falls on: `env`, `headers`
-    # and the entity maps are keyed by whatever was written, so a key
-    # there is request bytes even when it names something real.
+    if stored and isinstance(part, str):
+        # A mapping's key, in a location that came out of the store,
+        # which is the one segment provenance decides (#382).
+        return _entity_valued(annotation)
+    # A mapping's key otherwise, and anything a scalar cannot be indexed
+    # into. Note which side of the line a mapping falls on when nothing
+    # has accepted its keys: `env`, `headers` and the entity maps are
+    # keyed by whatever was written, so a key there is request bytes
+    # even when it names something real.
+    return None
+
+
+def _entity_valued(annotation: object) -> object | None:
+    """What one entry of a mapping holds, when the mapping is a section
+    of stored entities rather than a body somebody filled in.
+
+    Read off the declaration rather than kept as a second list of
+    section names, which would be one more structure to hold in step
+    with the models. What tells the two apart is what the mapping is
+    declared to HOLD: a section holds entities whose shape this
+    repository wrote down (`agents`, `mcp_servers`, `prompt_fragments`,
+    `providers.<stage>`) or a device's list of bindings, and its keys
+    are therefore the identities every write, every read and every URL
+    addresses one by. A mapping of strings to strings is a body the
+    caller filled in, keys and all: an MCP server's `env` and its
+    `headers` are named by whoever the tool belongs to, which is why a
+    key there is never said.
+    """
+    if get_origin(annotation) not in (dict, Mapping):
+        return None
+    arguments = get_args(annotation)
+    if len(arguments) != 2:
+        return None
+    values = _unwrapped(arguments[1])
+    if isinstance(values, type) and issubclass(values, BaseModel):
+        return arguments[1]
+    if get_origin(values) in (list, tuple, set, frozenset):
+        return arguments[1]
     return None
 
 
@@ -1489,7 +1542,7 @@ def json_pointer(segments: Iterable[object]) -> str:
 
 
 def validation_problems(
-    headline: str, model: type[BaseModel], exc: ValidationError
+    headline: str, model: type[BaseModel], exc: ValidationError, *, stored: bool = False
 ) -> tuple[str, tuple[FieldProblem, ...]]:
     """One failed validation in both the renderings a refusal needs: the
     sentence an operator reads, and the field problems a form acts on.
@@ -1509,6 +1562,12 @@ def validation_problems(
     `error["input"]` is never read either, here least of all: it is the
     whole rejected fragment, inline secret and all.
 
+    `stored` is passed through to that walk and says nothing more than
+    where the location came from. Every renderer of a validation
+    refusal in this package is now this one, the boot composition of
+    the stored half included (#382), and the two halves differ in that
+    one word rather than in a renderer each.
+
     It lives beside `safe_location` rather than in the repository that
     used to hold it because a second caller arrived that is not the
     repository: a provider type's own options model is validated by
@@ -1518,7 +1577,7 @@ def validation_problems(
     lines = [headline]
     problems: list[FieldProblem] = []
     for error in exc.errors():
-        location, dropped = safe_location(model, error["loc"])
+        location, dropped = safe_location(model, error["loc"], stored=stored)
         where = ".".join(str(part) for part in location)
         prefix = json_pointer(location)
         for problem in _error_problems(error, dropped):
@@ -3138,6 +3197,7 @@ def defined(what: str, names: Collection[str]) -> str:
     written by whoever wrote the entity, and the names that DID resolve
     were written by this deployment. One helper because five refusals
     say it and a fifth spelling would be a fifth shape for one fact.
+
     """
     return (
         f" (defined: {', '.join(sorted(names))})" if names else f"; no {what} are defined"
