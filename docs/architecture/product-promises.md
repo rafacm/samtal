@@ -36,7 +36,9 @@ The promise is bounded three ways, and the bounds are part of it:
   Upstream also speaks an MQTT-plus-UDP pairing; vinga does not
   promise every transport upstream carries.
 - Its version target is the firmware actually running on boards in
-  the field. Upstream protocol changes are absorbed as shipped
+  the field, a set the
+  [supported-firmware floor record](../adr/2026-09-05-supported-firmware-is-a-declared-floor.md)
+  enumerates. Upstream protocol changes are absorbed as shipped
   devices adopt them, not chased at upstream's commit log.
 - It is a floor, not a ceiling: ordinary conversation, not every
   vinga feature.
