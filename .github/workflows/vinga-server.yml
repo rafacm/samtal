@@ -224,6 +224,129 @@ jobs:
             exit 1
           }
 
+      # The production compose file, held to the promise its guards
+      # make. It is a separate file from the trial one above and it
+      # makes the opposite promise: every required value refuses rather
+      # than defaulting, because a deployment that inherited the
+      # loopback development password by leaving a line out is the
+      # failure this file exists to prevent.
+      #
+      # Both directions, because one successful `config` proves nothing
+      # about a refusal. Each required variable is omitted in turn and
+      # the resolution has to fail; then the complete, obviously dummy
+      # set has to resolve. A guard deleted by accident would pass the
+      # second arm alone.
+      #
+      # The env file goes in `deploy/`, which is compose's project
+      # directory for this file and therefore both the `.env` it
+      # interpolates from and the `.env` the service mounts. Removed
+      # however this step ends, for the reason the trial check's own
+      # trap gives: a stray `.env` in this tree is read by things below
+      # it.
+      - name: The production compose file refuses and resolves
+        working-directory: .
+        run: |
+          set -eu
+          trap 'rm -f deploy/.env' EXIT
+
+          file=deploy/docker-compose.production.yml
+          required="VINGA_IMAGE VINGA_AUTH_SECRET VINGA_API_SECRET VINGA_DB_HOST VINGA_DB_PORT VINGA_DB_NAME VINGA_DB_USER VINGA_DB_PASSWORD"
+
+          # Everything required except the one named, so what is being
+          # tested is that variable's own guard rather than the first
+          # guard in the file.
+          write_env() {
+            : > deploy/.env
+            for name in $required; do
+              if [ "$name" = "${1:-}" ]; then continue; fi
+              printf '%s=%s\n' "$name" "dummy-not-a-real-value" >> deploy/.env
+            done
+          }
+
+          for omitted in $required; do
+            write_env "$omitted"
+            if out=$(docker compose -f "$file" config 2>&1); then
+              echo "::error::$file resolved with $omitted unset; it must refuse"
+              exit 1
+            fi
+            # And the refusal has to be this variable's, named, so a
+            # file that refused for an unrelated reason is not read as
+            # this guard firing.
+            printf '%s\n' "$out" | grep -q "$omitted" || {
+              echo "::error::$file refused without $omitted but did not name it"
+              printf '%s\n' "$out"
+              exit 1
+            }
+          done
+
+          write_env
+          docker compose -f "$file" config --quiet
+
+      # The Kubernetes manifests under deploy/k8s/, held to the schemas
+      # of the resources they claim to be. Seconds of work needing no
+      # service and no cluster, which is why it sits in this lane: what
+      # it catches is the class of mistake nothing else here would, a
+      # misspelled field or an apiVersion that has moved. What it
+      # cannot catch is whether the manifests agree with this server,
+      # which is `tests/unit/test_deploy_manifests.py` in the lane
+      # below.
+      #
+      # A pinned release with its sha256 verified before it runs, the
+      # same discipline every other pinned tool here follows. A new
+      # version's checksum comes from the `CHECKSUMS` file published
+      # beside the release's own assets, at
+      # https://github.com/yannh/kubeconform/releases
+      #
+      # The two Secret templates are fed on stdin rather than named as
+      # paths, and that is not a style choice: kubeconform selects
+      # files by extension, so a path ending `.example` is found to
+      # hold no resource at all and the run exits 0 having checked
+      # nothing (measured). Their names have to end that way, because a
+      # `.yaml` under deploy/k8s/ rides along on
+      # `kubectl apply -f deploy/k8s/` and would install its
+      # placeholder credentials.
+      #
+      # The counts are asserted for the same reason: `Valid: 0` is a
+      # green exit code, so this says how many resources it expects to
+      # have validated rather than trusting that it validated any.
+      - name: The Kubernetes manifests validate
+        working-directory: .
+        env:
+          KUBECONFORM_VERSION: "0.8.0"
+          KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+        run: |
+          set -eu
+          curl -fsSL -o "$RUNNER_TEMP/kubeconform.tar.gz" \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  ${RUNNER_TEMP}/kubeconform.tar.gz" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP" kubeconform
+          kubeconform="$RUNNER_TEMP/kubeconform"
+
+          # `-summary` alongside `-output json` is what puts the counts
+          # in the document; on its own `json` reports resources and no
+          # totals.
+          valid() {
+            "$kubeconform" -strict -summary -output json "$@" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["summary"]["valid"])'
+          }
+
+          expected=$(find deploy/k8s -maxdepth 1 -name '*.yaml' | wc -l)
+          "$kubeconform" -strict -summary deploy/k8s/
+          counted=$(valid deploy/k8s/)
+          [ "$counted" -eq "$expected" ] || {
+            echo "::error::kubeconform validated $counted of the $expected manifests under deploy/k8s/"
+            exit 1
+          }
+
+          for template in deploy/k8s/secret.yaml.example deploy/k8s/secret-init.example; do
+            "$kubeconform" -strict -summary - < "$template"
+            counted=$(valid - < "$template")
+            [ "$counted" -eq 1 ] || {
+              echo "::error::kubeconform found nothing to validate in $template"
+              exit 1
+            }
+          done
+
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
