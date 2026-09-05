@@ -1094,7 +1094,8 @@ apply` builds the next snapshot and swaps to it instead:
 $ vinga-server config mcp-server set weather -f weather.yaml
 wrote mcp-server weather
 This is stored and not yet serving: the running server goes on
-serving what it already has until the stored ...
+serving what it already has until the stored configuration is
+installed on it.
 `vinga apply` installs the stored configuration on the running
 server, and `vinga diff` lists everything pending.
 $ vinga-server config agent set house -f house.yaml
