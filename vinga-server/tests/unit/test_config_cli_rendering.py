@@ -46,7 +46,7 @@ from vinga_server.config.cli import (
     nested,
     outcomes,
 )
-from vinga_server.config.entities import APPLY_NOTICE as APPLY_NOTICE_TEXT
+from vinga_server.config.entities import APPLY_NOTICE
 from vinga_server.config.loader import ConfigError, ReloadInProgressError
 from vinga_server.config.responses import (
     AgentsReload,
@@ -1004,7 +1004,7 @@ def test_what_an_import_wrote_is_read_before_the_boundary_under_it(run) -> None:
         written = shared.getvalue().decode("utf-8")
 
     assert WROTE in written
-    assert written.index(WROTE) < written.index(entities.APPLY_NOTICE)
+    assert written.index(WROTE) < written.index(entities.APPLY_NOTICE.sentence)
 
 
 def test_a_refused_document_is_the_whole_answer(
@@ -1096,7 +1096,7 @@ def _entry(**overrides: object) -> dict[str, object]:
         "section": "agents",
         "identity": "sam",
         "outcome": "wrote",
-        "notice": APPLY_NOTICE_TEXT,
+        "notice": APPLY_NOTICE.sentence,
     } | overrides
 
 
@@ -1172,7 +1172,7 @@ def test_an_unprintable_identity_never_leaves_as_an_exception() -> None:
 @pytest.mark.parametrize(
     ("outcome", "notice"),
     [
-        pytest.param("unchanged", APPLY_NOTICE_TEXT, id="unchanged-with-a-boundary"),
+        pytest.param("unchanged", APPLY_NOTICE.sentence, id="unchanged-with-a-boundary"),
         pytest.param("wrote", None, id="wrote-with-none"),
     ],
 )

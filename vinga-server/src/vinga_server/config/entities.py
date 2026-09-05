@@ -18,11 +18,14 @@ scalar rather than an entity, written with their own verbs and read
 without an envelope (`Setting`). One registry tuple per tier, in the
 order the reference documents them.
 
-Imports the models and the standard library, and nothing else,
-deliberately: every consumer sits above this, so a descriptor stays
-readable by the one that renders documentation on a machine with no
-database, no encryption key and no FastAPI, which is exactly what
-`docgen` is.
+Imports the models, the wire vocabulary and the standard library, and
+nothing else, deliberately: every consumer sits above this, so a
+descriptor stays readable by the one that renders documentation on a
+machine with no database, no encryption key and no FastAPI, which is
+exactly what `docgen` is. `responses` is on that list because a notice
+carries the boundaries it announces as the tokens the API publishes,
+and it imports pydantic and nothing of this server, which is the
+property `test_cli_import_weight.py` holds it to.
 
 Every fact is declared here, in the entry a reader meets the kind at,
 and nothing is installed onto a descriptor afterwards. That is what the
@@ -64,6 +67,7 @@ from vinga_server.config.models import (
     is_secret_option,
 )
 from vinga_server.config.provider_options import declared_options
+from vinga_server.config.responses import Applies
 
 # Where the example fragments and the configuration file live, relative
 # to the committed reference (docs/reference/domain-config.md). Printed
@@ -128,7 +132,29 @@ NO_SUCH_AGENT = "agents: no agent of that name exists"
 NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 
 
-# When a write takes effect. Five sentences, because there are five
+@dataclass(frozen=True, kw_only=True)
+class Notice:
+    """When a write takes effect: the boundaries it is waiting at, and
+    the sentence that says so.
+
+    One structure rather than two, because the two always were one fact.
+    The sentence is what a person reads and the tokens are what a
+    program branches on, and anything that had only the sentence had to
+    recover the boundary by looking for a phrase in it, which is a
+    second encoding of this pairing held together by a substring search.
+
+    `applies` is the vocabulary the comparison read already publishes,
+    so what a write announces and what a diff announces are one closed
+    set and a consumer learns it once. A tuple because a binding to an
+    agent this server is not serving yet is waiting at two boundaries at
+    the same time.
+    """
+
+    applies: tuple[Applies, ...]
+    sentence: str
+
+
+# When a write takes effect. Five notices, because there are five
 # answers, and each is a fact of what was written rather than of the
 # route or the command that wrote it: the descriptors below name one
 # each, and the two write paths choose between them where the answer
@@ -143,17 +169,23 @@ NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 # needs a default that promises nothing, and because a setting that
 # genuinely waits for a start should have one true sentence to be
 # answered with when it gets a write route.
-RESTART_NOTICE = (
-    "This applies at the next server start: the configuration is read once at boot."
+RESTART_NOTICE = Notice(
+    applies=(Applies.RESTART,),
+    sentence=(
+        "This applies at the next server start: the configuration is read once at boot."
+    ),
 )
 
 # The first exception: a running server reads device bindings and the
 # default agent as a device asks for them, so binding a board is done
 # with the board in front of you rather than at the next maintenance
 # window.
-BINDING_NOTICE = (
-    "This applies at the device's next OTA check or connection: a running server "
-    "reads device bindings as it needs them, so no restart is needed."
+BINDING_NOTICE = Notice(
+    applies=(Applies.CHECK_IN,),
+    sentence=(
+        "This applies at the device's next OTA check or connection: a running server "
+        "reads device bindings as it needs them, so no restart is needed."
+    ),
 )
 
 # The second, and unlike the first it is asked for rather than noticed:
@@ -173,10 +205,13 @@ BINDING_NOTICE = (
 # converges at are still true and still published; they moved to
 # `vinga apply --help` and to the domain-config reference, which is
 # where somebody asking that question is already looking.
-APPLY_NOTICE = (
-    f"This is stored and not yet serving: `{PROGRAM} apply` installs the stored "
-    f"configuration on the running server, and `{PROGRAM} diff` lists everything "
-    "pending."
+APPLY_NOTICE = Notice(
+    applies=(Applies.RELOAD,),
+    sentence=(
+        f"This is stored and not yet serving: `{PROGRAM} apply` installs the stored "
+        f"configuration on the running server, and `{PROGRAM} diff` lists everything "
+        "pending."
+    ),
 )
 
 # The third, for the binding whose agent this server is not serving
@@ -185,10 +220,13 @@ APPLY_NOTICE = (
 # next check-in, and the agent it names arrives at the apply that
 # installs it rather than at a restart, which is what an operator who
 # has just written both would otherwise be sent away to do.
-BINDING_UNSERVED_NOTICE = (
-    "The binding applies at the device's next OTA check or connection, but this "
-    f"server is not serving the agent it names yet: `{PROGRAM} apply` installs the "
-    "stored agents, and the device reaches it at the check-in after that."
+BINDING_UNSERVED_NOTICE = Notice(
+    applies=(Applies.RELOAD, Applies.CHECK_IN),
+    sentence=(
+        "The binding applies at the device's next OTA check or connection, but this "
+        f"server is not serving the agent it names yet: `{PROGRAM} apply` installs the "
+        "stored agents, and the device reaches it at the check-in after that."
+    ),
 )
 
 # The fourth, for a server that was handed its configuration rather than
@@ -196,10 +234,14 @@ BINDING_UNSERVED_NOTICE = (
 # this process serves reads the store these writes land in, so neither
 # of the two live sentences above is true of them, and the one thing
 # that is true is that the write is stored.
-SNAPSHOT_NOTICE = (
-    "This is stored and takes effect when a server starts from this store: the server "
-    "answering this request serves a configuration it was given rather than one it read "
-    "from a store, so nothing it is running reads what was just written."
+SNAPSHOT_NOTICE = Notice(
+    applies=(Applies.STORE_BOOT,),
+    sentence=(
+        "This is stored and takes effect when a server starts from this store: the "
+        "server answering this request serves a configuration it was given rather than "
+        "one it read from a store, so nothing it is running reads what was just "
+        "written."
+    ),
 )
 
 
@@ -325,8 +367,10 @@ class EntityDescriptor(DocumentedShape):
     #
     # Required, because every commanded kind has an answer: a write that
     # could not say when it applies is the one thing the boot-time
-    # snapshot can catch an operator with.
-    notice: str
+    # snapshot can catch an operator with. Both halves of the answer,
+    # because the sentence and the boundaries it announces are one fact
+    # (`Notice` above).
+    notice: Notice
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -747,6 +791,7 @@ __all__ = [
     "DocumentedShape",
     "EntityDescriptor",
     "NestedShape",
+    "Notice",
     "Setting",
     "addressed",
     "descriptor",
