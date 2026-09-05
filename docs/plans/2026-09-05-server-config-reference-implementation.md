@@ -269,9 +269,10 @@ declared; the renderer and its suite; the `HALF` selector with the
 regenerated `cli.md`; the committed page with its CI step and freshness
 pin; the domain preamble pointed at the new page, regenerating
 `domain-config.md`; the cross-links and the changelog; the CLI's import
-inventory; this record with the milestone tick and the census; and the
+inventory; this record with the milestone tick and the census; the
 live lane's refusal row, which the integration lane turned up after the
-tick and which is the eighth deviation below.
+tick and which is the eighth deviation below; and the regeneration the
+rebase onto merged M1 called for, below.
 
 **`config/models.py` is the one home of the database environment
 names.** `DATABASE_ENV_PREFIX` and the four `DATABASE_ENV_NAMES` came
@@ -418,31 +419,63 @@ in both directions.
 **A docstring's angle brackets reach the page as written.** The
 onboarding section's prose and the discoverability refusal both contain
 `/x/<key>/` outside a code span, which a browser rendering of the
-markdown drops as an unknown tag. Left as it is deliberately: the fix is
-either editing prose M1 wrote or escaping markup inside the shared
-`paragraph`, neither of which this milestone is, and the committed file
-is read as a file at least as often as it is rendered. Worth a follow-up
-if the browser rendering is the surface that matters.
+markdown drops as an unknown tag. Looked at twice and left alone both
+times. The prose is `models.py`'s, merged, so it is not this milestone's
+to edit; and neither fix on the renderer's side is the generic one it
+would have to be. Wrapping `<word>` runs in backticks is a rule about
+one token shape, needs code-span tracking not to double-wrap what is
+already spanned, and turns `/x/<key>/` into a string with a code span
+inside it; escaping to `&lt;` is generic but degrades the surface this
+page is mostly read on, which is the file. Worth a follow-up only if the
+browser rendering becomes the surface that matters, and then for every
+generated page at once rather than this one.
 
 **The example file's coverage guard needed nothing.** `config.example.yaml`
 gained a sentence in its header saying what it is and where the complete
 contract is; `test_config_examples.py`, which insists the file mentions
 every field, is unaffected.
 
+### The rebase onto merged M1
+
+M1 merged as PR #400 with five commits from its own review round, four
+of which rewrote docstrings this page renders as section prose. The
+branch was rebased onto that with `git rebase --onto origin/main`, and
+the twelve commits replayed with two conflicts, both in the commit that
+records a milestone: this document, where M1's own review-round section
+met the M2 section written under it (both kept, M1's round above), and
+the census manifest, which both sides had regenerated (resolved by
+taking one side whole and regenerating at the end, never by merging its
+text).
+
+Then the page itself, which is the point of the exercise: the models
+moved under it, so `uv run vinga-server config reference server`
+produced different bytes and they are committed as their own change.
+Four sections moved, one per fix: `server` (what a change to each half
+reaches without a restart, and no CREDENTIAL rather than no secret,
+with the two path fields that are sensitive without looking it),
+`server.onboarding` (which key the section is about), `server.capture`
+and `server.conversations` (the two storage switches' shape). A
+regeneration that had produced no diff would have meant a stale
+interpreter or a wrong base rather than a page that happened to agree.
+
 ### Verification
 
-Run from `vinga-server/`, against the development Postgres on 5432, with
-`PYTHONDONTWRITEBYTECODE=1` exported for everything run outside pytest.
+Run from `vinga-server/` on the rebased tree, against the development
+Postgres on 5432, with `PYTHONDONTWRITEBYTECODE=1` exported for
+everything run outside pytest.
 
 - `uv run ruff check .`: `All checks passed!`
-- `uv run pytest tests/unit -q` (serial): `5558 passed, 19 skipped in
-  588.09s`.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`, which is how CI
-  runs the lane, on the finished tree: `5558 passed, 19 skipped in
-  85.69s`.
-- `uv run pytest tests/integration -q`: `243 passed in 354.36s`, after
-  the refusal row above; the run before it had that one row's two cases
-  red, which is how the changed behavior was found.
+  runs the lane: `5558 passed, 19 skipped in 84.42s`. The same lane run
+  serially before the rebase, on the same set of cases: `5558 passed, 19
+  skipped in 588.09s`.
+- `uv run pytest tests/integration -q`: `243 passed in 353.74s`. The run
+  before the live lane's refusal row had that one row's two cases red,
+  which is how the changed behavior was found.
+- The five freshness pins run by name (`domain-config.md`, `cli.md`, the
+  recipes, `api-openapi.json` and the new `server-config.md`):
+  `4 passed` for the four in the config suites and `32 passed` for the
+  OpenAPI file they are not in.
 - `python3 scripts/check_doc_links.py .` from the repository root:
   `checked 195 files, 0 failures`.
 - The census manifest went stale, as the plan's risk list predicted: the
@@ -450,7 +483,8 @@ Run from `vinga-server/`, against the development Postgres on 5432, with
   workflow's new step quote command spellings. Regenerated with
   `uv run python -m tests.unit.test_command_spellings` after staging the
   documents, never by hand, in the same commit; and again with the live
-  lane's refusal row, since the manifest records a file and a line.
+  lane's refusal row and again after the rebase, since the manifest
+  records a file and a line and both moved each time.
   `uv run pytest tests/unit/test_command_spellings.py -q`: `48 passed`.
 - The five generated artifacts are what their generators render:
   `domain-config.md` (regenerated with the preamble change),
