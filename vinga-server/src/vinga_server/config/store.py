@@ -1684,7 +1684,17 @@ def _read_domain(connection: Connection) -> DomainConfig:
     except ValidationError as exc:
         # The sentence only, for the reason `_stored` records: unreadable
         # stored rows are not the caller's fields to correct.
-        problem, _ = validation_problems(_UNREADABLE_ROWS, DomainConfig, exc)
+        #
+        # Stored, and said so: this is the one refusal here whose
+        # headline names no entry, because it is about the assembly
+        # rather than about one row, so the identity of the row that
+        # will not read is in the LOCATION or nowhere (#382). The
+        # per-row refusals below need no such word: each is given its
+        # entry's location already, and the walk under it starts inside
+        # a body, where there is no identity to say.
+        problem, _ = validation_problems(
+            _UNREADABLE_ROWS, DomainConfig, exc, stored=True
+        )
     if domain is None:
         raise StorageError(problem)
 

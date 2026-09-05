@@ -1124,10 +1124,23 @@ def test_a_wrong_agent_default_is_reported_once_against_its_own_layer() -> None:
 
 
 def test_agent_defaults_reject_a_prompt() -> None:
-    # A prompt is a persona's identity; inheriting one silently would make
-    # two agents the same agent.
-    with pytest.raises(ConfigError, match="agent_defaults.prompt"):
+    """A prompt is a persona's identity; inheriting one silently would
+    make two agents the same agent.
+
+    The layer is named and the key is not, which is what the write of
+    the same fragment has always answered and what the boot answers
+    since #382: `prompt` here is a key somebody typed rather than a
+    field this repository declared under `agent_defaults`, and a key is
+    as good a place to paste a credential as a value. Which key was
+    refused is the one thing the sentence leaves out, so it says which
+    rule the entry broke instead.
+    """
+    with pytest.raises(ConfigError) as excinfo:
         load_config_from_data({"agent_defaults": {"prompt": "You are helpful."}})
+
+    message = str(excinfo.value)
+    assert f"agent_defaults: {UNRECOGNIZED_KEY_REFUSED}" in message
+    assert "prompt" not in message
 
 
 def test_inline_secret_is_rejected_with_env_hint() -> None:
@@ -1200,6 +1213,16 @@ def test_env_reference_options_are_allowed() -> None:
 
 
 def test_blank_identifiers_are_rejected() -> None:
+    """A name has to be a name, in every section keyed by one.
+
+    The location stops at the offending key rather than carrying
+    pydantic's `[key]` marker behind it (#382). The marker says the
+    error is about the key and not about a field under it, which is
+    what the location already says here: the segment after the section
+    IS the name, and it is empty. Everything the walk keeps is either
+    this repository's own vocabulary or a stored identity, and `[key]`
+    is neither.
+    """
     data = {
         "providers": {"llm": {"": {"type": ""}}},
         "agents": {"": {}},
@@ -1208,10 +1231,11 @@ def test_blank_identifiers_are_rejected() -> None:
     with pytest.raises(ConfigError) as excinfo:
         load_config_from_data(data)
     message = str(excinfo.value)
-    assert "providers.llm..[key]" in message
+    assert "  - providers.llm.: String should have at least 1 character" in message
     assert "providers.llm..type" in message
-    assert "agents..[key]" in message
+    assert "  - agents.: String should have at least 1 character" in message
     assert "default_agent" in message
+    assert "[key]" not in message
 
 
 def test_whitespace_provider_reference_is_rejected() -> None:
