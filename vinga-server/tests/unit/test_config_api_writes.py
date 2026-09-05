@@ -166,7 +166,7 @@ def test_a_write_says_what_it_did_and_when_it_applies(
 
     assert response.status_code == 200
     answer = response.json()
-    assert set(answer) == {"wrote", "notice"}
+    assert set(answer) == {"wrote", "notice", "applies"}
     assert isinstance(answer["wrote"], str) and answer["wrote"]
     assert boundaries(answer["notice"]) == _expected_boundaries(method, path)
 
@@ -303,7 +303,7 @@ def test_an_agent_write_carries_the_one_apply_sentence(
     body = answer.json()
     assert body["wrote"] == "agent sam"
     assert boundaries(body["notice"]) == {RELOAD}
-    assert body["notice"] == APPLY_NOTICE
+    assert body["notice"] == APPLY_NOTICE.sentence
 
 
 # The shape of the sentence, and not only the boundary in it
@@ -319,15 +319,15 @@ def test_an_agent_write_carries_the_one_apply_sentence(
 
 def test_the_per_write_notice_is_one_line_naming_both_commands() -> None:
     """The shortening, pinned as behavior rather than as prose."""
-    assert "\n" not in APPLY_NOTICE
-    assert f"{PROGRAM} apply" in APPLY_NOTICE
-    assert f"{PROGRAM} diff" in APPLY_NOTICE
+    assert "\n" not in APPLY_NOTICE.sentence
+    assert f"{PROGRAM} apply" in APPLY_NOTICE.sentence
+    assert f"{PROGRAM} diff" in APPLY_NOTICE.sentence
 
 
 def test_the_unserved_binding_notice_names_the_command_that_installs() -> None:
     """The one sentence that names two boundaries at once, held to
     naming the command that crosses the second of them."""
-    assert f"{PROGRAM} apply" in BINDING_UNSERVED_NOTICE
+    assert f"{PROGRAM} apply" in BINDING_UNSERVED_NOTICE.sentence
 
 
 def test_the_three_clocks_are_not_in_a_per_write_sentence() -> None:
@@ -337,7 +337,7 @@ def test_the_three_clocks_are_not_in_a_per_write_sentence() -> None:
     prompted #371 printed them six times.
     """
     for clock in ("next activation", "next utterance", "next conversation"):
-        assert clock not in APPLY_NOTICE, clock
+        assert clock not in APPLY_NOTICE.sentence, clock
 
 
 # The third sentence: what a reload applies

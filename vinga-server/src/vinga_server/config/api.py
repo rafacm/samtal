@@ -2390,7 +2390,7 @@ def _writes(api: FastAPI) -> None:
         loaded: LoadedAgentsDep,
         pending: PendingDep,
         snapshot_only: SnapshotOnlyDep,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Bind the device showing this activation code, and retire the
         code.
 
@@ -2480,7 +2480,7 @@ def _writes(api: FastAPI) -> None:
         loaded: LoadedAgentsDep,
         pending: PendingDep,
         snapshot_only: SnapshotOnlyDep,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Bind one device to one or more agents. The MAC is normalized
         before it is written, so the two spellings reach one row.
 
@@ -2514,7 +2514,7 @@ def _writes(api: FastAPI) -> None:
     )
     def remove_device(
         mac: str, store: StoreDep, snapshot_only: SnapshotOnlyDep
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Remove one device's binding, which with no default agent set
         means the device is refused at the handshake. Live, with no
         agent to be loaded or not: the device stops being served at its
@@ -2537,7 +2537,7 @@ def _writes(api: FastAPI) -> None:
         loaded: LoadedAgentsDep,
         pending: PendingDep,
         snapshot_only: SnapshotOnlyDep,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Set the agent an unbound device reaches. Read by the running
         server the way a binding is, so it applies to the next device
         that asks unless the agent it names was written since boot."""
@@ -2559,7 +2559,7 @@ def _writes(api: FastAPI) -> None:
     )
     def remove_default_agent(
         store: StoreDep, snapshot_only: SnapshotOnlyDep
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Unset it, leaving the devices map as the allowlist.
         Idempotent, like the CLI: there is no such thing as a default
         agent that was already not set. Live, like the delete above:
@@ -2663,7 +2663,7 @@ def _bounded(request: Request) -> None:
 # entity routes write, so it answers the same sentences. The two
 # settings are absent, because theirs depend on what the running server
 # is serving and are computed per entry below.
-_SECTION_NOTICE: dict[str, str] = {
+_SECTION_NOTICE: dict[str, entities.Notice] = {
     descriptor.moved_key: descriptor.notice for descriptor in entities.ENTITIES
 }
 
@@ -2679,17 +2679,22 @@ def _applied(
     names and on whether it reads a store at all, which is what the
     single writes ask the same two dependencies about.
     """
+    notice = _applied_notice(entry, loaded, snapshot_only) if entry.wrote else None
     return {
         "section": entry.section,
         "identity": entry.identity,
         "outcome": "wrote" if entry.wrote else "unchanged",
-        "notice": _applied_notice(entry, loaded, snapshot_only) if entry.wrote else None,
+        # Both halves of the one notice, or neither: an entry that wrote
+        # nothing is waiting at no boundary, which the empty tuple says
+        # and the null sentence beside it says again.
+        "notice": notice.sentence if notice is not None else None,
+        "applies": notice.applies if notice is not None else (),
     }
 
 
 def _applied_notice(
     entry: Applied, loaded: Collection[str], snapshot_only: bool
-) -> str:
+) -> entities.Notice:
     """When one applied entry takes effect: the settings' notice where
     it depends on the running server, and the kind's own otherwise."""
     if entry.section in _SECTION_NOTICE:
@@ -2697,16 +2702,21 @@ def _applied_notice(
     return _binding_notice(_unloaded(entry.agents, loaded), snapshot_only)
 
 
-def _acknowledge(what: str, notice: str = RESTART_NOTICE) -> dict[str, str]:
-    """What a write answers with. The start sentence is the default
-    because it promises nothing: no kind this API writes carries it any
-    more, so a new write route that forgot to name its own boundary
-    reads as conservative rather than as a promise the server cannot
-    keep."""
-    return {"wrote": what, "notice": notice}
+def _acknowledge(what: str, notice: entities.Notice = RESTART_NOTICE) -> dict[str, Any]:
+    """What a write answers with: what it did, and when it takes effect
+    in both the words a person reads and the tokens a client branches
+    on.
+
+    The start notice is the default because it promises nothing: no kind
+    this API writes carries it any more, so a new write route that
+    forgot to name its own boundary reads as conservative rather than as
+    a promise the server cannot keep."""
+    return {"wrote": what, "notice": notice.sentence, "applies": notice.applies}
 
 
-def _binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) -> str:
+def _binding_notice(
+    unloaded: Sequence[str] = (), snapshot_only: bool = False
+) -> entities.Notice:
     """When a device write takes effect, which depends on two things.
 
     The binding itself is live. The agent it names may not be: a server
