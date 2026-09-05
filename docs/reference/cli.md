@@ -135,7 +135,7 @@ vinga --version
 ```
 
 That leaves `vinga` on the PATH, which is what the
-[quick start](../../README.md#getting-started) types from its second
+[Getting Started](../../README.md#getting-started) types from its second
 step onward. `--version` is what proves the install, because it needs
 nothing arranged: every command that reads or writes configuration is a
 request, and [Reaching a server](#reaching-a-server) below is the

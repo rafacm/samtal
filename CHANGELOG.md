@@ -20,6 +20,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   choice among engines, delivered behind stable slots, never by making
   the pipeline machinery the product.
 
+### Changed
+
+- **The README front page leads with the mix.** The identity record
+  applied to the shopfront. A new "What is vinga?" opener: a
+  self-hostable home for voice agents, where agents live on the server
+  and move between boards, and every stage is mixed and matched. The
+  origin story shrinks to three sentences that no longer restate the
+  opener, and the features list turns user-facing and reorders to
+  match: the cast of agents first, your-server-only closing, engine
+  and provider names linked, the simulator bullet removed until the
+  simulator is polished. Quick Start is renamed Getting Started and
+  rewritten against the current CLI: one `vinga import` document
+  instead of seven writes, device authentication on by default with
+  `VINGA_SERVER__PUBLIC_URL` and a LAN address check, and the Ollama
+  keep-alive trap called out. The Hardware section (now Supported
+  Hardware) and Documentation move below Getting Started, and the
+  GitHub repository description and topics moved with it all.
+
 ## 2026-09-04
 
 ### Added

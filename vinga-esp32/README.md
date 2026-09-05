@@ -16,7 +16,7 @@ runtime. Planned customizations:
 
 ## Target hardware
 
-The same three boards the [project README](../README.md#hardware) lists, in the same order. The Touch-LCD-1.54 is the board vinga is developed and tested on; the other two are targets.
+The same three boards the [project README](../README.md#supported-hardware) lists, in the same order. The Touch-LCD-1.54 is the board vinga is developed and tested on; the other two are targets.
 
 | Board | Display | Audio | Links | Status |
 |---|---|---|---|---|

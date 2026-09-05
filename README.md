@@ -5,8 +5,7 @@
 # vinga 💬
 
 **vinga** *(interj.)* Catalan for "*come on, let's go*".<br>
-Come on, speak, on your own terms.
-
+Come on, speak, on your own terms.<br>
 Conversational AI. [Sweded](https://youtu.be/i5Rd8x4OJoY).
 
 [![Server CI](https://github.com/rafacm/vinga/actions/workflows/vinga-server.yml/badge.svg)](https://github.com/rafacm/vinga/actions/workflows/vinga-server.yml)
@@ -15,106 +14,138 @@ Conversational AI. [Sweded](https://youtu.be/i5Rd8x4OJoY).
 [![ESP-IDF v6.0.x](https://img.shields.io/badge/ESP--IDF-v6.0.x-E7352C)](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
-[What is it?](#what-is-vinga) • [Features](#features) • [Hardware](#hardware) • [Getting Started](#getting-started) • [Documentation](#documentation) • [Credits](#credits) • [Changelog](#changelog)
+[What is it?](#what-is-vinga) • [Features](#features) • [Getting Started](#getting-started) • [Hardware](#supported-hardware) • [Documentation](#documentation) • [Credits](#credits) • [Changelog](#changelog)
 
 </div>
 
 > [!WARNING]
-> **Early development.** This README describes the intended v1. Sections marked 🚧 are not implemented yet. The loop works end to end today: a Waveshare ESP32-S3 running stock upstream firmware, talking to vinga's own server, with a fully local pipeline (wake word, speech recognition, LLM, speech synthesis) or the cloud providers you configure.
+> **Early development.** This README describes the intended v1. Sections marked 🚧 are not implemented yet. Everything else works today: the conversation loop runs end to end on real hardware, fully local or with the cloud providers you configure.
 
 ## What is vinga?
 
-![A Waveshare ESP32-S3-Touch-LCD-1.54 in a white case, standing on a weathered wooden rail with a blurred green garden behind it. Its square screen shows the stock xiaozhi firmware's provisioning mode: a WiFi icon, the name of the access point the board is broadcasting, and a line telling you to open it in a browser.](assets/vinga-touch-lcd-1.54.jpg)
+vinga is a self-hostable home for voice agents. Define as many as you like on a conversation server you run yourself, and talk to them through small ESP32-S3 boards with a microphone, a speaker, and a display. Agents live on the server, not in the hardware. Several can share one board, and an agent can move from board to board. And every stage of the conversation (listening, transcribing, thinking, speaking) is a provider you mix and match: local engines, cloud services, or any blend of the two, down to a conversation that runs entirely on your own hardware.
 
-*A Touch-LCD-1.54 on stock upstream firmware, broadcasting its own access point and waiting to be told which network to join and which server to call.*
+![A Waveshare ESP32-S3-Touch-LCD-1.54 in a white case, standing on a weathered wooden rail with a blurred green garden behind it.](assets/vinga-touch-lcd-1.54.jpg)
 
-> You take what you like and mix it with some other things you like and make a new thing. *Your* thing!<br>
+> You take what you like and mix it with some other things you like and make a new thing. *Your* thing!
 > -- from the movie [Be Kind Rewind (2008)](https://youtu.be/i5Rd8x4OJoY)
 
-We took two projects we liked, the [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) firmware and the [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) conversation server, and some devices we also liked, the small [Waveshare ESP32-S3 boards](#hardware) that put a microphone, a speaker, and a display on your desk. We reimplemented what we wanted to make our own (the **conversation server**, rebuilt from the [protocol docs](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md) up, in Python you run yourself), kept what was already excellent (the firmware's board support, audio pipeline, and device protocol), and mixed in the things *you* like.
-
-The new thing is a self-hostable voice agent where the device talks to **your server** and nothing else. Every stage is a **pluggable provider**: bring your own LLM (a local [Ollama](https://ollama.com), Anthropic, or any OpenAI-compatible endpoint), your own voices, and your own tools via [MCP](https://modelcontextprotocol.io). The whole loop (wake word → speech recognition → language model → speech synthesis) [can run entirely on your own hardware](docs/architecture/product-promises.md#a-fully-local-deployment-is-first-class), and wherever you choose a cloud provider instead, it is exactly that, your choice: your keys, through your server, swappable at will. No vendor cloud, no account, nobody else's activation. Your thing.
+We took what we liked: the [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) firmware, whose board support, audio pipeline, and device protocol were already excellent, and the small [Waveshare ESP32-S3 boards](#supported-hardware) it runs on. From [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) we took an idea rather than code: the proof that a self-hosted backend was possible. Then we made the **conversation server** our own: a new implementation in Python, written from the firmware's [protocol docs](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md) up, with the board talking to **your server** and nothing else.
 
 ## Features
 
-The design premise is a [**thin device and a smart server**](docs/architecture/guidelines.md#thin-device-smart-server): the firmware's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Customization lives server-side, in Python, not in C++ you have to reflash.
+One premise makes all of this possible, a [**thin device and a smart server**](docs/architecture/guidelines.md#thin-device-smart-server): the board's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Changing what vinga does means changing server configuration, never reflashing a board.
 
-- **Your server is the only one it talks to.** The board speaks Opus over a WebSocket, the one transport v1 carries, to an address you chose. No account to create, no vendor cloud between the two, no phone app in the way: point the board at your server once and it connects. Run that server on a laptop while you are trying it, or ship the published multi-arch container image to your own infrastructure.
-- **A conversation that needs no API key at all.** Silero, faster-whisper, [Ollama](https://ollama.com) and Piper make a loop that [runs entirely on your own hardware](docs/architecture/product-promises.md#a-fully-local-deployment-is-first-class), works today, bills nothing per word, and is heard nowhere else.
-- **Every stage is swappable, the language model included.** Point the LLM at that local Ollama, at Anthropic, or at any OpenAI-compatible endpoint. Swap either half of the voice for a cloud engine when a better voice, or an ear that copes with a noisy room, is worth more to you than a fully private one.
-- **Configurable agents.** Define several, each with its own prompt, providers, and tools; bind devices to them, and switch mid-conversation by asking. One device can be a whole cast.
-- **Tools via MCP, on both sides.** Attach any MCP server as assistant tools; the device itself exposes its controls (volume, brightness, screen) as MCP tools over the same channel.
-- **Speech in, speech out, everything visible.** Recognized text and responses render on the device display as the conversation happens.
-- **Try it without hardware.** `vinga simulator` is a simulated board in the CLI: it checks in, claims itself, and holds a conversation, with the terminal standing in for the display.
-
-## Hardware
-
-Any board xiaozhi-esp32 supports can work, since the device runs upstream's firmware. These three are the ones vinga cares about, and they are not in the same state. The Touch-LCD-1.54 at the top is the board vinga is developed and tested on; the two under it are targets, with a guide each and no hands-on run behind them yet.
-
-| Board | Display | Audio | Links | Status |
-| --- | --- | --- | --- | --- |
-| [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) | 240×240 LCD, touch | dual-mic with hardware echo cancellation | [guide](docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | [**working** (upstream firmware)](docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) |
-| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) | 480×480 AMOLED, touch | dual-mic with hardware echo cancellation | [guide](docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned 🚧 |
-| [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) | 200×200 e-paper | single mic | [guide](docs/devices/waveshare-esp32-s3-epaper-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned 🚧 |
+- 🎭 **A cast of agents, not one assistant.** Define as many as you like, each with its own personality, providers, and tools. Bind boards to them, switch mid-conversation just by asking, and let an agent follow you from board to board. One device can be a whole cast.
+- 🎛️ **Mix and match every stage.** Who listens, who transcribes, who thinks, who speaks: each is a provider you pick, a local [Ollama](https://ollama.com), [Anthropic](https://www.anthropic.com), any [OpenAI-compatible endpoint](https://developers.openai.com/api/reference/chat-completions/overview), a cloud voice or a local one, and swap without touching the rest. Choose a better voice, or an ear that copes with a noisy room, the day you want one.
+- 🏠 **Fully local when you want it.** [Silero](https://github.com/snakers4/silero-vad), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [Ollama](https://ollama.com) and [Piper](https://github.com/OHF-Voice/piper1-gpl) make a conversation that [runs entirely on your own hardware](docs/architecture/product-promises.md#a-fully-local-deployment-is-first-class): no API key anywhere, nothing billed per word, and heard nowhere else.
+- 🧰 **Tools via [MCP](https://modelcontextprotocol.io), on both sides.** Give your agents tools from any MCP server, and the board offers its own controls (volume, brightness, screen) as tools over the same channel, so you can ask it to turn itself down.
+- 💬 **Speech in, speech out, everything visible.** Recognized text and responses render on the device display as the conversation happens.
+- 🔒 **Your server is the only one it talks to.** Point a board at your server once and it connects: no account to create, no vendor cloud in between, no phone app in the way. Run the server on a laptop while you are trying it, or deploy the published container image to your own infrastructure.
 
 ## Getting Started
 
-At the end of this you press a button on a board across the room, say something, and a model running on your own machine answers out loud. Once it is set up, nothing you say leaves the house: the transcription, the model and the voice all run on your hardware, and no part of a conversation is sent anywhere.
-
-Eight steps, numbered from zero. The device runs upstream's prebuilt xiaozhi firmware; the server is vinga's and ships as a container image, configured over the API it serves with the `vinga` command line. [`vinga-server/README.md`](vinga-server/README.md) has every option, the security defaults, and the container details.
+Here is a path to get a [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) talking to a vinga server and nothing you say leaves your computer: the transcription, the model and the voice all run locally.
 
 ### Prerequisites
 
-- **[Ollama](https://ollama.com)**, which serves the model in step 0.
-- **Docker** with Compose v2, for the two containers of step 1.
-- **[uv](https://docs.astral.sh/uv/)**, for the CLI of step 2.
-- **A board** from the Hardware table, and a USB cable for the ones whose image has no Custom OTA URL field.
+- **[Ollama](https://ollama.com)**, which serves the LLM model.
+- **Docker** with Compose v2, for the two containers.
+- **[uv](https://docs.astral.sh/uv/)**, for the CLI.
+- **A Waveshare board** from the Supported Hardware table (see below) and a USB cable to connect the board to your computer.
 - **`curl`, `openssl` and `git`**, which steps 1 and 2 invoke directly. macOS ships all three, which is why they went unnoticed while this was being walked rather than read; a stripped-down Linux may not have them.
 
-**0. Pull the model.** The stack in step 3 is fully local, and the one piece of it that does not ship in the server image is the language model. Ollama serves it on this machine, and the server dials it from inside its container.
+The following steps have been tested on macOS.
+
+**Step 0. Setup Ollama** 
+
+Any model [Ollama](https://ollama.com) serves works, and any endpoint that speaks the [OpenAI chat completions API](https://developers.openai.com/api/reference/chat-completions/overview) does too. This one is a good starting point: it answers fast enough for speech, and it is reliable at the tool calls the device exposes, which is what lets you ask the board to change its own volume or brightness.
 
 ```bash
-ollama pull qwen3:8b
+ollama pull llama3.1:8b
 ```
 
-Any model Ollama serves works, and any endpoint that speaks the OpenAI chat completions API does too, llama.cpp and vLLM among them; `qwen3:8b` is the one this walkthrough was run with. What each field of a provider entry means is in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), and [`vinga-server/examples/`](vinga-server/examples/) holds a commented fragment per provider type.
+Ollama unloads a model after five minutes idle, and loading it again takes longer than the server waits for the model's first word, so a reply that meets a cold model is dropped and the device stays silent. Keep it resident:
 
-**1. Start the server.** It is two containers, the server and the one Postgres database it keeps everything in, and they come up together from the compose file this repository publishes. No checkout is needed: fetch that file and the provisioning script beside it into a directory of its own, mint the two secrets, and start it.
+```bash
+export OLLAMA_KEEP_ALIVE=-1
+```
+
+Ollama reads that when it starts, so set it where your Ollama runs: restart the app after exporting it, or put it in the service environment if you run Ollama as one.
+
+**Step 1. Configure and start the vinga server**
+
+Create a directory for vinga:
 
 ```bash
 mkdir vinga && cd vinga
+```
+
+`vinga` uses a Postgres database it keeps everything in, so fetch the Docker compose and Postgres provisioning script:
+
+```bash
 curl -O https://raw.githubusercontent.com/rafacm/vinga/main/docker-compose.yml
+
 curl --create-dirs -o deploy/postgres-init.sql \
   https://raw.githubusercontent.com/rafacm/vinga/main/deploy/postgres-init.sql
+```
 
-# The two secrets, minted once and kept: this file is what the server
-# is given, and it is where you read the API token back from later.
+Find the address your computer has on the local network, which is what boards will dial:
+
+```bash
+LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I | awk '{print $1}')
+echo "$LAN_IP"
+```
+
+> [!IMPORTANT]
+> Check this is really the address your board can reach: on a machine with more than one interface the command picks the first it finds, and a `127.` address means it found none. Set `LAN_IP` by hand if so.
+>
+> Boards store this address rather than resolving it, so give this machine a static DHCP reservation now: if the IP address of your computer changes later, this will break every board already onboarded.
+
+Create the `.env` file that the vinga server and the CLI both read:
+
+```bash
+# Stop here rather than write a half-configured file
+: "${LAN_IP:?empty; set it to your machine's address on the local network}"
+
+# .env holds secrets, so create it readable only by you
 umask 077
-{ echo "VINGA_API_SECRET=$(openssl rand -hex 32)"
-  echo "VINGA_AUTH_SECRET=$(openssl rand -hex 32)"
-  echo "VINGA_SERVER__AUTH__ENABLED=false"
-} > .env
+{
+  # The bearer token for the configuration API
+  echo "VINGA_API_SECRET=$(openssl rand -hex 32)"
 
+  # Where the CLI reaches that API, which is this machine. Loopback
+  # because the token above grants every write, and plain http is
+  # allowed to a loopback address and to nothing else. Administering a
+  # deployment you do not host is https, and this is the line to change.
+  echo "VINGA_API_URL=http://127.0.0.1:8003/api"
+
+  # The secret that signs device tokens
+  echo "VINGA_AUTH_SECRET=$(openssl rand -hex 32)"
+
+  # The address boards on your LAN reach this machine on.
+  # The server listens on 0.0.0.0 and cannot tell which interface that is.
+  echo "VINGA_SERVER__PUBLIC_URL=http://$LAN_IP:8003"
+} > .env
+```
+
+Start the server with:
+
+```bash
 docker compose --profile server up -d --wait
 ```
 
-That is the whole of it: the database, then the server once the database answers, and `--wait` returns when both are healthy. An empty database is a valid state to start on, so no configuration file is needed either; the server comes up serving no agents, and the next two steps configure it over the API. Stop it with `docker compose --profile server down`, and add `-v` to throw the database and the downloaded models away too.
+The Postgres server is published on loopback while vinga server's port 8003 **is published on every interface, because boards on your LAN have to reach it**.
 
-`VINGA_API_SECRET` is the bearer token for the configuration API and `VINGA_AUTH_SECRET` signs the device tokens. **Neither has a default anywhere**, and with no `.env` at all compose refuses before a container starts. After that the two differ, because what needs them differs. The API is always mounted and always behind its token, so a missing `VINGA_API_SECRET` is always a boot that refuses, naming the variable. Device authentication is what `VINGA_AUTH_SECRET` is for, so it is required exactly when that is on, which is the default and is not what the third line above selects: **this trial boots without it**. Mint it now anyway and keep both, because the secret signs every device token and the key in the onboarding URL of step 5 is derived from it, so regenerating it later invalidates the token every device has stored and moves that URL ([Security](vinga-server/README.md#security)).
+**Step 2. Install the CLI and check vinga server status**
 
-The same file is where every other variable the server should find in its environment goes, a provider credential your agent names among them. `VINGA_SERVER__AUTH__ENABLED=false` is for a trial on a network you trust; drop that line for anything that outlives an afternoon.
-
-The compose file is the one place the topology is written down, so nothing here restates it: the database is published on loopback while the server's port 8003 is published on every interface, because boards on your LAN have to reach it. **The database password it defaults to is a trial convenience and nothing more**: a deployment sets a real one, and [The configuration database in a deployment](vinga-server/README.md#the-configuration-database-in-a-deployment) covers that along with the privileges the server needs, the provisioning file at [`deploy/postgres-init.sql`](deploy/postgres-init.sql) and backups. The server migrates its schemas at every boot, so there is no init step to run. A checkout already has both files and runs the same command from its root; running the server itself some other way, on one container against a Postgres you provide, is [Running in a container](vinga-server/README.md#running-in-a-container), which also has every key of the server half and the YAML file that is the alternative to a handful of variables.
-
-**2. Install the CLI.** `vinga` is a client of the configuration API rather than a second way into the database, so this is how a deployment is administered from here on, whether it runs on this machine or across the network.
+`vinga` is a client of the `vinga-server` configuration API, so this is how a deployment is administered from here on, whether it runs on this machine or across the network.
 
 ```bash
 uv tool install "git+https://github.com/rafacm/vinga#subdirectory=vinga-server"
-
-vinga list
 ```
 
-There is nothing to export. Run it from the directory step 1 made and it reads that same `.env` itself, searching upwards from wherever it is invoked, and with anything already in your environment winning over the file; a server it is not told about is assumed to be this machine on the port the server half names, which is where step 1 put one. Name a different one with `VINGA_API_URL` or `--api-url`, remembering that plain http is allowed to a loopback address and to nothing else, since the bearer token crosses every request: a deployment anywhere else is https.
+If your shell then reports `vinga` as not found, `uv` installed it into a directory that is not on your `PATH`; `uv tool update-shell` fixes that for new shells.
 
 **Or install nothing.** The image from step 1 already carries the same CLI, built together with the server it talks to, so the pair cannot disagree about the grammar. From the same directory, a shell function makes it the same word:
 
@@ -126,18 +157,66 @@ vinga list
 
 The function shadows an installed `vinga` for as long as the shell defining it lives, and a file on this machine is piped in rather than named, because a path is resolved inside the container; the image door in the CLI's own page has both details and how to put the binary back.
 
-[`docs/reference/cli.md`](docs/reference/cli.md) is the CLI's own page: the one-off `uvx` spelling, the image door above, reaching a deployment you do not host, and every command's help.
-
-**3. Say what the agent is.** Which engines, which agents, which devices: this is the other half of the configuration, and it is written a line at a time. The stack these lines build is fully local and needs no account anywhere: Silero listens for the end of a phrase, faster-whisper transcribes, [Ollama](https://ollama.com) answers and Piper speaks.
+Check the vinga server status with:
 
 ```bash
-vinga provider set llm local type=openai_compatible base_url=http://host.docker.internal:11434/v1 model=qwen3:8b egress=false
-vinga provider set asr whisper type=faster_whisper model=small vad_filter=true
-vinga provider set tts voice type=piper voice=en_US-lessac-medium
-vinga provider set vad ears type=silero
-vinga agent-defaults set llm=local asr=whisper tts=voice vad=ears
-vinga agent set assistant "prompt=You are a helpful voice assistant. Keep replies short, plain, and speakable. One or two sentences, no lists, no markdown. Always reply in the language the user spoke."
-vinga default-agent set assistant
+vinga info
+```
+
+Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked.
+
+[`docs/reference/cli.md`](docs/reference/cli.md) is the CLI's own page: the one-off `uvx` spelling, the image door above, reaching a deployment you do not host, and every command's help.
+
+**Step 3. Configure an agent**
+
+Which engines, which agents, which devices: this is the other half of the configuration, and it goes in as one document. The stack it builds is fully local and needs no account anywhere: Silero listens for the end of a phrase, faster-whisper transcribes, [Ollama](https://ollama.com) answers and Piper speaks.
+
+```bash
+vinga import -f - <<'EOF'
+providers:
+  llm:
+    local:
+      type: openai_compatible
+      # The server dials Ollama from inside its container, where
+      # localhost would mean the container itself.
+      base_url: http://host.docker.internal:11434/v1
+      model: llama3.1:8b
+      # openai_compatible cannot know its own egress, since base_url
+      # decides it. False asserts this endpoint stays on this machine.
+      egress: false
+  asr:
+    whisper:
+      type: faster_whisper
+      model: small
+      vad_filter: true
+  tts:
+    voice:
+      type: piper
+      voice: en_US-lessac-medium
+  vad:
+    ears:
+      type: silero
+
+# What every agent uses unless it names something else.
+agent_defaults:
+  llm: local
+  asr: whisper
+  tts: voice
+  vad: ears
+
+agents:
+  assistant:
+    # State the reply language explicitly: models otherwise pick one by
+    # their training bias.
+    prompt: >
+      You are a helpful voice assistant. Keep replies short, plain, and
+      speakable: one or two sentences, no lists, no markdown. Always
+      reply in the language the user spoke.
+
+# Which agent a board reaches when nothing has bound it.
+default_agent: assistant
+EOF
+
 vinga apply
 ```
 
@@ -145,9 +224,9 @@ Read top to bottom that is the whole deployment: four engines, the defaults that
 
 `host.docker.internal` rather than `localhost`, because the server dials the model from inside its container and localhost there is the container. The compose file resolves that name to this machine. This was walked on macOS, where it reaches Ollama even though Ollama listens only on loopback. **On Linux, resolving that name is not enough**: Ollama binds loopback there too, and a container cannot reach a loopback-only service, so it has to be told to listen more widely with `OLLAMA_HOST` ([Ollama's FAQ](https://github.com/ollama/ollama/blob/main/docs/faq.md) has the variable and where to set it for your init system). That path is untested here.
 
-Type them in the order shown. A write whose references do not resolve is refused, so the defaults cannot name providers that do not exist yet and the default agent cannot name an agent that does not: the order is the shape of the deployment, not a convention. What is decoupled is installation, not order. Writing an entry stores it and does not touch the running server, so all seven land before anything is built, and there is no window where the server is half configured. `vinga apply` then builds the engines and serves the agents without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first apply is the slow one, because it downloads the speech models onto the data volume. `vinga default-agent set` needs no apply either way: it is read as a device asks for it.
+Two commands, because they promise different things. `import` writes the document to the store in one transaction and touches nothing that is running: it orders the writes for you, so the defaults naming providers and the agent inheriting them all arrive together, and it is refused whole rather than half written if anything in it will not resolve. `apply` then installs what is stored on the running server, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first apply is the slow one, because it downloads the speech models onto the data volume.
 
-The same deployment in document form is [`vinga-server/examples/presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml), imported whole in one transaction with `vinga import -f` and then installed with `vinga apply`, which is the better shape once there is more here than fits on a screen. It is not a drop-in replacement for the lines above: it says `localhost` where they say `host.docker.internal`, and it deliberately sets no `default_agent`, because which board reaches which agent is the one thing a preset cannot know. The presets beside it are the same deployment on vendor APIs. Every field of either spelling is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
+Importing is additive and never deletes, so running the same document twice changes nothing and a section it does not name is left alone. Editing it later means editing the document and importing it again. The same deployment ships as a file at [`vinga-server/examples/presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml), which is what `-f` normally points at once there is more here than fits on a screen; the presets beside it are the same deployment on vendor APIs. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
 
 **4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
@@ -175,6 +254,16 @@ When a turn does not go the way you expected, `vinga events` is the first place 
 
 Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](vinga-server/README.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
 
+## Supported Hardware
+
+Any board xiaozhi-esp32 supports can work, since the device runs upstream's firmware. These three are the ones vinga cares about, and they are not in the same state. The Touch-LCD-1.54 at the top is the board vinga is developed and tested on; the two under it are targets, with a guide each and no hands-on run behind them yet.
+
+| Board | Display | Audio | Links | Status |
+| --- | --- | --- | --- | --- |
+| [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) | 240×240 LCD, touch | dual-mic with hardware echo cancellation | [guide](docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | [**working** (upstream firmware)](docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md) |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) | 480×480 AMOLED, touch | dual-mic with hardware echo cancellation | [guide](docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md) · [wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned 🚧 |
+| [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) | 200×200 e-paper | single mic | [guide](docs/devices/waveshare-esp32-s3-epaper-1.54.md) · [wiki](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned 🚧 |
+
 ## Documentation
 
 [`docs/`](docs/README.md) is the index, and it says which class each page belongs to and therefore what that page may claim. Four doors into it:
@@ -197,7 +286,7 @@ License notices are preserved in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.
 
 Those two are the foundation rather than the neighbourhood. [`docs/related-projects.md`](docs/related-projects.md) is the survey of the rest: what each nearby voice assistant is, where it overlaps, where vinga is deliberately different, and what vinga borrows. Several of them are older than vinga and better at what they set out to do, and the page says so.
 
-The word *sweded*, and the whole idea of remaking something you love with your own hands, comes from the film *Be Kind Rewind* (2008); its creators explain [How To Swede](https://youtu.be/i5Rd8x4OJoY) on YouTube.
+The word *sweded*, and the whole idea of remaking something you love with your own hands, comes from the film [Be Kind Rewind (2008)](https://en.wikipedia.org/wiki/Be_Kind_Rewind); its creators explain [How To Swede](https://youtu.be/i5Rd8x4OJoY) on YouTube.
 
 ## Changelog
 
