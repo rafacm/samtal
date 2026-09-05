@@ -563,7 +563,7 @@ Reusing what exists wherever the assertion already has a home.
 
 ## Milestones
 
-- [ ] **M1: the boundary an acknowledgement announces, on the wire.**
+- [x] **[M1: the boundary an acknowledgement announces, on the wire](2026-09-05-server-state-vocabulary-implementation.md#m1-the-boundary-an-acknowledgement-announces-on-the-wire)** (PR TBD).
   `Applies` gains `STORE_BOOT` with its docstring corrected, and the
   seven diff fields narrow to `DiffApplies`; `Acknowledgement` and
   `AppliedEntry` gain `applies`, defaulted so an older server's body
