@@ -911,8 +911,9 @@ Reusing the assets that exist wherever the assertion already has a home.
   standing way of proving a pin bites, and it applies here (copy the
   file aside and `touch` it on the way back, never `git checkout`, per
   `AGENTS.md`).
-- **The refusals, one case each**, asserting the fixed sentence and, for
-  the three collisions, that neither name appears in it. Each collision
+- **The refusals, seven cases, one per state**, asserting the fixed
+  sentence and, for the three destination states, that neither name
+  appears in it. Each collision
   case builds the destination in one store and leaves it empty in the
   other two, so a check that stopped running is a failure rather than a
   case that passes for the wrong reason: an agent under the new name, a
@@ -1037,8 +1038,10 @@ where it is enforced rather than asserting it.
   route cannot address one; the reachable no-leak case is the other
   door, a credential-bearing name typed as the new one.
 - **Closed sets at decision sites.** Two decision sites, both closed and
-  both pinned. The refusals are a six-state set, each state a condition
-  of the transaction before it writes. The boundary is the `Applies`
+  both pinned. The refusals are a seven-state set, each state a
+  condition of the transaction before it writes: one absent source,
+  three occupied destinations, two malformed new names and one
+  contended database. The boundary is the `Applies`
   vocabulary #386 landed, chosen in three arms from `Renamed`'s own
   fields, with the producer-side pin that every `Notice.applies` member
   is an `Applies` member already in place. Nothing branches on a
@@ -1431,6 +1434,15 @@ amendments. 1 P1, 1 P2 and 1 P3.
    section and in M1, "six-state" in the standing-lenses answer. Pick
    one classification and use it everywhere, the test inventory
    included.
+
+   *Resolution*: accepted. Seven is the count, and the six was a
+   leftover from before the thread collision joined the set rather than
+   a second classification anybody meant. The lens now says seven and
+   spells out which they are (one absent source, three occupied
+   destinations, two malformed new names, one contended database), and
+   the test inventory says seven cases, one per state, so the three
+   places that count them agree and a reader can check the arithmetic
+   against the table.
 
 3. **P3: the writer's rename map has no lifecycle bound.** "Bounded by
    the number of renames in one process's lifetime" is not a bound for a
