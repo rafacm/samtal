@@ -2,13 +2,13 @@
 # tests/unit/test_command_spellings.py; do not edit by hand.
 #
 # One line per match: path:line  class  invocation
-.github/workflows/vinga-server.yml:489  respell  vinga-server config reference
-.github/workflows/vinga-server.yml:491  respell  vinga-server config reference
-.github/workflows/vinga-server.yml:527  respell  vinga-server config openapi
-.github/workflows/vinga-server.yml:529  respell  vinga-server config openapi
-.github/workflows/vinga-server.yml:547  respell  vinga-server config cli-reference
-.github/workflows/vinga-server.yml:550  respell  vinga-server config cli-reference
-.github/workflows/vinga-server.yml:574  respell  vinga-server config cli-reference
+.github/workflows/vinga-server.yml:514  respell  vinga-server config reference
+.github/workflows/vinga-server.yml:516  respell  vinga-server config reference
+.github/workflows/vinga-server.yml:552  respell  vinga-server config openapi
+.github/workflows/vinga-server.yml:554  respell  vinga-server config openapi
+.github/workflows/vinga-server.yml:572  respell  vinga-server config cli-reference
+.github/workflows/vinga-server.yml:575  respell  vinga-server config cli-reference
+.github/workflows/vinga-server.yml:599  respell  vinga-server config cli-reference
 AGENTS.md:178  respell  vinga-server config schema
 CHANGELOG.md:59  historical  vinga import
 CHANGELOG.md:206  historical  vinga import

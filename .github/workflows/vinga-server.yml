@@ -243,6 +243,18 @@ jobs:
       # however this step ends, for the reason the trial check's own
       # trap gives: a stray `.env` in this tree is read by things below
       # it.
+      #
+      # And every compose invocation runs with the required names taken
+      # OFF the process environment, which is not tidiness: compose
+      # resolves an interpolation from the process environment first and
+      # from the env file only after it, and this job exports
+      # VINGA_DB_HOST and its four siblings at job level for the
+      # Postgres service the lanes connect to. Without the scrubbing,
+      # leaving one of those out of the temporary file leaves it set
+      # anyway, its guard never fires, and the negative arm of this
+      # check reports a file that refuses nothing. Measured: that is
+      # exactly how this step failed on its first CI run, on a body
+      # that passed locally where those five are not exported.
       - name: The production compose file refuses and resolves
         working-directory: .
         run: |
@@ -263,9 +275,22 @@ jobs:
             done
           }
 
+          # Compose, with the temporary env file as the only place it
+          # can read a required value from. The `env -u` list is built
+          # from the same `required` above rather than written out a
+          # second time, so a variable added to the contract is scrubbed
+          # by the same edit that starts guarding it.
+          scrubbed() {
+            unset_flags=""
+            for name in $required; do
+              unset_flags="$unset_flags -u $name"
+            done
+            env $unset_flags "$@"
+          }
+
           for omitted in $required; do
             write_env "$omitted"
-            if out=$(docker compose -f "$file" config 2>&1); then
+            if out=$(scrubbed docker compose -f "$file" config 2>&1); then
               echo "::error::$file resolved with $omitted unset; it must refuse"
               exit 1
             fi
@@ -280,7 +305,7 @@ jobs:
           done
 
           write_env
-          docker compose -f "$file" config --quiet
+          scrubbed docker compose -f "$file" config --quiet
 
       # The Kubernetes manifests under deploy/k8s/, held to the schemas
       # of the resources they claim to be. Seconds of work needing no
