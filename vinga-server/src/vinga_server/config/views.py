@@ -24,13 +24,17 @@ valid environment reference is masked, whatever it is, because a value
 that got in another way may be a plaintext credential and the command an
 operator runs to find that mistake must not be the one that prints it.
 
-There are two rules, and the second one looks at values rather than at
-names. A URL is the shape that carries a credential under a key
-admitting to nothing, so what a display shows of one is the address
-without it, whatever key it sits under and at whatever depth (#381).
+There are two rules, and the second one looks at what a string is
+rather than at what it is called. A URL is the shape that carries a
+credential under a key admitting to nothing, so what a display shows of
+one is the address without it, whatever key it sits under and at
+whatever depth (#381). It is asked of both halves of a pair: a mapping
+keyed by whatever the caller wrote is the one place a rule about values
+does not reach, so a key is stripped exactly as a value is (#408).
 Both write paths refuse such a URL, and both refuse only at write time,
 so this is what stands between a row that predates the rule and a
-caller. `_shown` below is where it happens and says why it is one site.
+caller. `_shown` is where a value meets it and `_shown_mapping` is
+where a key does; each says why it is the one site for its half.
 
 What is displayed fails open, which is the other half of the same
 decision (#176). A body is derived from the entry's model rather than
@@ -249,9 +253,11 @@ def _declared(entry: object, secret_key: Callable[[str], bool]) -> dict[str, obj
         value = getattr(entry, name)
         if name in shown or not _absent(field, value):
             data[name] = _masked(name, value, secret_key)
-    for name, value in (getattr(entry, "model_extra", None) or {}).items():
-        data[name] = _masked(name, value, secret_key)
-    return data
+    return _shown_mapping(
+        data,
+        getattr(entry, "model_extra", None) or {},
+        lambda name, value: _masked(name, value, secret_key),
+    )
 
 
 def _order(model: type[BaseModel]) -> list[str]:
@@ -320,12 +326,72 @@ def _shown(value: object, secret_key: Callable[[str], bool]) -> object:
     if isinstance(value, BaseModel):
         return _declared(value, secret_key)
     if isinstance(value, Mapping):
-        return {key: _masked(key, nested, secret_key) for key, nested in value.items()}
+        return _shown_mapping(
+            {}, value, lambda key, nested: _masked(key, nested, secret_key)
+        )
     if isinstance(value, (list, tuple)):
         return [_shown(item, secret_key) for item in value]
     if isinstance(value, str):
         return without_url_credential(value)
     return value
+
+
+def _shown_mapping(
+    into: dict[str, object],
+    mapping: Mapping[object, object],
+    rendered: Callable[[object, object], object],
+) -> dict[str, object]:
+    """One mapping as it may leave this module: every key shown without
+    what a URL of it carries, every value rendered by the caller's own
+    rule, and no pair dropped.
+
+    A key is as good a place to paste a credential as a value is, which
+    is the write path's own words for why it refuses one there
+    (`store._check_no_url_credentials`), and a mapping keyed by whatever
+    the caller wrote is the one place a value's rule does not reach:
+    a provider's options are `extra="allow"` at the top and pass-through
+    structures below it, and an MCP server's `env` and `headers` are
+    keyed by names somebody else chose. So the same strip is applied to
+    both halves of a pair, and it is applied here, once, for every
+    mapping any display or record builds (#408).
+
+    Rendered from the key as it is STORED, never from the shown one.
+    The two rules read the same name and only one of them may change it:
+    an MCP env key spelled `https://host/x?auth=...` is secret-shaped by
+    the wider fragment set, so its value is masked, and sanitizing the
+    key first would take the word `auth` out of it and quietly stop the
+    masking. Order is the whole of what keeps fail-closed masking and
+    this strip from fighting.
+
+    Two keys can sanitize to one spelling (`https://a:1@host/x` and
+    `https://b:2@host/x` are both `https://host/x`), and a mapping
+    comprehension would answer with the last of them and drop the rest.
+    Dropping is not available here: a read is a fragment a write of it
+    accepts back, so a pair silently missing from a read is a pair an
+    operator deletes by re-importing what they were shown. A spelling
+    already taken therefore gets `#2`, then `#3`, in the order the
+    mapping holds its keys, which is the order the stored body has, so
+    one row renders one way every time. The later key is the one that
+    moves, whichever of the two was sanitized, because reserving the
+    untouched keys first would mean two passes and a display order that
+    is no longer the row's own. It costs nothing in practice: no write
+    accepts such a key any more, so a collision needs a stored row
+    holding two of them.
+    """
+    for key, value in mapping.items():
+        display = without_url_credential(key) if isinstance(key, str) else key
+        if display in into:
+            display = _unclaimed(display, into)
+        into[display] = rendered(key, value)
+    return into
+
+
+def _unclaimed(display: object, taken: Mapping[object, object]) -> str:
+    """The first spelling of a shown key that nothing has claimed."""
+    index = 2
+    while f"{display}#{index}" in taken:
+        index += 1
+    return f"{display}#{index}"
 
 
 # The defaults that mean a field holds nothing rather than something.
@@ -391,29 +457,34 @@ def provider_record(entry: ProviderConfig) -> dict[str, object]:
         data["api_key_env"] = mask(entry.api_key_env)
     if entry.egress is not None:
         data["egress"] = entry.egress
-    data.update(
-        {
-            key: mask(value) if is_secret_option(key) else recorded_option(value)
-            for key, value in entry.options.items()
-        }
-    )
-    return data
+    return _shown_mapping(data, entry.options, _recorded_pair)
 
 
 def recorded_option(value: object) -> object:
     """One provider option as it may be recorded, at every depth: what
     was configured, minus anything a URL carries in front of its host or
-    in a credential-shaped parameter."""
+    in a credential-shaped parameter, on either half of a pair.
+
+    The key is stripped by the same rule and at the same site the
+    display strips one (`_shown_mapping`), because it is the same rule:
+    a manifest keyed by what the caller wrote would otherwise outlive
+    the conversation carrying the credential the value no longer has
+    (#408).
+    """
     if isinstance(value, Mapping):
-        return {
-            key: mask(nested) if is_secret_option(key) else recorded_option(nested)
-            for key, nested in value.items()
-        }
+        return _shown_mapping({}, value, _recorded_pair)
     if isinstance(value, list):
         return [recorded_option(item) for item in value]
     if isinstance(value, str):
         return without_url_credential(value)
     return value
+
+
+def _recorded_pair(key: object, value: object) -> object:
+    """What one option holds as a record shows it, given the key as it
+    is stored: the mask where the name admits to being a secret, and the
+    option's own walk otherwise."""
+    return mask(value) if is_secret_option(str(key)) else recorded_option(value)
 
 
 def device_body(agents: Sequence[str]) -> dict[str, object]:
