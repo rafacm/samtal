@@ -14,9 +14,9 @@ What it pins:
 - **The lock order.** A transaction that writes both stores takes the
   record chain's advisory lock and then the memory chain's, ascending,
   which is what keeps two of them from deadlocking. Asserted by
-  recording the keys as they are taken, walking both the erasure path
-  and the retention path, because a lock order is not observable in any
-  other way.
+  recording the keys as they are taken, walking the erasure path, the
+  retention path and the agent rename that takes all three, because a
+  lock order is not observable in any other way.
 - **Both straddling interleavings, forced rather than reasoned about.**
   A thread-keyed memory write parked inside its transaction while a
   deletion arrives finishes first and is then deleted by that deletion;
@@ -57,13 +57,15 @@ from tests.support.stores import memory, memory_rows
 from vinga_server import db as db_module
 from vinga_server.config.api import build_api
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.store import ConfigStore
+from vinga_server.conversations import store as record_store
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import (
     CONVERSATIONS_CHAIN,
     ConversationStore,
     erasures_announced_to,
 )
-from vinga_server.db import connection_url
+from vinga_server.db import DOMAIN_CHAIN, connection_url, open_database
 from vinga_server.memory import store as memory_store
 from vinga_server.memory.store import MEMORY_CHAIN, MemoryScope
 
@@ -415,10 +417,11 @@ def keys_taken(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     White-box in its reach and unavoidable in what it pins: a lock order
     is not observable from any surface, and the property it protects (two
     transactions over the same two chains cannot deadlock) is exactly
-    what a test cannot provoke on demand. Both names are patched because
-    both callers hold their own reference: the write engine's begin
-    listener reads `db`'s, and the memory purge reads the one it
-    imported.
+    what a test cannot provoke on demand. All three names are patched
+    because each caller holds its own reference: the write engine's begin
+    listener reads `db`'s, the memory purge and the memory rename read
+    the one that module imported, and the record's own rename reads
+    the one its module imported.
     """
     taken: list[int] = []
     real = db_module.take_the_chain_lock
@@ -429,6 +432,7 @@ def keys_taken(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
     monkeypatch.setattr(db_module, "take_the_chain_lock", recording)
     monkeypatch.setattr(memory_store, "take_the_chain_lock", recording)
+    monkeypatch.setattr(record_store, "take_the_chain_lock", recording)
     return taken
 
 
@@ -459,6 +463,39 @@ async def test_a_retention_pass_takes_both_chain_locks_in_ascending_order(
     pruning.stop()
 
     assert keys_taken == [CONVERSATIONS_CHAIN.lock_key, MEMORY_CHAIN.lock_key]
+    assert keys_taken == sorted(keys_taken)
+
+
+async def test_an_agent_rename_takes_all_three_chain_locks_in_ascending_order(
+    thread: str, keys_taken: list[int]
+) -> None:
+    """The third path, and the first transaction in this server that can
+    hold all three keys at once.
+
+    It opens on the domain chain's write engine, whose begin listener
+    takes key 1, and then crosses into the record chain's 2 and the
+    memory chain's 3, in that order. Ascending, and therefore incapable
+    of closing a cycle with the erasure above, which takes 2 and then 3.
+    """
+    a_recorded_thread(thread)
+    await a_thread_with_memory(thread)
+    engine = open_database(DatabaseConfig())
+    try:
+        store = ConfigStore(engine)
+        store.set_provider("llm", "claude", {"type": "anthropic", "model": "c-5"})
+        store.set_agent_defaults({"llm": "claude"})
+        store.set_agent("poet", {"prompt": "You are a poet."})
+        keys_taken.clear()
+
+        store.rename_agent("poet", "bard")
+    finally:
+        engine.dispose()
+
+    assert keys_taken == [
+        DOMAIN_CHAIN.lock_key,
+        CONVERSATIONS_CHAIN.lock_key,
+        MEMORY_CHAIN.lock_key,
+    ]
     assert keys_taken == sorted(keys_taken)
 
 
