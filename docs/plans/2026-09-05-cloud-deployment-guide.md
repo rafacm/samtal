@@ -108,8 +108,14 @@ memory.
 ## Artifact layout
 
 - `deploy/k8s/` (new): `deployment.yaml` (one replica,
-  `strategy: Recreate`, both probes pointed per the README's rule,
-  restart at `/healthz` and admission at `/readyz`,
+  `strategy: Recreate`, three probes rather than two: a
+  `startupProbe` on `/healthz` with a documented budget sized for a
+  cold start that downloads and loads models (the listener binds
+  only after lifespan startup finishes, so a starting server meets
+  connection failures for minutes; the budget is generous, on the
+  order of `failureThreshold: 60` at `periodSeconds: 5`, and the
+  manifest comment says when to raise it), and only behind it the
+  README's pair, restart at `/healthz` and admission at `/readyz`,
   `terminationGracePeriodSeconds: 30` above the drain, the read-only
   root filesystem with a `/tmp` emptyDir, `/data` from the PVC, env
   from the Secret and a plain ConfigMap-free env section for the
@@ -354,6 +360,12 @@ answer every finding, and a delta re-review confirms them.
    with a documented budget sized for first-run downloads, gate the
    other probes behind it, and pin the structure in the agreement
    test.
+
+   *Resolution*: accepted in full. The Deployment carries a
+   `startupProbe` on `/healthz` with a documented, generous budget
+   and a comment saying when to raise it; liveness and readiness sit
+   behind it, and the agreement test asserts all three probes'
+   paths and that the startup budget clears a stated floor.
 
 5. **P1: the Ingress design leaves the public security boundary
    undefined.** No routed paths were named, and the
