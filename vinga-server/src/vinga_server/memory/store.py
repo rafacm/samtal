@@ -261,13 +261,22 @@ PURGE_BUSY = (
 # The remedy is the operator door that already exists, in the spelling a
 # server has: this sentence is composed inside the image, where
 # `vinga-server` is what a shell answers to.
+#
+# The listing is the one that takes a name. `memory list agent` and
+# `memory list agent <name>` are the same words one level apart and are
+# two different questions: the first is who is remembering anything, the
+# second is what one of them remembers, which is what a caller holding a
+# destination they cannot use needs to see. The `<name>` is a
+# placeholder, not the value: the rule against echoing either name is
+# what the sentence above it states, and a remedy that pasted one back in
+# would break it while looking helpful.
 RENAME_OCCUPIED = (
     "memory: facts are already remembered under the new name, and a rename may not "
     "merge two memories into one, because nothing could tell them apart afterwards "
     "and no second rename could separate them. Nothing was changed, and neither "
     "name is quoted back. Rename to a name nothing holds, or read what is stored "
-    "under this one with `vinga-server config memory list agent` and clear it with "
-    "`vinga-server config memory delete agent <name> --all`"
+    "under this one with `vinga-server config memory list agent <name>` and clear "
+    "it with `vinga-server config memory delete agent <name> --all`"
 )
 
 RENAME_FAILED = (
