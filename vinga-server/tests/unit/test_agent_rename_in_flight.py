@@ -29,32 +29,56 @@ What it pins:
   the moment the session opened.
 - **The lifecycle the per-session map rests on.** A chain of renames
   resolves in one step, an agent nothing renamed is untouched, a batch
-  queued behind a close still finds its translation, and a name a rename
+  queued behind a close still finds its translation, a name a rename
   freed and an operator gave to a NEW agent is not translated for the
-  session that opened under the new agent. The last one is the case a
-  process-wide map would fail, which is why the map is per session.
+  session that opened under it, and that second agent renamed in its
+  turn leaves the older session's own name alone. The last two are the
+  cases a process-wide map fails.
+- **The world a conversation speaks from, which is what decides all of
+  the above.** A session captures its generation before it awaits the
+  device's hello and registers with the writer several awaits later, and
+  it goes on speaking that world's names until an apply and a new
+  conversation replace them. So the sessions a publication has to reach
+  are not the ones registered at that instant: they are the ones whose
+  world was built before it. The three cases here drive that through a
+  real served session, with the hello withheld to hold one in the
+  window, and through the seam the writer reads at the open.
 
 Every thread and every session here is minted per test, because the
 writer's own state is keyed by both and a suite that reused one would be
 arranging something no server can produce.
 """
 
+import asyncio
+import contextlib
 import datetime as dt
 import threading
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tests.support.configs import recording_config, world
+from tests.support.providers import built_world
 from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
-from tests.support.sessions import Gate, until
+from tests.support.sessions import (
+    Gate,
+    bound_to_its_world,
+    drive_reply,
+    handshaken,
+    open_session,
+    served,
+    until,
+)
+from tests.support.sockets import LoopingSocket
 from tests.support.stores import rows
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore
 from vinga_server.conversations import store as record_store
 from vinga_server.conversations.records import TurnLeg, TurnRecord
-from vinga_server.conversations.store import ConversationStore
+from vinga_server.conversations.store import ConversationStore, renames_announced_to
 from vinga_server.db import open_database
 
 # The name a session opens under, the name it is given, and two more for
@@ -628,3 +652,157 @@ async def test_the_freed_name_renamed_again_leaves_the_older_session_alone(
     # replacement's new one.
     assert agent_of(other_thread) == THIRD
     assert [row["agent"] for row in turns_of(other_thread)] == [THIRD]
+
+
+# The world a conversation speaks from, which is what decides the rest
+
+
+SERVED = "assistant"
+
+UTTERANCE = b"\x00\x00" * 320
+
+
+@pytest.fixture
+def served_store() -> Iterator[ConversationStore]:
+    """The store a served session records into, started the way the
+    composition root starts one."""
+    store = ConversationStore(DatabaseConfig(), retention_days=0)
+    store.start()
+    try:
+        yield store
+    finally:
+        store.stop()
+
+
+@contextlib.contextmanager
+def a_running_server(config: ConfigStore, tmp_path: Path) -> Iterator[Any]:
+    """One world, held the way a running server holds it, hearing every
+    rename this process publishes.
+
+    The subscription is what the composition root wires, and it is here
+    rather than assumed because these cases are about the difference
+    between what a world was built from and what the store says now:
+    everything else in this file drives the writer directly, where that
+    difference cannot arise.
+    """
+    a_working_configuration(config, SERVED)
+    settings = recording_config(tmp_path)
+    generations = world(settings, providers=built_world(settings))
+    with renames_announced_to(generations.renamed):
+        yield settings, generations
+
+
+async def a_finished_session(session: Any, websocket: Any, task: Any) -> None:
+    """One reply spoken, then the conversation ended the way a device
+    ends one, so its rows are all committed before they are read."""
+    await drive_reply(session, UTTERANCE)
+    await websocket.close(1000, "goodbye")
+    await asyncio.wait_for(task, timeout=TIMEOUT_S)
+
+
+async def test_a_rename_between_the_world_and_the_open_reaches_the_session(
+    config: ConfigStore, served_store: ConversationStore, tmp_path: Path
+) -> None:
+    """The window a session's own registration cannot see.
+
+    A conversation captures the world it will serve before it awaits the
+    device's hello, and it registers with the writer several awaits
+    later, once that hello has arrived. A rename published in between is
+    invisible to a writer that only marks the sessions it already has:
+    the session speaks the name its world was built with, and the row it
+    writes lands on a thread the rename has moved, or makes a new one
+    under a name nothing answers to.
+
+    Forced rather than raced. The hello is withheld, so the session is
+    parked in exactly that window when the rename commits, and it is
+    handed over afterwards.
+    """
+    with a_running_server(config, tmp_path) as (settings, generations):
+        websocket = LoopingSocket()
+        # Withheld, which is what holds the session in the window: `run`
+        # has captured its world and is waiting for this.
+        hello = websocket.inbox.get_nowait()
+        session = served(settings, websocket, served_store, generations)
+        task = asyncio.create_task(session.run())
+        await bound_to_its_world(session)
+
+        config.rename_agent(SERVED, NEW)
+
+        websocket.inbox.put_nowait(hello)
+        await handshaken(session, websocket)
+        await a_finished_session(session, websocket, task)
+
+    (thread,) = rows("conversations")
+    assert thread["agent"] == NEW, "the session's world never heard the rename"
+    assert [row["agent"] for row in rows("turns")] == [NEW]
+    # And the row whose subject is the moment the session opened keeps
+    # what it opened with, which is the name its world serves.
+    (opening,) = rows("sessions")
+    assert opening["agent"] == SERVED
+
+
+async def test_a_session_opened_before_the_apply_still_writes_the_new_name(
+    config: ConfigStore, served_store: ConversationStore, tmp_path: Path
+) -> None:
+    """The wider half of the same window, and the one that lasts.
+
+    A rename is durable the moment it commits, and the running server
+    goes on serving the old name until an apply installs a world built
+    from what the store now says. Every conversation begun in between
+    binds that older world and speaks the old name, so a writer that
+    translated only the sessions live at the publication would leave
+    each of them writing rows under a name no agent answers to, for as
+    long as the operator waits before applying.
+    """
+    with a_running_server(config, tmp_path) as (settings, generations):
+        config.rename_agent(SERVED, NEW)
+
+        # No apply: the world this session binds is the one built before
+        # the rename, and it is what the session speaks.
+        session, websocket, task = await open_session(settings, served_store, generations)
+        await a_finished_session(session, websocket, task)
+
+    (thread,) = rows("conversations")
+    assert thread["agent"] == NEW, "a session opened before the apply was left behind"
+    assert [row["agent"] for row in rows("turns")] == [NEW]
+    (opening,) = rows("sessions")
+    assert opening["agent"] == SERVED
+
+
+async def test_a_world_installed_after_a_rename_has_nothing_to_translate(
+    config: ConfigStore, served_store: ConversationStore, session: str, thread: str
+) -> None:
+    """The other end of the same anchor, at the seam the writer reads.
+
+    What a world has not heard is what was published since it was
+    installed, so a world installed afterwards has heard everything and
+    a session on it translates nothing. This is what an apply produces,
+    and it is what makes the freed name safe to reuse: the recreated
+    agent is servable only from a world that already knows both names.
+    """
+    a_working_configuration(config, OLD)
+    settings = recording_config(Path("/nonexistent"))
+    generations = world(settings)
+    older = generations.current()
+    with renames_announced_to(generations.renamed):
+        config.rename_agent(OLD, NEW)
+        # The apply: a second world, built from what the store says now.
+        # A distinct object, because that is what a world is: two
+        # generations over the same configuration are two of them.
+        with generations.applying() as install:
+            install(world(settings).current())
+        newer = generations.current()
+
+        assert generations.renames_for(older) == ((OLD, NEW),)
+        assert generations.renames_for(newer) == ()
+
+        served_store.open_session(
+            session, 100.0, manifest(OLD), renames=lambda: generations.renames_for(newer)
+        )
+        landed = served_store.record_turn(session, a_turn(thread, OLD, "on the new world"))
+        assert landed.wait(TIMEOUT_S) is True
+        served_store.close_session(session, duration_s=2.0, reason="client")
+        served_store.stop()
+
+    assert agent_of(thread) == OLD
+    assert [row["agent"] for row in turns_of(thread)] == [OLD]

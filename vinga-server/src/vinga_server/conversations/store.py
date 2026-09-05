@@ -257,6 +257,22 @@ _writers_lock = threading.Lock()
 # composition root for the life of the application.
 _listeners: "list[Callable[[frozenset[str]], None]]" = []
 
+# And who has to hear a rename, which is a different register because it
+# is a different fact told to a different kind of holder.
+#
+# A deletion is told to whoever holds rows for a thread. A rename is told
+# to whoever knows which world a session speaks from, because that is
+# what decides whether a name a session hands over is one this rename
+# moved: a session opened under a world built before the rename speaks
+# the old name and has to be translated, and one opened under a world
+# built after it speaks the new name and must not be. Only the holder of
+# the generations knows the difference, so it subscribes here and the
+# writer asks it for a session's starting point at the open.
+#
+# The memory store is on neither register for a rename, which is the
+# decision `renamed()` states.
+_rename_listeners: "list[Callable[[str, str], None]]" = []
+
 
 @contextmanager
 def erasures_announced_to(
@@ -279,6 +295,32 @@ def erasures_announced_to(
         with _writers_lock:
             if listener in _listeners:
                 _listeners.remove(listener)
+
+
+@contextmanager
+def renames_announced_to(listener: "Callable[[str, str], None]") -> "Iterator[None]":
+    """Hear every agent rename this process publishes, for as long as
+    the caller holds this.
+
+    `erasures_announced_to`'s sibling and attached the same way, by the
+    composition root's exit stack, for the reason that one gives: what
+    has to be guaranteed is the detach.
+
+    The one subscriber is the holder of the generations, because what it
+    keeps is the half of the protocol a writer cannot work out for
+    itself. A conversation binds the world it opened with and speaks
+    that world's names for the rest of its life, and whether a name it
+    hands over is one a rename moved is a question about when that world
+    was installed rather than about when the session registered.
+    """
+    with _writers_lock:
+        _rename_listeners.append(listener)
+    try:
+        yield
+    finally:
+        with _writers_lock:
+            if listener in _rename_listeners:
+                _rename_listeners.remove(listener)
 
 # The order the two halves of the dead-id rule are put in, above the
 # database's own lock.
@@ -414,6 +456,18 @@ def renamed(old: str, new: str) -> None:
         return
     with _writers_lock:
         live = list(_writers)
+        telling = list(_rename_listeners)
+    # The worlds first, then the sessions, and the order is the whole of
+    # what makes a session registering right now come out right. A
+    # session's map is seeded from its world's own list of renames, read
+    # inside the writer's lock at the instant the session is registered,
+    # and `translate` below takes that same lock. So a session that
+    # registers before this reaches the writers is marked by them; one
+    # that registers after is seeded with a list this has already
+    # appended to; and one that does both is composed twice with the
+    # same pair, which `_compose` answers once.
+    for listener in telling:
+        listener(old, new)
     for writer in live:
         writer.translate(old, new)
 
@@ -908,23 +962,52 @@ class ConversationStore:
     # --- what a session hands over ------------------------------------
 
     def open_session(
-        self, session_id: str, opened_at: float, manifest: dict[str, Any]
+        self,
+        session_id: str,
+        opened_at: float,
+        manifest: dict[str, Any],
+        renames: "Callable[[], Sequence[tuple[str, str]]] | None" = None,
     ) -> None:
         """Begin one session's record. A control record: never dropped.
 
         `opened_at` is the session loop's clock reading at open, which is
         what every offset below is measured from and what aligns a row
-        with the capture triplet of the same name."""
+        with the capture triplet of the same name.
+
+        `renames` is what this session's world has not heard: the renames
+        published since the generation this conversation bound was
+        installed, newest last. A thunk rather than a value, and that is
+        the whole of why the seeding is sound. A caller that read the
+        list and then called this would leave a window between the two
+        statements in which a rename could publish, mark every session
+        registered at that moment (which does not yet include this one)
+        and then be missed by a list already read. Called here, under the
+        lock a publication takes to mark a session, the two orders are
+        the only two there are: either this seeds a list the publication
+        has already appended to, or the publication marks a session this
+        has already registered.
+
+        None is a caller with no world behind it, which is the test lane
+        and the simulator rather than anything a served session does. It
+        seeds nothing, which is what a deployment that has renamed
+        nothing has anyway.
+
+        Why a world's list and not an empty map: a session speaks the
+        names of the generation it bound, and it binds that generation
+        before it awaits the device's hello, which is where it is when a
+        rename lands in the window this closes. Its own registration is
+        several awaits later. Seeding from the world rather than from the
+        instant of registration is what makes those two facts one.
+        """
         with self._lock:
             if self._stopped:
                 return
             self._opened_at[session_id] = opened_at
             self._dropped.setdefault(session_id, 0)
-            # Nothing to translate, and saying so is what makes this
-            # session translatable at all: a rename published from here
-            # on marks it, and one published before this read its name
-            # out of a store the rename had already changed.
-            self._renames[session_id] = {}
+            moved: dict[str, str] = {}
+            for old, new in () if renames is None else renames():
+                _compose(moved, old, new)
+            self._renames[session_id] = moved
             self._queue.put_nowait(Open(session_id, opened_at, dict(manifest)))
 
     def record_event(
@@ -1905,4 +1988,5 @@ __all__ = [
     "open_conversations",
     "rename_agent",
     "renamed",
+    "renames_announced_to",
 ]

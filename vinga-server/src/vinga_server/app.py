@@ -40,7 +40,10 @@ from vinga_server.config.responses import (
 )
 from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, open_conversations, threads
-from vinga_server.conversations.store import erasures_announced_to
+from vinga_server.conversations.store import (
+    erasures_announced_to,
+    renames_announced_to,
+)
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import ServerEvents, attach_server_tap, detach_server_tap
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
@@ -409,6 +412,17 @@ async def _build_composition(
     # meet, an apply that replaced it and a server that is stopping
     # alike.
     stack.push_async_callback(generations.aclose)
+    # And the rename's half of the same promise the erasure subscription
+    # above makes. A conversation binds a world before it awaits the
+    # device's hello and speaks that world's names until it ends, so a
+    # rename published while a device is connecting, or while a stored
+    # change waits for its apply, reaches a session whose world has never
+    # heard it. The holder is what knows when each world began, so it is
+    # what hears this, and the writer asks it for a session's starting
+    # point at the open. Wired here because this is where both sides
+    # exist, and as a context manager so a partial startup and a second
+    # application in one process both detach.
+    stack.enter_context(renames_announced_to(generations.renamed))
     # Which agents a device is bound to, and the only thing this server
     # re-reads from storage while it runs: an operator binds a board
     # with the board in front of them, and its next check-in is seconds

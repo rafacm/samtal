@@ -41,6 +41,7 @@ one home, and this is it.
 """
 
 import contextlib
+import threading
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -140,6 +141,36 @@ class Generations:
 
     def __init__(self, first: Generation) -> None:
         self._current = first
+        # Every agent rename this process has published, oldest first,
+        # and where each world this server still has joined that list.
+        #
+        # The third fact this module owns, and it is here because it is
+        # the same fact the two above are: what a world is, and when it
+        # began and ended. A conversation binds a world before it awaits
+        # the device's hello and speaks that world's names until it ends,
+        # so whether a name it hands the record is one a rename moved is
+        # a question about when its world was installed. Nothing else
+        # knows that instant: the writer sees a session register several
+        # awaits later, and by then a rename may have come and gone.
+        #
+        # A list and a watermark rather than a composed map per world,
+        # because composing is a rule with one home and it is the
+        # conversation store's: what a reader takes from here is the
+        # renames its world has not heard, in publication order, and the
+        # store folds them exactly as it folds the ones that arrive
+        # afterwards.
+        #
+        # The list is append-only for the life of the process, and the
+        # bound is what an entry costs against what makes one: two agent
+        # names, once per rename an operator performs. What must not
+        # accumulate is the association with a world, and that goes when
+        # the world does, in `dispose` below.
+        self._renames: list[tuple[str, str]] = []
+        self._known: dict[Generation, int] = {first: 0}
+        # Renames arrive on a request thread and everything else here
+        # runs on the loop, so the two statements that must agree (the
+        # append, and the watermark an install stamps) take this.
+        self._ledger = threading.Lock()
         # How many applies have settled. Counted rather than timed: an
         # instant cannot say that two reads saw the same world, because
         # two applies can land inside a clock's resolution.
@@ -164,6 +195,45 @@ class Generations:
         generation whether it meant to or not.
         """
         return self._current
+
+    def renamed(self, old: str, new: str) -> None:
+        """One agent answers to another name now.
+
+        Told to this from wherever the rename was published, on that
+        caller's thread and inside the order that covers the instant
+        between the write's commit and its announcement, which is what
+        makes a conversation opening right now see either all of this
+        rename or none of it.
+
+        Recorded against every world at once rather than only the
+        current one, because a world that has stopped being current can
+        still have a conversation binding it: an apply that lands while
+        a device is connecting leaves that conversation on the world it
+        captured, and that world has not heard this either. A world
+        installed after this line has heard it by construction, since
+        its configuration is what the rename wrote.
+        """
+        with self._ledger:
+            self._renames.append((old, new))
+
+    def renames_for(self, generation: Generation) -> tuple[tuple[str, str], ...]:
+        """What this world has not heard: every rename published since it
+        was installed, oldest first.
+
+        What a conversation bound to it needs in order to file its rows
+        under the names its agents answer to now, while going on speaking
+        as the names this world knows. Empty is the ordinary answer, and
+        it is what a world installed by an apply since the last rename
+        has.
+
+        A world this has never stamped answers with everything, which is
+        the honest reading of a generation from outside this holder: it
+        is older than every rename here or it is not this server's, and
+        translating too much is the safe direction. Nothing built by a
+        running server takes that arm.
+        """
+        with self._ledger:
+            return tuple(self._renames[self._known.get(generation, 0) :])
 
     @property
     def mark(self) -> int | None:
@@ -216,7 +286,13 @@ class Generations:
         which is what makes "a generation nothing is serving and nobody
         holds" a state this class can see rather than a thing an apply
         has to remember to say.
+
+        And the new world joins the rename ledger here, at the end of
+        it: its configuration is what every rename published so far
+        wrote, so what it has not heard is nothing.
         """
+        with self._ledger:
+            self._known[generation] = len(self._renames)
         self._retired.append(self._current)
         self._current = generation
 
@@ -260,6 +336,14 @@ class Generations:
         self._retired = [
             generation for generation in self._retired if id(generation) in keeping
         ]
+        # And what these worlds had not heard goes with them. Nothing can
+        # bind a world nobody is serving and nobody holds, so its place
+        # in the rename ledger is state about a conversation that can no
+        # longer begin, and keeping it would hold the world itself alive
+        # in a dictionary for the life of the process.
+        with self._ledger:
+            for generation in letting_go:
+                self._known.pop(generation, None)
         await disposed(self._last_held_by(letting_go))
 
     async def aclose(self) -> None:
