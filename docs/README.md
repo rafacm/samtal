@@ -36,6 +36,7 @@ be revised given new evidence, provided the promises still hold:
 **Maintained maps and explanations** describe the system as it is now
 and are corrected when it moves:
 [`system-overview.md`](system-overview.md),
+[`deployment.md`](deployment.md),
 [`concepts.md`](concepts.md), [`glossary.md`](glossary.md),
 [`architecture/observability-surfaces.md`](architecture/observability-surfaces.md),
 the whole [`architecture/diagrams/`](architecture/diagrams/README.md)
@@ -115,6 +116,14 @@ records link it.
   customization and the boards it targets.
 - [**devices/**](devices/README.md): the per-board guides, described
   under [Device guides](#device-guides) below.
+- [**deployment.md**](deployment.md): the worked path from a published
+  image to a running deployment, in a Docker Compose lane and a
+  Kubernetes lane. The contract both implement as a table of links into
+  the section that owns each fact, the artifacts under
+  [`../deploy/`](../deploy/) that implement it, the routing boundary a
+  public deployment draws, the provisioning transaction an upgrade
+  reruns, and how to tell that it worked. The server README stays the
+  authority for the contract itself; this is the page that walks it.
 - [**deploy/postgres-init.sql**](../deploy/postgres-init.sql): the one
   thing a deployment runs against its own Postgres before the server
   does. It creates the three schemas the server owns, `domain`,

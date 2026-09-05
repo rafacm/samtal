@@ -252,7 +252,7 @@ vinga device pending claim 418293 assistant   # bind the one showing 418293
 
 When a turn does not go the way you expected, `vinga events` is the first place to look: it is the server's own account of what it decided, turn by turn, and it names the stage that failed rather than leaving you to read a container log.
 
-Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](vinga-server/README.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
+That was the trial. Running vinga somewhere it stays up is [`docs/deployment.md`](docs/deployment.md): the same server in a Docker Compose lane and a Kubernetes lane, with the manifests and the hardened compose file committed under [`deploy/`](deploy/). Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](vinga-server/README.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
 
 ## Supported Hardware
 
