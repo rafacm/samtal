@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-06
+
+### Added
+
+- **An agent rename is one transaction across the three schemas.** The
+  repository gains `rename_agent`, which gives one agent another name
+  and moves every live reference to it in the same transaction or writes
+  nothing at all: the agents row's key, the device bindings that name
+  it, the default agent, the facts filed under it, and the threads it
+  owns. The memory store and the conversation record each publish one
+  function taking the caller's connection and its own chain's advisory
+  lock as its first statement, so the ascending key order the deadlock
+  rule is stated as is a property of those functions rather than of a
+  call site; the rename is the first transaction in this server that can
+  hold all three keys at once. What is not rewritten is the record of
+  what happened: a turn, a session and an event say what was true when
+  they were written, and nothing here touches one. Seven refusals, each
+  a state the transaction can be in before it writes, and the three that
+  refuse an occupied destination come from one rule that is what keeps
+  the verb reversible: a rename may never merge two pasts, because no
+  second rename could tell them apart afterwards.
+  `AgentRenameConflictError` carries those three under a 409. Nothing an
+  operator can reach changes yet: there is no route and no verb until a
+  later change.
+
 ## 2026-09-05
 
 ### Added

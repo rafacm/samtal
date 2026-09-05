@@ -1114,7 +1114,7 @@ where it is enforced rather than asserting it.
 
 ## Milestones
 
-- [ ] **M1: one transaction, three schemas.**
+- [x] **[M1: one transaction, three schemas](2026-09-05-agent-rename-implementation.md#m1-one-transaction-three-schemas)** (PR TBD).
   `memory.store.rename_owner` and `conversations.store.rename_agent`,
   each taking the caller's connection, its own chain's lock as its first
   statement, and raising a classified failure; `ConfigStore.rename_agent`
