@@ -148,6 +148,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   Docker Compose, an ingress controller). Hosting providers stay
   unnamed, which was always the part that mattered.
 
+### Fixed
+
+- **A legacy URL credential is no longer displayed** (#381). A URL
+  carrying a credential, either before its host or in an `auth`-family
+  query parameter, has been refused at every write since #279, and no
+  capture manifest or conversation record has carried one since then
+  either. Both of those are write-time rules, though, and a row stored
+  before them still boots and still reads: until now every display
+  handed the credential straight back, in a single read, in a listing,
+  in the whole-configuration document, over the API and through the CLI
+  renderings built on them. The display boundary now strips one from
+  every string it shows, at every depth and for both kinds (an MCP
+  server's `url` and a provider's `base_url`), so what a read answers
+  with is the address without the credential. Nothing else about a
+  displayed value changes: a string that is not a URL carrying a
+  credential is shown exactly as it is stored. The export gains a
+  working round trip as a consequence, which it did not have: a
+  document exported from a store holding such a row used to be refused
+  whole by the very import path it was written for.
+
 ## 2026-09-04
 
 ### Added
