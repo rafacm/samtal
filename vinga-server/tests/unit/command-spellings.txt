@@ -845,11 +845,11 @@ docs/plans/2026-09-04-simulator-tokenless-admission-implementation.md:181  histo
 docs/plans/2026-09-04-simulator-tokenless-admission-implementation.md:187  historical  vinga simulator
 docs/plans/2026-09-04-simulator-tokenless-admission.md:240  historical  vinga simulator run
 docs/plans/2026-09-05-agent-rename.md:19  historical  vinga agent rename
-docs/plans/2026-09-05-agent-rename.md:149  historical  vinga conversation list
-docs/plans/2026-09-05-agent-rename.md:240  historical  vinga agent rename
-docs/plans/2026-09-05-agent-rename.md:297  historical  vinga memory delete agent
-docs/plans/2026-09-05-agent-rename.md:742  historical  vinga-server config openapi
-docs/plans/2026-09-05-agent-rename.md:1102  historical  vinga agent rename
+docs/plans/2026-09-05-agent-rename.md:153  historical  vinga conversation list
+docs/plans/2026-09-05-agent-rename.md:247  historical  vinga agent rename
+docs/plans/2026-09-05-agent-rename.md:304  historical  vinga memory delete agent
+docs/plans/2026-09-05-agent-rename.md:801  historical  vinga-server config openapi
+docs/plans/2026-09-05-agent-rename.md:1178  historical  vinga agent rename
 docs/plans/2026-09-05-server-config-reference-implementation.md:289  historical  vinga reference server
 docs/plans/2026-09-05-server-config-reference-implementation.md:451  historical  vinga-server config reference server
 docs/plans/2026-09-05-server-config-reference-implementation.md:496  historical  vinga-server config reference server
