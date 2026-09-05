@@ -379,7 +379,10 @@ that DO exist may be listed, because this deployment wrote them.
   what the request said, the way `bind_device`'s is
   (`config/api.py:2499-2504`), and the old name goes through
   `without_url_credential` on the way into it because it is a stored
-  identity that predates nothing.
+  identity, which a row written before the addressability rule can make
+  load-bearing. That strip is belt and braces rather than a reachable
+  path, for the reason the tests record: a name carrying a credential
+  carries a slash, and no path segment addresses one.
 - **No counts in the body.** How many facts and how many threads moved
   is information about this invocation rather than about the artifact,
   the `Acknowledgement` shape is one shape for every domain write, and
@@ -867,10 +870,26 @@ Reusing the assets that exist wherever the assertion already has a home.
   other two, so a check that stopped running is a failure rather than a
   case that passes for the wrong reason: an agent under the new name, a
   memory fact under it with no agent, and orphaned threads under it with
-  neither. The no-leak case
-  plants a name carrying a URL credential as the *old* name and asserts
-  the acknowledgement's line carries the stripped form, which is #381's
-  door and #382's policy in this surface's terms.
+  neither.
+- **The no-leak cases, on the surface each can actually be reached
+  through.** Two of them, because the two names arrive by different
+  doors.
+  - *The caller's name*, which is the reachable one and the one a paste
+    lands in: a new name carrying a URL credential, sent through the
+    route and typed at the verb. It is refused, since such a URL holds a
+    slash and `_check_addressable` refuses one, and the assertion is
+    that it appears in no response body, no header, no log record, no
+    stdout and no stderr. This is the case the surface has, and it is
+    the one the standard is about.
+  - *The stored name*, which cannot be reached through the route at all:
+    a name holding a credential holds a slash, so no path segment
+    addresses it, which `config/views.py:127-144` already measures for
+    the reads. So the strip on the old name is pinned where it lives, as
+    a unit test of the line composer over a planted stored name, with
+    the unreachability stated in the test rather than left as an
+    implication. It is belt and braces exactly as #382 says the same
+    strip is on the write path, and a plan that pretended otherwise
+    would have shipped a test that cannot be written.
 - **The boundary arms, twice, once per side of the wire.** In the
   milestone that adds the route they are asserted on what the route
   answers: a rename that moved only the row carries the apply notice and
@@ -954,8 +973,9 @@ where it is enforced rather than asserting it.
   [the converged location policy](../features/2026-09-05-boot-refusal-location-policy.md).
   The one place a name is printed after a successful rename is the
   acknowledgement's line, composed from the transaction's own result and
-  stripped, and there is a test that plants a credential-bearing old name
-  to prove it.
+  stripped, pinned by a unit test over a planted stored name because the
+  route cannot address one; the reachable no-leak case is the other
+  door, a credential-bearing name typed as the new one.
 - **Closed sets at decision sites.** Two decision sites, both closed and
   both pinned. The refusals are a six-state set, each state a condition
   of the transaction before it writes. The boundary is the `Applies`
@@ -1254,6 +1274,18 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    unreachability stated, and make the reachable no-leak tests use
    credential-bearing caller text as the NEW name, asserting it appears
    in no body, header, stdout, stderr or log line.
+
+   *Resolution*: accepted in full, and checked against the merged
+   measurement rather than reasoned about: `config/views.py:127-144`
+   already records that such a name is unaddressable before a change and
+   after it, which is the same fact this route inherits. The plan's
+   single no-leak case becomes two, one per door. The reachable one uses
+   a credential-bearing NEW name, refused for its slash, asserting the
+   value appears in no body, header, log record, stdout or stderr. The
+   unreachable one keeps the strip pinned where it lives, as a unit test
+   of the line composer over a planted stored name, with the
+   unreachability stated in the test rather than implied, which is the
+   same belt-and-braces posture #382 records for the write path.
 
 9. **P3: the sentinel sweep does not deliver the inventory guarantee it
    claims.** Metadata cannot say which text or JSON fields hold an agent
