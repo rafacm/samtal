@@ -1267,6 +1267,65 @@ class ServerConfig(BaseModel):
         return self
 
 
+class BootRefusal(NamedTuple):
+    """One combination of server-half keys that is refused at boot,
+    carried as data so the page that publishes it reads the validator's
+    own sentence.
+
+    A cross-field rule is the one thing a table of fields cannot show: it
+    is true of two keys at once, so it belongs to neither row. Writing it
+    out in prose beside the tables would be the second copy of a sentence
+    this repository already owns, and a second copy is what goes stale
+    the day a validator is reworded.
+
+    `provoked_by` is what makes a row more than an assertion that a
+    string exists. It is a mapping of field values that triggers exactly
+    this refusal on `model`, so the suite can validate it and compare
+    what was raised against `sentence`: a row whose provocation no longer
+    refuses, or refuses with something else, fails rather than rendering
+    a rule the server does not enforce. `validator` names the
+    model-level validator the row is claiming, which is what lets the
+    reverse direction be mechanized: a sweep over every reachable model's
+    declared model validators asserts each of them is claimed here, so a
+    new cross-field rule cannot arrive unpublished.
+    """
+
+    model: type[BaseModel]
+    validator: str
+    sentence: str
+    provoked_by: Mapping[str, object]
+
+
+# Every cross-field refusal the server half has, in the order the
+# reference publishes them: the two resumption combinations, then the
+# server that no device could reach.
+#
+# Below the models rather than beside the sentences above, because a row
+# names the model it is a rule of and a model has to exist before it can
+# be named. The sentences themselves stay where they were declared, and
+# this registry holds no text of its own.
+BOOT_REFUSALS: tuple[BootRefusal, ...] = (
+    BootRefusal(
+        model=ConversationsConfig,
+        validator="_check_resumption",
+        sentence=RESUMPTION_NEEDS_RECORDING,
+        provoked_by={"enabled": False, "text": True, "resumption": True},
+    ),
+    BootRefusal(
+        model=ConversationsConfig,
+        validator="_check_resumption",
+        sentence=RESUMPTION_NEEDS_TEXT,
+        provoked_by={"enabled": True, "text": False, "resumption": True},
+    ),
+    BootRefusal(
+        model=ServerConfig,
+        validator="_check_something_is_discoverable",
+        sentence=NOTHING_DISCOVERABLE,
+        provoked_by={"ota_path": None, "onboarding": {"enabled": False}},
+    ),
+)
+
+
 class FieldProblem(NamedTuple):
     """One thing wrong with one field of a fragment, said where the
     field is known.
