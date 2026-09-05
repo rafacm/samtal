@@ -52,12 +52,12 @@ missing-path finding to record.
   pinned commit, the read date and the paths above, with a header
   carrying the resolution loop, the rule for adding a path and the
   rename caveat.
-- `scripts/upstream_watch.py`, the one parser, with `check`, `print`,
+- `scripts/upstream_watch.py`, the one parser, with `check`, `clone`,
   `report` and `decide`.
-- `.github/workflows/upstream-drift.yml`, the weekly watch, plus the
-  paths-filtered `pull_request` dry run.
+- `.github/workflows/upstream-drift.yml`, the weekly watch as two
+  jobs, plus the paths-filtered `pull_request` dry run.
 - The `check` step in `.github/workflows/docs.yml`.
-- `vinga-server/tests/unit/test_upstream_watch.py`, twenty-six tests.
+- `vinga-server/tests/unit/test_upstream_watch.py`, forty-three tests.
 - The currency section's new paragraph in `docs/xiaozhi-notes.md`, and
   the `CHANGELOG.md` entry.
 
@@ -88,11 +88,24 @@ missing-path finding to record.
    adding the pinned setup-uv and frozen sync to the docs lane; that
    lane already runs both for the census, so the check is one step
    placed after the existing install.
+7. **The subcommand set is `check`, `clone`, `report`, `decide`, not
+   `check`, `print`, `report`, `decide`.** The plan named `print`
+   because the workflow's shell was to loop over its rows and clone.
+   The PR review moved the cloning into the script (see finding 3
+   below), after which nothing consumed the rows, so `print` was
+   retired rather than left as a subcommand with no caller. The count
+   the plan states is unchanged: one parser, four subcommands.
+8. **The workflow is two jobs rather than one.** Also from the review
+   (finding 1): the plan's single job would have held `issues: write`
+   while cloning and diffing upstream code, and a step-scoped
+   `GH_TOKEN` does not undo what `actions/checkout` leaves in
+   `.git/config`. The read half and the write half are now separate
+   jobs with separate permissions.
 
 ### Verification
 
-- `uv run pytest tests/unit/test_upstream_watch.py -q`: 26 passed, run
-  three times serially and twice under `-n auto --dist loadfile`.
+- `uv run pytest tests/unit/test_upstream_watch.py -q`: 43 passed,
+  run repeatedly, serially and under `-n auto --dist loadfile`.
 - The whole unit lane, serially and the way CI runs it.
 - `python3 scripts/check_doc_links.py .`: 199 files, 0 failures.
 - The agreement check bites in all four directions, proved against
@@ -139,3 +152,120 @@ surprise. The same run also exercised the behind-the-pin branch for
 real: the server repository's latest qualifying tag, `v0.9.6`, is an
 ancestor of the pin, and the report rendered it as a not-diffed line
 rather than diffing backwards.
+
+### PR review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, 2026-09-05,
+against commit `aec14fb2` of PR #405; the reviewer ran 3m39s. Verdict:
+not mergeable, on three P1 and four P2 findings. All seven are fixed,
+one commit each, and every fix carries its own tests.
+
+1. **P1: the checkout leaves the token where every later step can read
+   it.** `actions/checkout` defaults `persist-credentials` to true, so
+   the job's token sits in `.git/config` for the rest of the job,
+   including script code a pull request can change. Scoping `GH_TOKEN`
+   to one step was a claim the checkout had already broken.
+
+   *Fixed*, both halves. Every checkout passes
+   `persist-credentials: false`, and the workflow is two jobs whose
+   permissions describe what each can do: `drift` holds `contents: read`
+   and runs on all three triggers; `issue` holds `issues: write`, needs
+   `drift`, downloads the report as an artifact, and runs only for the
+   schedule and a non-dry-run dispatch. Workflow-level `permissions` is
+   empty so neither job inherits anything, and a pull request no longer
+   starts a write-capable job at all rather than starting one and
+   relying on a step condition.
+
+2. **P1: failure paths could echo values or a traceback.** Argparse's
+   error path repeats what was typed; undecodable input raised
+   `UnicodeDecodeError`; an unwritable output path or a git that could
+   not be launched escaped as a traceback whose frames hold the
+   documents this script exists not to echo.
+
+   *Fixed.* Every failure leaves through `Refusal`, whose message is
+   assembled from literals and validated identifiers only, and `main`
+   is the single boundary that prints it. `_FixedMessageParser` answers
+   a bad invocation with a usage line of our own. The decode policy is
+   stated: our own documents strictly, with a refusal on failure, and
+   upstream's bytes with `errors="replace"`, which is safe precisely
+   because U+FFFD is not a backtick, a newline, a tab or a `#` and so
+   cannot close a fence early or forge a heading, a row or a
+   name-status separator. Refusals are raised after their `except` arm
+   rather than inside it, the discipline `vinga_server.config.cli`
+   states at length: `from None` suppresses the traceback, not the
+   chain. Five tests, including a credential-shaped unknown argument
+   asserted absent from both streams.
+
+3. **P1: git's stderr went straight into the log.** The clone loop ran
+   in the workflow's shell with stderr inherited, so a failure printed
+   the URL git was handed and whatever the remote said.
+
+   *Fixed.* A `clone` subcommand does the blobless clone and the
+   all-tags fetch with both streams captured, and a failure is a fixed
+   sentence naming only the repository. git's environment is narrowed
+   so it cannot stop to ask a runner for a password, and every git call
+   carries a timeout, because that failure mode is a hang. Tested
+   against a credential-shaped host in the reserved `.invalid` domain,
+   which fails without a network.
+
+4. **P2: `gh issue list` returns thirty by default.** The
+   exactly-one-match discipline held only inside that window.
+
+   *Fixed.* The listing asks for a thousand, with the reason stated
+   beside it, and two tests pin the script's half: a match behind forty
+   non-candidates is still found, and an ambiguity split across that
+   distance still refuses naming both.
+
+5. **P2: git failures read as legitimate states.** A failed
+   `tag --list` returned the same `None` as a repository with no
+   qualifying tag, and any nonzero `merge-base --is-ancestor` was read
+   as non-ancestry and then as divergence, so a corrupt clone became a
+   confident claim about upstream's history.
+
+   *Fixed.* Tag enumeration that fails is its own refusal, and ancestry
+   goes through one helper accepting only 0 and 1. Both tested against
+   synthetic breakage that leaves the rest of git working: an unusable
+   `tag.sort` in the clone's config, and a corrupted loose commit object
+   in the middle of the history, where the pin and `origin/HEAD` still
+   resolve and only the walk between them fails.
+
+6. **P2: the version comparison was not deterministic.** Padding a
+   two-part tag to a triple made `v1.2` and `v1.2.0` equal, with
+   first-seen winning; leading zeros collided the same way.
+
+   *Fixed.* Leading zeros are outside the accepted syntax, which is
+   semver's rule and here a determinism rule. The remaining tie is
+   broken explicitly in favour of the three-part spelling, stated in
+   place, and the tag text is the last key component so the ordering is
+   total. Three tests, including `v0.10.0` over `v0.9.0`.
+
+7. **P2: a multiline URL injected rows into the shell handoff.**
+   `startswith("https://")` accepted a value carrying a newline, which
+   the line-oriented clone loop then read as two rows, the second
+   naming a directory of the manifest's choosing.
+
+   *Fixed*, strongest form. The loop is gone with finding 3, and the
+   value is unrepresentable too: `urlsplit` with a scheme allowlist, a
+   host that has to be there, and a refusal for any whitespace or
+   control character anywhere in the URL, with the derived directory
+   name checked for separators and dot segments. `check` additionally
+   holds the committed manifest to https, so the `file://` form the
+   tests need cannot reach the file a scheduled workflow fetches over
+   the internet. `print` is retired, which is recorded as deviation 7
+   above.
+
+### What the review round could not verify, and what it did
+
+Everything above is covered by the suite except two things, both named
+here rather than implied.
+
+- **`actions/upload-artifact@v5` and `actions/download-artifact@v5` are
+  the one version pair in this workflow that no local run exercises.**
+  The rest of the workflow's actions are the versions the other two
+  workflows already pin. The PR's own dry run exercises the upload; the
+  download runs only in the write job, which a pull request never
+  starts.
+- **The whole read half was re-run against live upstream after the
+  fixes**, through the new `clone` subcommand rather than a shell loop:
+  both repositories cloned blobless with their tags, and the report
+  came back with the same drift as before.
