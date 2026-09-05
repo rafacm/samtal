@@ -117,7 +117,7 @@ and `VINGA_SERVER__ONBOARDING__KEY` than committed into a file.
 
 ## `server.onboarding`
 
-The short onboarding path, /x/<key>/, an alias of the OTA endpoint.
+The short onboarding path, `/x/<key>/`, an alias of the OTA endpoint.
 
 Onboarding a stock board means typing its backend URL into a captive portal on
 a phone, with no feedback on a typo, so the string has to be short and its
@@ -297,4 +297,4 @@ is listed here in the words the model's own validator raises.
 - server.ota_path is null and server.onboarding.enabled is false, so no device
   could fetch its configuration from this server at all. Keep one of the two:
   an ota_path for the boards already provisioned with it, or onboarding
-  enabled for the short /x/<key>/ route
+  enabled for the short `/x/<key>/` route
