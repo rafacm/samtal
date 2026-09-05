@@ -608,7 +608,7 @@ Reusing what exists wherever the assertion already has a home.
   regenerated for them; the licensed substitution and the amended
   docstring in
   `test_config_cli_respelling.py`; the follow-up issue for class (a)'s
-  five refusals (number substituted when filed); a CHANGELOG `Changed`
+  five refusals (filed as #410); a CHANGELOG `Changed`
   entry; the
   implementation-doc section. Behavior changes sit alone in this
   review. Design footprint: no new module; the seam that changes is the
