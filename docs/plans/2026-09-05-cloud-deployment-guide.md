@@ -143,7 +143,10 @@ memory.
   manifest comment says when to raise it), and only behind it the
   README's pair, restart at `/healthz` and admission at `/readyz`,
   `terminationGracePeriodSeconds: 30` above the drain, the read-only
-  root filesystem with a `/tmp` emptyDir, `/data` from the PVC, env
+  root filesystem with a memory-backed `/tmp`
+  (`emptyDir.medium: Memory` with a stated `sizeLimit`, since a
+  default emptyDir is node-backed storage and the contract promises
+  tmpfs), `/data` from the PVC, env
   from the Secret and a plain ConfigMap-free env section for the
   `VINGA_DB_*` facts, and a pod security context that makes the PVC
   writable by the image's non-root user: `runAsNonRoot`,
@@ -441,6 +444,10 @@ answer every finding, and a delta re-review confirms them.
    A default `emptyDir` is node-backed. Specify
    `emptyDir.medium: Memory` with a size limit and assert it in the
    agreement test.
+
+   *Resolution*: accepted in full. `/tmp` is
+   `emptyDir.medium: Memory` with a stated size limit, and the
+   agreement test asserts the medium.
 
 8. **P2: the agreement test omits the network path that must agree
    on port 8003.** A Service with the wrong `targetPort` or an
