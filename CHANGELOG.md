@@ -34,6 +34,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   choice among engines, delivered behind stable slots, never by making
   the pipeline machinery the product.
 
+- **Deployment artifacts for both lanes** (#397). `deploy/k8s/` holds
+  five plain committed manifests, no Helm and no kustomize: a
+  Deployment (one replica, `strategy: Recreate`, a startup probe on
+  `/healthz` generous enough for a cold start that downloads models and
+  only behind it the README's pair of restart at `/healthz` and
+  admission at `/readyz`, a read-only root filesystem with a
+  memory-backed `/tmp`, and a security context that makes the volume
+  writable by the image's own user), a Service, an Ingress written
+  against ingress-nginx that routes exactly `/x/` and `/xiaozhi/v1/`
+  and deliberately leaves `/api/`, the probes and the legacy OTA path
+  unrouted, an RWO PersistentVolumeClaim for `/data`, and a one-shot
+  Job that runs `deploy/postgres-init.sql` from a ConfigMap built out
+  of the one committed copy. Two Secret templates sit beside them,
+  `secret.yaml.example` for the server and `secret-init.example` for
+  the provisioning Job's administrative credential, named so they
+  cannot ride along on `kubectl apply -f deploy/k8s/`. Beside the
+  manifests, `deploy/docker-compose.production.yml` is the Docker
+  lane's file. CI validates the manifests with a pinned, checksummed
+  kubeconform, proves each of the compose file's refusals fires, and a
+  new agreement test
+  (`vinga-server/tests/unit/test_deploy_manifests.py`) reads the port,
+  the probe paths, the drain budget, the routed paths and the image's
+  user id out of the code and the Dockerfile and holds the manifests to
+  them.
+
 ### Changed
 
 - **The README front page leads with the mix.** The identity record
@@ -51,6 +76,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   keep-alive trap called out. The Hardware section (now Supported
   Hardware) and Documentation move below Getting Started, and the
   GitHub repository description and topics moved with it all.
+
+- **A hardened compose deployment is now a supported shape** (#397).
+  Until now the only compose file in the repository was explicitly the
+  trial and development story, and a deployment was left to derive its
+  own. `deploy/docker-compose.production.yml` is a second, standalone
+  file that says the production shape out loud: a required, pinned
+  image tag, `restart: unless-stopped`, an external Postgres and no
+  database service at all, a read-only root filesystem with a tmpfs,
+  and an explicit `${VAR:?}` refusal on every required value, so an
+  omission stops before a container starts instead of inheriting the
+  loopback development password. The trial file at the repository root
+  is untouched and remains exactly what it was: the two-container
+  trial CI boots, with its convenience defaults and its deliberate
+  absence of a restart policy.
 
 ## 2026-09-04
 
