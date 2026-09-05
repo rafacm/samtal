@@ -177,9 +177,21 @@ with `drain_s` inside the 30 s grace, read-only rootfs plus tmpfs,
 the two env secrets, the five `VINGA_DB_*` variables, migrations on
 boot); one replica everywhere it matters, citing the one-replica
 ADR; the Docker lane walking the production compose file; the k8s
-lane walking the manifests in apply order (secret, PVC, configmap
-plus init Job against the operator's own Postgres, deployment,
-service, ingress); `/data` sizing (model weights and voice caches
+lane walking the manifests in apply order (secrets, PVC, the init
+transaction against the operator's own Postgres, deployment,
+service, ingress), where the init step is written as a repeatable
+transaction rather than a one-time incantation: the ConfigMap
+applied idempotently
+(`kubectl create configmap ... --dry-run=client -o yaml \|
+kubectl apply -f -`), the Job deleted if present
+(`--ignore-not-found`) and recreated, then
+`kubectl wait --for=condition=complete` with a timeout, and a
+failed Job stops the upgrade with the Deployment untouched;
+upgrading is exactly that transaction rerun before the image tag
+changes (the README's rerun-then-boot order), and the `Recreate`
+strategy is what makes the no-overlap requirement hold, since the
+old pod is terminated and gone before the new image's pod, and so
+its boot-time migrations, exists; `/data` sizing (model weights and voice caches
 plus the capture budget when recording is provisioned, priced
 against the emptyDir alternative: weights re-download on reschedule,
 captures die with the pod); image tag guidance from the actual
@@ -307,6 +319,13 @@ answer every finding, and a delta re-review confirms them.
    `condition=complete`, stop on failure without touching the
    Deployment, then the tag change and the `Recreate` rollout, with
    the no-overlap property stated.
+
+   *Resolution*: accepted in full. The guide's k8s lane now
+   specifies the repeatable init transaction (idempotent ConfigMap
+   apply, delete-then-create Job, `kubectl wait` with a timeout,
+   failure stops the upgrade), upgrading reruns it before the tag
+   change, and the no-overlap property is stated as `Recreate`'s
+   own guarantee.
 
 3. **P1: the PVC may be unwritable by the image's non-root user.**
    The image runs as UID 1000 and writes caches under `/data`; a
