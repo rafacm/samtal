@@ -312,24 +312,60 @@ def test_an_agent_write_carries_the_one_apply_sentence(
 #
 # `boundaries()` answers in tokens, which is what keeps a suite from
 # going red over an edit that changed no boundary. The other side of
-# that is that it passes ANY sentence containing the announcing phrase,
-# so the two decisions #371 made about this sentence need assertions of
-# their own: it is one line, because it is printed once per entry of
-# every domain-half write, and it names the read that says what is
-# waiting as well as the command that installs it.
+# that is that it passes ANY sentence a notice registers, so the
+# decisions about the words themselves need assertions of their own:
+# #371's, that it is one line, because it is printed once per entry of
+# every domain-half write; and #386's, that it names no command, which
+# is the whole of what this server is allowed to say about a client it
+# neither ships nor versions.
 
 
-def test_the_per_write_notice_is_one_line_naming_both_commands() -> None:
-    """The shortening, pinned as behavior rather than as prose."""
+def test_the_per_write_notice_is_one_line_and_names_no_command() -> None:
+    """The shortening (#371) and the de-commanding (#386), pinned as
+    behavior rather than as prose.
+
+    The two commands this sentence used to end with are the client's to
+    name now, out of `cli.REMEDIES`, and the boundary they cross is
+    what `applies` beside the sentence carries.
+    """
     assert "\n" not in APPLY_NOTICE.sentence
-    assert f"{PROGRAM} apply" in APPLY_NOTICE.sentence
-    assert f"{PROGRAM} diff" in APPLY_NOTICE.sentence
+    assert f"{PROGRAM} apply" not in APPLY_NOTICE.sentence
+    assert f"{PROGRAM} diff" not in APPLY_NOTICE.sentence
+    assert APPLY_NOTICE.applies == (RELOAD,)
 
 
-def test_the_unserved_binding_notice_names_the_command_that_installs() -> None:
-    """The one sentence that names two boundaries at once, held to
-    naming the command that crosses the second of them."""
-    assert f"{PROGRAM} apply" in BINDING_UNSERVED_NOTICE.sentence
+def test_the_unserved_binding_notice_states_two_boundaries_and_no_command() -> None:
+    """The one sentence that announces two boundaries at once, held to
+    stating both of them and commanding neither: the row is live at the
+    device's next check-in, and the agent it names arrives at an
+    install."""
+    assert f"{PROGRAM} apply" not in BINDING_UNSERVED_NOTICE.sentence
+    assert set(BINDING_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
+
+
+def test_no_sentence_this_server_composes_names_a_command_of_a_client() -> None:
+    """The invariant that keeps #386's class closed, over every notice
+    rather than over the two that had to change.
+
+    A command spelling in one of these travels to a client of any age
+    and is answered by that client's own grammar, which is the pairing
+    nothing in one checkout can see: the census guard reads files, and a
+    sentence composed by an image built a year ago is not a file. So the
+    guard here is about the surface instead, and it is one line.
+
+    Scoped to the sentences a write is acknowledged with, deliberately.
+    A refusal still names a command, because `Problem` carries no type
+    token for a client to map to a sentence of its own, and de-commanding
+    one without giving the client something to map would make it
+    strictly less useful. That is a follow-up issue's, with the
+    vocabulary it needs.
+    """
+    composed = [
+        value for value in vars(entities).values() if isinstance(value, entities.Notice)
+    ]
+
+    for notice in composed:
+        assert PROGRAM not in notice.sentence, notice.sentence
 
 
 def test_the_three_clocks_are_not_in_a_per_write_sentence() -> None:

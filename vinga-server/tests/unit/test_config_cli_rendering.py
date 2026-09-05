@@ -1317,3 +1317,131 @@ def test_an_unknown_boundary_is_never_printed(
     printed = capsys.readouterr()
     assert APPLY_NOTICE.sentence in printed.err
     assert UNKNOWN_BOUNDARY not in printed.out + printed.err
+
+
+# And what this client says about a boundary it does know
+#
+# The other half of #386. The server states what is true of the write
+# and this client names the command that crosses the boundary it states,
+# so what reaches an operator is two voices in two lines: the sentence
+# the server composed, and the advice this grammar has about it.
+#
+# The advice is printed for a set this client knows and has something to
+# run about, and for nothing else. A set with no command to cross it, an
+# absent set and a set carrying a token this client cannot name all
+# print the sentence alone, which is the same rule the reading keeps one
+# level down: an unknown state is quoted, never guessed at.
+
+# The advice a write waiting at a reload is answered with, read from the
+# table rather than written out again: what this asserts is that the
+# client's half is printed, and what it says is the table's business.
+RELOAD_REMEDY = cli.REMEDIES[frozenset({Applies.RELOAD})]
+
+ADVISED = [
+    ("a set this client knows", [Applies.RELOAD.value], True),
+    ("a set with no command that crosses it", [Applies.CHECK_IN.value], False),
+    ("no applies at all, from a server older than the field", None, False),
+    ("an empty set", [], False),
+    ("a token this client does not know", [UNKNOWN_BOUNDARY], False),
+]
+
+
+@pytest.mark.parametrize(
+    ("applies", "advised"),
+    [(applies, advised) for _, applies, advised in ADVISED],
+    ids=[what for what, _, _ in ADVISED],
+)
+def test_a_write_is_advised_where_this_client_knows_the_boundary(
+    applies: list[str] | None, advised: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One write acknowledged, through the act that reads the body.
+
+    The server's sentence first and always, because an old client
+    printing it verbatim is what makes a state sentence safe; the
+    client's line under it only where this grammar has something to
+    cross that boundary with.
+    """
+    body = ACKNOWLEDGED if applies is None else ACKNOWLEDGED | {"applies": applies}
+
+    cli._acknowledged(cli.BIND_DEVICE.read(body))
+
+    printed = capsys.readouterr()
+    assert printed.err.splitlines() == [APPLY_NOTICE.sentence] + (
+        [RELOAD_REMEDY] if advised else []
+    )
+    assert (cli.INSTALLS in printed.err) is advised
+
+
+@pytest.mark.parametrize(
+    ("applies", "advised"),
+    [(applies, advised) for _, applies, advised in ADVISED],
+    ids=[what for what, _, _ in ADVISED],
+)
+def test_an_imported_entry_is_advised_where_this_client_knows_the_boundary(
+    applies: list[str] | None, advised: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """And the same five states one level down, where the boundaries
+    arrive inside a list of entries rather than beside one write."""
+    entry = _entry() if applies is None else _entry(applies=applies)
+
+    cli._imported(cli.IMPORT.read({"entries": [entry]}))
+
+    printed = capsys.readouterr()
+    assert printed.err.splitlines() == [APPLY_NOTICE.sentence] + (
+        [RELOAD_REMEDY] if advised else []
+    )
+    assert (cli.INSTALLS in printed.err) is advised
+
+
+def test_two_entries_waiting_at_one_boundary_are_advised_once(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The dedupe, on the half that is doing the work.
+
+    A document that wrote nine entities is waiting on one apply, not on
+    nine, and the advice under the sentence is one thing to do rather
+    than nine. Keyed on the boundary set, so a prose edit that reached
+    one sentence and not another could not split it into two.
+    """
+    entries = [
+        _entry(identity="sam", applies=[Applies.RELOAD.value]),
+        _entry(identity="alex", applies=[Applies.RELOAD.value]),
+    ]
+
+    cli._imported(cli.IMPORT.read({"entries": entries}))
+
+    printed = capsys.readouterr()
+    assert printed.out.splitlines() == ["agents.sam: wrote", "agents.alex: wrote"]
+    assert printed.err.splitlines() == [APPLY_NOTICE.sentence, RELOAD_REMEDY]
+
+
+def test_two_entries_from_an_older_server_keep_both_sentences(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The mixed-version arm, and why the key is not the set alone.
+
+    Every entry from a server older than the vocabulary carries the same
+    empty set, so a boundary-only key would collapse an ordinary stored
+    entry and a device binding, which are two different sentences, into
+    one and tell an operator half of what they are waiting on. With no
+    set to key on, the sentence is what is left, and both are printed
+    with nothing under either: this client cannot advise about a
+    boundary that was never stated.
+    """
+    entries = [
+        _entry(identity="sam"),
+        _entry(
+            section="devices",
+            identity="aa:bb:cc:dd:ee:ff",
+            notice=entities.BINDING_NOTICE.sentence,
+        ),
+    ]
+
+    cli._imported(cli.IMPORT.read({"entries": entries}))
+
+    printed = capsys.readouterr()
+    assert printed.err.splitlines() == [
+        APPLY_NOTICE.sentence,
+        entities.BINDING_NOTICE.sentence,
+    ]
+    assert cli.INSTALLS not in printed.err

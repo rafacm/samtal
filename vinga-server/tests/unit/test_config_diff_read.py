@@ -31,6 +31,7 @@ from sqlalchemy import select, update
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
+from tests.support.notices import RELOAD, boundaries
 from tests.support.problems import refused as refusal_body
 from tests.support.tools_mcp import Applying, entry_data, reading
 from vinga_server.app import DIFF_LOADS, config_diff_reader
@@ -43,7 +44,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
-from vinga_server.config.models import PROGRAM, DatabaseConfig
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -599,6 +600,8 @@ def test_a_running_server_hands_its_own_comparison_to_the_api(
 
     assert pending["providers"]["added"] == ["tts.spare"]
     assert pending["providers"]["applies"] == "reload"
-    # And the write's own acknowledgement said the same thing in
-    # sentence form, which is the pair an operator sees.
-    assert f"{PROGRAM} apply" in written.json()["notice"]
+    # And the write's own acknowledgement said the same thing in the
+    # same tokens, which is the pair an operator sees: one read off the
+    # comparison and one off the answer to the write, and the vocabulary
+    # is one closed set for both (#386).
+    assert boundaries(written.json()) == {RELOAD}

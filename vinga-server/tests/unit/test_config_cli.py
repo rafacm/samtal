@@ -46,8 +46,9 @@ from tests.support.config_cli import document as _document
 from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
-from vinga_server.config import cli
+from vinga_server.config import cli, entities
 from vinga_server.config.models import NOT_A_MAC, DatabaseConfig
+from vinga_server.config.responses import Applies
 from vinga_server.db import open_database, schema
 
 
@@ -320,14 +321,21 @@ def test_every_mutating_command_says_when_the_write_applies(
     The boundary each write names is what an operator acts on, so that
     is what is asserted; the agent's notice is also the whole of what
     the command printed, which is what pins that a write says one thing
-    and not a paragraph of them."""
+    and not a paragraph of them.
+
+    Two lines rather than one since #386, and they are two voices rather
+    than a paragraph: the server's sentence saying what is true of the
+    write, and this client's own advice about the boundary it states."""
     run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     assert boundaries(capsys.readouterr().err) == {RELOAD}
 
     run("agent", "set", "sam", "-f", "-", stdin="llm: claude\n")
     written = capsys.readouterr().err
     assert boundaries(written) == {RELOAD}
-    assert written.count("\n") == 1
+    assert written.splitlines() == [
+        entities.APPLY_NOTICE.sentence,
+        cli.REMEDIES[frozenset({Applies.RELOAD})],
+    ]
 
     run("default-agent", "set", "sam")
     # The application this fixture builds is told of no servable agents,
