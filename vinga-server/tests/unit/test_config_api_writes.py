@@ -168,7 +168,7 @@ def test_a_write_says_what_it_did_and_when_it_applies(
     answer = response.json()
     assert set(answer) == {"wrote", "notice", "applies"}
     assert isinstance(answer["wrote"], str) and answer["wrote"]
-    assert boundaries(answer["notice"]) == _expected_boundaries(method, path)
+    assert boundaries(answer) == _expected_boundaries(method, path)
 
 
 def _expected_boundaries(method: str, path: str) -> frozenset[str]:
@@ -210,7 +210,7 @@ def test_a_binding_to_a_loaded_agent_needs_no_restart(serving_client: TestClient
 
     answer = serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
 
-    assert boundaries(answer.json()["notice"]) == {CHECK_IN}
+    assert boundaries(answer.json()) == {CHECK_IN}
 
 
 def test_a_binding_to_an_agent_the_server_has_not_loaded_names_the_restart(
@@ -227,7 +227,7 @@ def test_a_binding_to_an_agent_the_server_has_not_loaded_names_the_restart(
     # Both boundaries at once, which is the whole of why this is not the
     # sentence a binding to a served agent carries: the row is live at
     # the next check-in, and the agent it names arrives with the reload.
-    assert boundaries(answer.json()["notice"]) == {CHECK_IN, RELOAD}
+    assert boundaries(answer.json()) == {CHECK_IN, RELOAD}
 
 
 def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> None:
@@ -237,8 +237,8 @@ def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> 
     served = serving_client.put("/default-agent", json={"name": "sam"})
     unserved = serving_client.put("/default-agent", json={"name": "poet"})
 
-    assert boundaries(served.json()["notice"]) == {CHECK_IN}
-    assert boundaries(unserved.json()["notice"]) == {CHECK_IN, RELOAD}
+    assert boundaries(served.json()) == {CHECK_IN}
+    assert boundaries(unserved.json()) == {CHECK_IN, RELOAD}
 
 
 def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
@@ -250,8 +250,8 @@ def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
     unbound = serving_client.delete("/devices/aa:bb:cc:dd:ee:ff")
     cleared = serving_client.delete("/default-agent")
 
-    assert boundaries(unbound.json()["notice"]) == {CHECK_IN}
-    assert boundaries(cleared.json()["notice"]) == {CHECK_IN}
+    assert boundaries(unbound.json()) == {CHECK_IN}
+    assert boundaries(cleared.json()) == {CHECK_IN}
 
 
 def test_the_notice_is_about_the_row_and_not_about_the_request(
@@ -269,7 +269,7 @@ def test_the_notice_is_about_the_row_and_not_about_the_request(
     assert answer.status_code == 200
     answer_body = answer.json()
     assert answer_body["wrote"] == "device aa:bb:cc:dd:ee:ff bound to sam"
-    assert boundaries(answer_body["notice"]) == {CHECK_IN}
+    assert boundaries(answer_body) == {CHECK_IN}
     # And the row really does hold the stripped name, which is what
     # makes the notice the true one.
     assert store.read_device("aa:bb:cc:dd:ee:ff").entry == ["sam"]
@@ -284,7 +284,7 @@ def test_the_default_agent_notice_is_about_the_row_too(
 
     assert answer.status_code == 200
     assert answer.json()["wrote"] == "default agent sam"
-    assert boundaries(answer.json()["notice"]) == {CHECK_IN}
+    assert boundaries(answer.json()) == {CHECK_IN}
     assert store.read_default_agent() == "sam"
 
 
@@ -302,7 +302,7 @@ def test_an_agent_write_carries_the_one_apply_sentence(
 
     body = answer.json()
     assert body["wrote"] == "agent sam"
-    assert boundaries(body["notice"]) == {RELOAD}
+    assert boundaries(body) == {RELOAD}
     assert body["notice"] == APPLY_NOTICE.sentence
 
 
@@ -379,7 +379,7 @@ def test_every_mutation_a_reload_applies_names_the_reload(
     answer = serving_client.request(method.upper(), path, json=body)
 
     assert answer.status_code == 200, answer.text
-    assert boundaries(answer.json()["notice"]) == {RELOAD}
+    assert boundaries(answer.json()) == {RELOAD}
 
 
 LAST_MUTATIONS = [
@@ -404,7 +404,7 @@ def test_the_last_two_kinds_name_the_reload_as_well(
     answer = serving_client.request(method.upper(), path, json=body)
 
     assert answer.status_code == 200, answer.text
-    assert boundaries(answer.json()["notice"]) == {RELOAD}
+    assert boundaries(answer.json()) == {RELOAD}
 
 
 def test_an_empty_database_becomes_a_working_configuration(
@@ -987,7 +987,7 @@ def test_a_fragment_is_written_and_read_back_byte_for_byte(
 
     assert written.status_code == 200, written.text
     assert written.json()["wrote"] == "prompt-fragment household"
-    assert boundaries(written.json()["notice"]) == {RELOAD}
+    assert boundaries(written.json()) == {RELOAD}
     assert client.get("/prompt-fragments/household").json() == {
         "entity": {"text": FRAGMENT},
         "secrets": {},
@@ -1012,7 +1012,7 @@ def test_a_fragment_is_deleted_unless_something_includes_it(
     gone = client.delete("/prompt-fragments/household")
 
     assert gone.json()["wrote"] == "prompt-fragment household deleted"
-    assert boundaries(gone.json()["notice"]) == {RELOAD}
+    assert boundaries(gone.json()) == {RELOAD}
     assert client.get("/prompt-fragments/household").status_code == 404
 
 
@@ -1203,7 +1203,7 @@ def test_every_applied_entry_says_when_it_takes_effect(client: TestClient) -> No
     read as a device asks for them."""
     entries = client.post("/apply", json=DOCUMENT).json()["entries"]
 
-    named = {one["section"]: boundaries(one["notice"]) for one in entries}
+    named = {one["section"]: boundaries(one) for one in entries}
     assert named["providers"] == {RELOAD}
     assert named["agents"] == {RELOAD}
     # This application serves no agent at all, which is the honest answer
@@ -1221,7 +1221,7 @@ def test_an_applied_binding_to_a_loaded_agent_needs_no_reload(
     differently on a server that is serving the agent it names."""
     entries = serving_client.post("/apply", json=DOCUMENT).json()["entries"]
 
-    named = {one["section"]: boundaries(one["notice"]) for one in entries}
+    named = {one["section"]: boundaries(one) for one in entries}
     assert named["devices"] == {CHECK_IN}
     assert named["default_agent"] == {CHECK_IN}
 

@@ -80,7 +80,7 @@ async def test_a_bind_over_the_api_reaches_the_devices_next_check_in(
             assert answer.status_code == 200, answer.text
             # The acknowledgement says what just became true, and this is
             # the path an operator's CLI prints it from.
-            assert boundaries(answer.json()["notice"]) == {CHECK_IN}
+            assert boundaries(answer.json()) == {CHECK_IN}
 
             assert (await _check_in(client))["websocket"]["token"] != ""
 

@@ -386,12 +386,23 @@ def test_the_prompt_read_describes_where_it_reads_memory_from() -> None:
 
 def test_the_acknowledgement_notice_names_two_boundaries_and_no_start() -> None:
     """And the schema a client reads a write's answer through. Two
-    boundaries, because there are two: a device asking, and a reload."""
+    boundaries, because there are two an operator waits on: a device
+    asking, and an install.
+
+    What the description may not do is describe a notice the server
+    stopped sending, which is what it did until #386: it said the
+    sentence names `POST /runtime/config/reload` and the three moments a
+    conversation meets a change at, and since the verb rename it names
+    neither. So the route is asserted absent rather than present, and
+    the description points a program at the field beside it.
+    """
     schemas = json.loads(docgen.openapi())["components"]["schemas"]
     notice = schemas["Acknowledgement"]["properties"]["notice"]["description"]
 
-    assert "/runtime/config/reload" in notice
+    assert "/runtime/config/reload" not in notice
     assert "next OTA check or connection" in notice
+    assert "installed on the running server" in notice
+    assert "`applies`" in notice
     assert "Nothing this API writes waits for a server start." in notice
 
 

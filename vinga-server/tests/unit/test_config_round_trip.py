@@ -169,7 +169,7 @@ def test_a_read_of_one_entity_is_a_write_of_it(
     again = client.put(path, json=envelope["entity"])
 
     assert again.status_code == 200
-    assert set(again.json()) == {"wrote", "notice"}
+    assert set(again.json()) == {"wrote", "notice", "applies"}
     assert client.get(path).json() == envelope
 
 

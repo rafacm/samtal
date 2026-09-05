@@ -310,7 +310,7 @@ def test_an_agent_added_by_an_apply_is_served_at_the_next_check_in(tmp_path: Pat
             headers=BEARER,
         )
         assert bound.status_code == 200
-        assert boundaries(bound.json()["notice"]) == {CHECK_IN, RELOAD}
+        assert boundaries(bound.json()) == {CHECK_IN, RELOAD}
         # The binding is live and the agent is not, so the board is
         # still turned away.
         assert token_of(client) == ""
@@ -329,7 +329,7 @@ def test_an_agent_added_by_an_apply_is_served_at_the_next_check_in(tmp_path: Pat
             json={"agents": ["poet"]},
             headers=BEARER,
         )
-        assert boundaries(again.json()["notice"]) == {CHECK_IN}
+        assert boundaries(again.json()) == {CHECK_IN}
 
 
 def test_an_agent_removed_by_an_apply_is_out_of_reach_at_the_next_one(

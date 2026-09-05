@@ -112,7 +112,7 @@ async def test_a_board_is_onboarded_by_the_code_it_shows(
             )
             assert claim.status_code == 200, claim.text
             assert claim.json()["wrote"] == f"device {DEVICE_MAC} bound to assistant"
-            assert boundaries(claim.json()["notice"]) == {CHECK_IN}
+            assert boundaries(claim.json()) == {CHECK_IN}
 
             # The board's very next poll, three seconds after the last
             # one, sees it: no power cycle, no button press.

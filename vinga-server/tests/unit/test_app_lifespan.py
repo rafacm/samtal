@@ -1058,7 +1058,7 @@ def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
         # The acknowledgement claims the write is live rather than
         # waiting for a restart, which is the promise the check-in below
         # either keeps or breaks.
-        assert boundaries(answer.json()["notice"]) == {CHECK_IN}
+        assert boundaries(answer.json()) == {CHECK_IN}
 
         body = check_in(client, mac=NORMALIZED)
 

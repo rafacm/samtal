@@ -114,7 +114,7 @@ def test_a_device_write_says_it_is_stored_and_waits_for_a_start(
 
     assert bound.status_code == 200, bound.text
     assert bound.json()["wrote"] == f"device {DEVICE} bound to assistant"
-    assert boundaries(bound.json()["notice"]) == {STORE_BOOT}
+    assert boundaries(bound.json()) == {STORE_BOOT}
     # Stored, which is the half the acknowledgement promises: a server
     # started from this directory would read it.
     assert client.get(f"{MOUNT_PATH}/devices/{DEVICE}").json() == {
@@ -137,7 +137,7 @@ def test_every_live_write_names_the_same_boundary(client: TestClient) -> None:
 
     for answer in answers:
         assert answer.status_code == 200, answer.text
-        assert boundaries(answer.json()["notice"]) == {STORE_BOOT}
+        assert boundaries(answer.json()) == {STORE_BOOT}
 
 
 def test_a_server_reading_a_store_answers_all_three_as_usual(
@@ -167,4 +167,4 @@ def test_a_server_reading_a_store_answers_all_three_as_usual(
             f"{MOUNT_PATH}/devices/{DEVICE}", json={"agents": ["assistant"]}
         )
 
-    assert STORE_BOOT not in boundaries(bound.json()["notice"])
+    assert STORE_BOOT not in boundaries(bound.json())

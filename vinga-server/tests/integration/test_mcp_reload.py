@@ -156,7 +156,7 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
             assert written.status_code == 200, written.text
             # And the write said how to apply it, which is what this
             # test then does.
-            assert boundaries(written.json()["notice"]) == {RELOAD}
+            assert boundaries(written.json()) == {RELOAD}
 
             granted = await control.put(
                 "/agents/assistant", json={"prompt": "ASSISTANT", "mcp": [ENTRY]}
