@@ -22,7 +22,7 @@ from pydantic import BaseModel, ValidationError
 
 from tests.support.configs import config_with
 from tests.support.tools_mcp import entry_data
-from vinga_server.config import Config, responses
+from vinga_server.config import Config
 from vinga_server.config.boot import BootConfig
 from vinga_server.config.diff import (
     APPLIES,
@@ -553,20 +553,58 @@ NARROWED: dict[type[BaseModel], dict[str, object]] = {
 }
 
 
+def _models_in(annotation: object) -> list[type[BaseModel]]:
+    """Every model an annotation names, however deeply it is wrapped.
+
+    Walked rather than matched on a container, because what a field of
+    this answer is declared as is the answer's business and not this
+    test's: a kind carried in a list, an optional or a union tomorrow
+    is still a model of the comparison.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [annotation]
+    return [model for argument in get_args(annotation) for model in _models_in(argument)]
+
+
+def _reachable(root: type[BaseModel]) -> set[type[BaseModel]]:
+    """Every model the comparison's answer is composed of, itself
+    included."""
+    found: set[type[BaseModel]] = set()
+    queue = [root]
+    while queue:
+        model = queue.pop()
+        if model in found:
+            continue
+        found.add(model)
+        queue += [
+            nested
+            for field in model.model_fields.values()
+            for nested in _models_in(field.annotation)
+        ]
+    return found
+
+
 def test_every_boundary_a_comparison_carries_is_one_of_the_narrowed_models() -> None:
-    """The completeness pin for the table above: a model of this read
-    that grew a boundary and was never pinned would leave the case below
-    passing while saying nothing about it."""
+    """The completeness pin for the table above, and the one place the
+    narrowing is asked about rather than assumed.
+
+    Reached from `ConfigDiff` and selected on carrying a boundary at
+    all, deliberately: a set selected on already being narrowed would
+    answer the question with itself, so a model added to this read and
+    typed with the whole enum would drop out of the comparison instead
+    of failing it. Which is the shape of the defect this pin exists for:
+    a fifth boundary reaching a field that never sends it.
+
+    The narrowing is therefore its own assertion, made over the models
+    this walk found rather than over the ones the table lists.
+    """
     carrying = {
-        model
-        for model in vars(responses).values()
-        if isinstance(model, type)
-        and issubclass(model, BaseModel)
-        and "applies" in model.model_fields
-        and model.model_fields["applies"].annotation is DiffApplies
+        model for model in _reachable(ConfigDiff) if "applies" in model.model_fields
     }
 
     assert carrying == set(NARROWED)
+    for model in carrying:
+        assert model.model_fields["applies"].annotation is DiffApplies, model.__name__
 
 
 @pytest.mark.parametrize("model", list(NARROWED), ids=lambda model: model.__name__)
