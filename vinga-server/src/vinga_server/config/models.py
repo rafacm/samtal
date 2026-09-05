@@ -233,8 +233,13 @@ class ApiConfig(BaseModel):
         default="VINGA_API_SECRET",
         description=(
             "The name of the environment variable holding the API's bearer token, "
-            "never the token itself. The server refuses to boot when the variable "
-            "it names is unset or blank."
+            "never the token itself. A variable name and nothing else: letters, "
+            "digits and underscores, not starting with a digit, so a pasted token "
+            "is refused where it was written rather than at the lookup that would "
+            "never have found it. The server refuses to boot when the variable it "
+            "names is unset or blank. The token grants everything the API can do, "
+            "secret writes included, so it belongs on a loopback connection or "
+            "behind TLS and nowhere else."
         ),
     )
 
@@ -252,13 +257,39 @@ class AuthConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = True
-    secret_env: EnvName = "VINGA_AUTH_SECRET"
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether the websocket handshake checks a device token. On by default, "
+            "and a server started with it on and nothing in the variable "
+            "`secret_env` names refuses to boot, so a deployment never quietly "
+            "serves every device that connects. Turning it off is the one "
+            "deliberate flag for a trial on a trusted network, and with no secret "
+            "there is no key to derive, so the short onboarding route is then "
+            "served keyless."
+        ),
+    )
+    secret_env: EnvName = Field(
+        default="VINGA_AUTH_SECRET",
+        description=(
+            "The name of the environment variable holding the device-auth secret, "
+            "never the secret itself. A variable name and nothing else: letters, "
+            "digits and underscores, not starting with a digit, so a pasted secret "
+            "is refused where it was written rather than at the lookup that would "
+            "never have found it. The same secret is what the short onboarding "
+            "key is derived from, which is why rotating it moves that key."
+        ),
+    )
 
-    # How long an issued token stays valid. Thirty days, upstream's
-    # default; the firmware re-checks OTA on every boot, so a device in
-    # normal use is re-issued long before it gets near this.
-    token_expire_s: int = Field(default=2592000, gt=0)
+    token_expire_s: int = Field(
+        default=2592000,
+        gt=0,
+        description=(
+            "How long an issued device token stays valid, in seconds. Thirty days, "
+            "which is upstream's default; the firmware re-checks OTA on every boot, "
+            "so a device in normal use is re-issued long before it gets near this."
+        ),
+    )
 
 
 class OnboardingConfig(BaseModel):
@@ -277,14 +308,33 @@ class OnboardingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = True
+    enabled: bool = Field(
+        default=True,
+        description=(
+            f"Whether the short onboarding route is served at "
+            f"`{ONBOARDING_MOUNT_PATH}/<key>/`. On by default. The legacy "
+            f"`server.ota_path` keeps working beside it, and a deployment that "
+            f"wants only that one turns this off; turning this off with "
+            f"`server.ota_path` null as well is refused at boot, since no device "
+            f"could then fetch its configuration from this server at all."
+        ),
+    )
 
-    # The derived key, pinned. Its one use is a secret rotation: the
-    # derivation follows the secret, so pinning the previous key keeps
-    # provisioned boards reaching the same URL while the new secret takes
-    # over everything else. Left unset, which is the normal case, the key
-    # is derived and nothing about it is stored.
-    key: str | None = None
+    key: str | None = Field(
+        default=None,
+        description=(
+            "The onboarding key, pinned, rather than derived from the device-auth "
+            "secret. Eight base32 characters (A-Z and 2-7), the shape the "
+            "derivation produces, written in any case and normalized to upper. Its "
+            "one use is a secret rotation: the derivation follows the secret, so "
+            "pinning the previous key keeps provisioned boards reaching the same "
+            "URL while the new secret takes over everything else. Left unset, "
+            "which is the normal case, the key is derived and nothing about it is "
+            "stored. It stands in front of the endpoint that issues device tokens, "
+            "so it is better injected from the environment than written into a "
+            "file."
+        ),
+    )
 
     @field_validator("key")
     @classmethod
