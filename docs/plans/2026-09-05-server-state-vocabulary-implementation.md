@@ -330,13 +330,13 @@ the two READMEs, the guide, the example fragments and the reference
 pages carry none of them, so the two documents the plan names are the
 whole of the documentation footprint.
 
-**The follow-up issue is drafted, not filed.** This milestone ran with
-no GitHub access by instruction, so class (a)'s five refusals are
-written up as a draft for the coordinator to file. It carries the
+**The follow-up issue is #410, filed by the coordinator from this
+milestone's draft.** The milestone itself ran with no GitHub access
+by instruction. It carries the
 mechanism the fix needs (a problem-type vocabulary on `Problem`, with
 this milestone's shape as its precedent), the two facts #386's census
 established about the `SERVER_PROGRAM` mitigation, and the table of the
-five constants. Nothing committed here names an issue number for it.
+five constants. 
 
 ### Open questions
 
