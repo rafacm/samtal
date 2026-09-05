@@ -39,7 +39,7 @@ from vinga_server.memory.store import MEMORY_CHAIN, MemoryScope, open_memory
 # the whole of what this release upgrades from.
 BASELINE = "2001_agent_memory"
 
-HEAD = "2002_memory_scopes"
+HEAD = "2003_rename_moves_memory"
 
 # Three facts, written the way the baseline's shape wrote them: an agent
 # name that needed sanitizing when memory was a file, text with the

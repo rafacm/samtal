@@ -16,7 +16,8 @@ The pieces, in the order they are met:
 - `schema.py`: the `facts` table with its scope check, its held pair
   and its two indexes, and the `state` table.
 - `migrations/`: the chain's Alembic environment, its baseline
-  `2001_agent_memory`, and the forward migration `2002_memory_scopes`.
+  `2001_agent_memory`, and the forward migrations `2002_memory_scopes`
+  and `2003_rename_moves_memory`.
 - `store.py`: `MEMORY_CHAIN`, the two engines, `open_memory`, and the
   sentences a caller speaks, from `read_for_prompt` down to the purge.
 
