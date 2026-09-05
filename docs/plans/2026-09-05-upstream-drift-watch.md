@@ -141,7 +141,18 @@ record that owns the reasoning) rather than a promise change.
   repository: `url`, `pinned`, `read` (date), `paths` (list). A
   header comment carries the resolution loop and the rule for adding
   a path (a path joins when a maintained section of the notes is
-  read from it).
+  read from it). The firmware repository's four paths are exact
+  already (`docs/websocket.md`, `main/protocols/`, `main/ota.cc`,
+  `main/application.cc`); the server repository's are descriptive
+  today (the manager-api OTA controller and device service, the
+  xiaozhi-server handshake core), so resolving them to exact
+  repository-relative paths is an explicit M1 prerequisite: the
+  milestone clones that repository bloblessly at the pinned SHA,
+  locates `OTAController.java`, `DeviceServiceImpl.java` and the
+  handshake module by listing the tree rather than by memory, and
+  records the resolved paths in the manifest and the implementation
+  doc. A candidate that does not exist at the pin is a finding to
+  record, not a path to guess.
 - `.github/workflows/upstream-drift.yml` (M1): the scheduled
   workflow above. It never parses the manifest itself: it calls
   `scripts/check_upstream_watch.py --print`, so exactly one parser
@@ -274,6 +285,11 @@ so it rides, per the queue decision's condition.
    repository-relative paths, and the vendor clones are absent.
    List the exact paths or make confirming and recording them an
    explicit M1 prerequisite.
+
+   *Resolution*: accepted, second option. Resolving the server-side
+   paths from a blobless clone at the pinned SHA is an explicit M1
+   prerequisite, recorded in the manifest and the implementation
+   doc, with a missing candidate recorded rather than guessed.
 
 5. **P2: the manifest and notes are two manually maintained
    structures whose dates can silently disagree.** Only the SHA was
