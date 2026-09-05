@@ -1254,9 +1254,13 @@ class AppliedEntry(BaseModel):
     )
     notice: str | None = Field(
         description=(
-            "When this entry's change takes effect, in the same sentences a single "
-            "write of it is acknowledged with, and null for an entry that was "
-            "`unchanged`, which has nothing waiting to be applied."
+            "What is true of this entry now, in the same sentences a single write of "
+            "it is acknowledged with: a reader's half, saying what the write did and "
+            "did not reach, and naming no command, because which command crosses a "
+            "boundary is a fact of a client's grammar rather than of this server's. "
+            "The boundary itself is `applies` beside it, which is the half to branch "
+            "on. Null for an entry that was `unchanged`, which has nothing waiting to "
+            "be applied."
         )
     )
     applies: tuple[Applies, ...] = Field(
@@ -1275,10 +1279,10 @@ class AppliedEntry(BaseModel):
         say two.
 
         The field above states the rule as prose and nothing enforced
-        it: an entry that changed nothing arriving with a boundary to
-        wait at, or a write arriving with none, are two answers no
-        operator can act on, and the first is a sentence printed to a
-        terminal by an entry that has nothing to say.
+        it: an entry that changed nothing arriving with a sentence about
+        what it is still waiting for, or a write arriving with none, are
+        two answers no operator can act on, and the first is a sentence
+        printed to a terminal by an entry that has nothing to say.
 
         Refused rather than reconciled, for the reason `RuntimeInfo`
         refuses its own three-field disagreement: reconciling is picking
@@ -1298,8 +1302,9 @@ class AppliedEntry(BaseModel):
         if wrote != (self.notice is not None):
             raise ValueError(
                 "outcome and notice are one fact and disagree: an entry that was "
-                "written carries the boundary its change takes effect at, and an "
-                "unchanged one carries null, having nothing waiting to be applied"
+                "written carries the sentence saying what its change is still waiting "
+                "for, with the boundary itself in `applies`, and an unchanged one "
+                "carries null, having nothing waiting to be applied"
             )
         return self
 
