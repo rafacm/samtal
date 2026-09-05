@@ -527,6 +527,24 @@ def test_the_production_compose_publishes_the_servers_port(compose: Any) -> None
     assert compose["ports"] == [f"{port}:{port}"]
 
 
+def test_the_production_compose_pins_the_url_that_would_beat_the_guards(
+    compose: Any,
+) -> None:
+    """`VINGA_DB_URL` replaces the five discrete facts whole when it is
+    set, so one line in the required env file would send the container
+    at another database with every guard beside it still satisfied. The
+    pin has to be empty rather than absent, since absent is what the env
+    file could fill in, and empty reaches the same resolver path unset
+    does."""
+    from vinga_server.db import URL_ENV
+
+    pinned = compose["environment"].get(URL_ENV, "<absent>")
+    assert pinned == "", (
+        f"{URL_ENV} is {pinned!r} rather than pinned empty, "
+        "so the env file can override the guarded fields"
+    )
+
+
 def test_the_production_compose_refuses_without_each_required_value() -> None:
     """Every required value is an interpolation guard of its own. A
     required `env_file` proves only that a file exists, so the guards
