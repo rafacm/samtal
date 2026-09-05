@@ -2104,9 +2104,10 @@ def _check_no_mcp_url_credential(
     `url` is the same shape `base_url` is: an innocent field name whose
     value can carry the whole credential, and
     `url: https://user:password@host/mcp` passes every secret-shaped-key
-    rule this model has, since the key admits to nothing. Stored, it is
-    read back on every display path. So it is refused where it is
-    chosen.
+    rule this model has, since the key admits to nothing. Stored, it
+    sits in the configuration in plain text rather than in the encrypted
+    store a credential belongs in, where it could be entered, rotated
+    and kept out of an export. So it is refused where it is chosen.
 
     One declared scalar and no further, deliberately: `headers` and
     `env` carry their own rules about what a secret-bearing key may
@@ -2118,7 +2119,11 @@ def _check_no_mcp_url_credential(
     Write time only, exactly like the provider's rule and for the same
     reason: a row written before this rule still boots, still reads and
     is still deletable, and a deployment does not get a server that
-    refuses to start over a value it can no longer edit.
+    refuses to start over a value it can no longer edit. What such a row
+    no longer does is hand the credential back: the display boundary
+    strips one from every string it shows (`views._shown`), so a read of
+    that entry answers with the address and not with what is in front of
+    its host (#381).
 
     The refusal names the field and the rule and never the value: what
     fails this check is a credential. Naming the field is safe here in a
@@ -2129,21 +2134,22 @@ def _check_no_mcp_url_credential(
     if carried == "userinfo":
         raise ConfigError(
             f'"{location}.url" is a URL carrying a user and password before its '
-            f"host, which is not allowed: this value is stored as written and "
-            f"shown on every read of this MCP server. Write the address on its "
-            f"own and send the credential as a header whose value is read from "
-            f"the server's own environment at startup, for example "
-            f"headers.Authorization: $MY_MCP_TOKEN. The value is not quoted back"
+            f"host, which is not allowed: this value is stored as written, in the "
+            f"configuration rather than in the encrypted store a credential "
+            f"belongs in. Write the address on its own and send the credential as "
+            f"a header whose value is read from the server's own environment at "
+            f"startup, for example headers.Authorization: $MY_MCP_TOKEN. The value "
+            f"is not quoted back"
         )
     if carried == "query":
         raise ConfigError(
             f'"{location}.url" is a URL carrying a credential as a query '
             f"parameter, which is not allowed, for the reason a user and "
-            f"password before the host is not: this value is stored as written "
-            f"and shown on every read of this MCP server. Send the credential as "
-            f"a header whose value is read from the server's own environment at "
-            f"startup instead, for example headers.Authorization: $MY_MCP_TOKEN. "
-            f"The value is not quoted back"
+            f"password before the host is not: this value is stored as written, in "
+            f"the configuration rather than in the encrypted store a credential "
+            f"belongs in. Send the credential as a header whose value is read from "
+            f"the server's own environment at startup instead, for example "
+            f"headers.Authorization: $MY_MCP_TOKEN. The value is not quoted back"
         )
 
 
@@ -2216,17 +2222,19 @@ def _check_no_url_credentials(
     The secret-shaped-key rules above stop a secret written under a name
     that admits to being one. A URL is the shape that gets past them:
     `base_url: https://user:password@host/v1` has an innocent key, and
-    what it holds is stored in the configuration, read back on every
-    display path, and copied verbatim into the manifest of every capture
-    and every conversation record made against it. So it is refused
+    what it holds is stored in the configuration in plain text rather
+    than in the encrypted store a credential belongs in, where it could
+    be entered, rotated and kept out of an export. So it is refused
     where it is chosen.
 
     Write time only, exactly like the addressability rule below and for
     the same reason: a row written before this rule still boots, still
     reads and is still deletable, and a deployment does not get a server
-    that refuses to start over a value it can no longer edit. The record
-    is defended on its own side as well, by building a manifest that
-    strips this rather than by trusting that no row has it.
+    that refuses to start over a value it can no longer edit. Both
+    surfaces such a row would otherwise reach defend themselves rather
+    than trust that no row has one: the record, by building a manifest
+    that strips it, and the display, by showing every string without
+    what a URL of it carries (`views._shown`, #381).
 
     The refusal names the option and the rule and never the value: what
     fails this check is a credential. It names the option only when the
@@ -2284,21 +2292,20 @@ def _refuse_url_credentials(path: str, value: object, *, named: bool) -> None:
     if carried == "userinfo":
         raise ConfigError(
             f"{where} is a URL carrying a user and password before its host, which "
-            f"is not allowed: this value is stored as written, shown on every read, "
-            f"and copied into the manifest of every capture and conversation record "
-            f"made against this provider. Write the address on its own and name the "
-            f"variable holding the credential, for example api_key_env: "
-            f"MY_PROVIDER_KEY. The value is not quoted back"
+            f"is not allowed: this value is stored as written, in the "
+            f"configuration rather than in the encrypted store a credential belongs "
+            f"in. Write the address on its own and name the variable holding the "
+            f"credential, for example api_key_env: MY_PROVIDER_KEY. The value is "
+            f"not quoted back"
         )
     if carried == "query":
         raise ConfigError(
             f"{where} is a URL carrying a credential as a query parameter, which is "
             f"not allowed, for the reason a user and password before the host is "
-            f"not: this value is stored as written, shown on every read, and copied "
-            f"into the manifest of every capture and conversation record made "
-            f"against this provider. Name the variable holding the credential "
-            f"instead, for example api_key_env: MY_PROVIDER_KEY. The value is not "
-            f"quoted back"
+            f"not: this value is stored as written, in the configuration rather "
+            f"than in the encrypted store a credential belongs in. Name the "
+            f"variable holding the credential instead, for example api_key_env: "
+            f"MY_PROVIDER_KEY. The value is not quoted back"
         )
     if isinstance(value, Mapping):
         for nested in value.values():
