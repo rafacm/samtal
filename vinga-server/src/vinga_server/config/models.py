@@ -489,6 +489,75 @@ class CaptureConfig(BaseModel):
     )
 
 
+# How the environment names a key of the file half.
+#
+# The prefix and the delimiter are `FileConfig`'s own settings
+# configuration below, read from here rather than written there as two
+# literals: what `VINGA_SERVER__PORT` means is the scheme itself, and a
+# scheme spelled once in the settings model and again in every sentence
+# about it is two spellings that must agree.
+ENV_PREFIX = "VINGA_"
+ENV_NESTING = "__"
+
+# And the prefix every key of the server half carries, which is the
+# scheme applied to `FileConfig`'s one field. The word is written out
+# because that field is the root this page and the refusals are about;
+# everything below it is joined by the delimiter.
+SERVER_ENV_PREFIX = f"{ENV_PREFIX}SERVER{ENV_NESTING}"
+
+# The database section's own environment spellings, declared beside the
+# model they name the fields of.
+#
+# One key, one variable, and the variable is the short one. The generic
+# `VINGA_SERVER__DATABASE__HOST` would work by accident of the nesting
+# scheme, and letting it would give every connection fact two names: the
+# compose file feeds the Postgres image from the short spellings, which
+# is the whole point of having them, and two spellings that must agree
+# are one spelling with a bug pending. `loader._check_database_environment`
+# is what refuses the generic one.
+#
+# Outside the section scheme rather than inside it, the way
+# `VINGA_MASTER_KEY` is: what these name is where the server's own state
+# lives, which a deployment sets beside its credentials rather than in
+# the file it edits.
+#
+# Here rather than in `loader.py`, where they were, and rather than in
+# `vinga_server.db`, where the two credential-only names were, for the
+# reason `PROGRAM` is here: three readers and one of them below the
+# other two. The loader applies them, the database package reads the two
+# with no key, and the generated server reference publishes all six, and
+# a renderer that restated them as literals would keep passing across a
+# rename. This module imports neither of the other two, so there is no
+# cycle to pay for it.
+DATABASE_SECTION = "database"
+
+DATABASE_ENV_PREFIX = f"{ENV_PREFIX}DB_"
+
+# The four the YAML also carries, by the field of `DatabaseConfig` each
+# one overrides. The password and the whole-URL override have no YAML
+# key at all and are read where the URL is built (`vinga_server.db`), so
+# they are deliberately not in this table: it is what maps a field onto
+# its variable, and neither of those is a field.
+DATABASE_ENV_NAMES: dict[str, str] = {
+    "host": f"{DATABASE_ENV_PREFIX}HOST",
+    "port": f"{DATABASE_ENV_PREFIX}PORT",
+    "name": f"{DATABASE_ENV_PREFIX}NAME",
+    "user": f"{DATABASE_ENV_PREFIX}USER",
+}
+
+# And the two that are environment-only, with the reasoning on
+# `DatabaseConfig` below: a credential in a configuration file is what
+# the no-secrets-in-YAML stance exists to prevent, and a URL carries one
+# in its authority and can carry another in its query.
+DATABASE_PASSWORD_ENV = f"{DATABASE_ENV_PREFIX}PASSWORD"
+DATABASE_URL_ENV = f"{DATABASE_ENV_PREFIX}URL"
+
+# The generic spelling of a database key, which is refused in favour of
+# the short one above. Derived from the scheme rather than written out,
+# so it cannot come to name a prefix the scheme would not produce.
+DATABASE_GENERIC_ENV_PREFIX = f"{SERVER_ENV_PREFIX}{DATABASE_SECTION.upper()}{ENV_NESTING}"
+
+
 class DatabaseConfig(BaseModel):
     """Which Postgres database this server keeps its state in.
 
@@ -3160,8 +3229,8 @@ class FileConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         extra="forbid",
-        env_prefix="VINGA_",
-        env_nested_delimiter="__",
+        env_prefix=ENV_PREFIX,
+        env_nested_delimiter=ENV_NESTING,
     )
 
     @classmethod

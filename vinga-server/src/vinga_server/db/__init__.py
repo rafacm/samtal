@@ -70,7 +70,11 @@ from alembic.util.exc import CommandError
 from sqlalchemy import URL, Engine, create_engine, event, make_url, text
 
 from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import (
+    DATABASE_PASSWORD_ENV,
+    DATABASE_URL_ENV,
+    DatabaseConfig,
+)
 from vinga_server.db import schema
 
 # How long a connection waits for another one's lock before it gives up.
@@ -90,8 +94,14 @@ LOCK_TIMEOUT_MS = 10_000
 # at all, because a password in a config file is what the
 # no-secrets-in-YAML stance exists to prevent, and the URL has none
 # because it is the whole of the five at once.
-URL_ENV = "VINGA_DB_URL"
-PASSWORD_ENV = "VINGA_DB_PASSWORD"
+#
+# Declared beside that model with the other four rather than here, since
+# the generated server reference publishes all six and a page that
+# restated them would keep rendering across a rename. These are the
+# names this module's own callers already read them under, so the two
+# spellings are one string each.
+URL_ENV = DATABASE_URL_ENV
+PASSWORD_ENV = DATABASE_PASSWORD_ENV
 
 # What a development machine gets when it says nothing, matching the
 # compose file's own default so the zero-configuration loop is
