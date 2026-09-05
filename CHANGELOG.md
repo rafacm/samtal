@@ -30,6 +30,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   operator can reach changes yet: there is no route and no verb until a
   later change.
 
+- **A rename is ordered against the conversations still in flight.** A
+  live session holds the agent's name for as long as it lasts, so a
+  rename moves the store underneath it, and left alone that is two
+  defects rather than a cosmetic mismatch: a thread that already has a
+  row refuses the next turn for misattribution and the writer drops the
+  marker's whole batch, and a thread that has not materialized yet is
+  written under the old name, which is a fresh reference to a name
+  nothing answers to made by the act that removes them. The rename now
+  takes the same ordering lock a deletion takes, across its transaction
+  and the publication that follows it, and announces the pair of names
+  to whichever writer is recording in this process. That writer keeps
+  one translation per recording session, marked for the sessions live at
+  that instant and no others, and resolves the name once at the boundary
+  where a name enters the record, so the turn, its handover legs and the
+  thread it lands on all say the same thing. What a session writes after
+  a rename is a new write and carries the name the agent has now; what
+  was written before it is dated record and is never touched; and the
+  session row keeps the name it opened with, because that column's
+  subject is the moment the session opened. Still nothing an operator
+  can reach: the protocol lands whole before anything can call it.
+
 ## 2026-09-05
 
 ### Added

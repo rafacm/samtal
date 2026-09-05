@@ -214,3 +214,138 @@ from.
 - The generated-document drift checks: all seven current, none
   regenerated. M1 touches no generated document; the two migrations and
   the regenerated references are M3's.
+
+## M2: the order that covers the sessions in flight
+
+PR TBD.
+
+### What landed
+
+In the order the commits tell it: the writer's half, the publication
+that reaches it, and the suite that arranges every interleaving it
+claims.
+
+- **`conversations/store.py` gains `renamed(old, new)`,** `erased()`'s
+  sibling: it reaches the same register of writers with a different
+  fact, is called after the renaming transaction has committed and
+  inside `erasure_order()`, and skips a no-op rename. The comment above
+  `_erasure_order` gains the rename as its second holder and says what
+  the property both holders need really is, which is that every store
+  change a live writer must observe atomically is published under it;
+  `erasure_order()`'s own docstring now names both pairings. The lock
+  keeps the erasure's name, per the plan.
+- **`ConversationStore` gains the translation.** One map per recording
+  session, `_renames`, guarded by the lock the producer state is guarded
+  by, because a publication writes it from a request thread and the
+  writer reads it inside its durable transaction. `open_session`
+  registers an empty map, which is what makes a session translatable at
+  all; `translate(old, new)` is `forget`'s sibling and marks every
+  session live at that instant, composing on insert so a chain of
+  renames resolves in one lookup; `_retire` drops a session's map where
+  `_devices` is dropped, at the Close marker and at the tombstone.
+- **The resolution sits at the durable-write boundary.** `_write` reads
+  the session's translations once for the whole marker (`_naming`) and
+  resolves each turn's agent once, handing that one value to
+  `_turn_row`, which now takes it as an argument, and to the `Landing`.
+  `_leg` resolves its own agent through the same map. `_session_row` is
+  untouched.
+- **`config/store.py`'s `rename_agent` enters the order before it opens
+  its transaction and publishes after the commit, still inside it.** Two
+  lines and a docstring paragraph; nothing else about the write moved.
+- **`tests/unit/test_agent_rename_in_flight.py`,** nine cases: the two
+  defects with the writer parked and the rename committing in front of
+  it, the ordering lock's own claim, the row read back whole, a leg
+  naming a second renamed agent, an agent nothing renamed, a chain of
+  renames, a batch queued behind a close, and the freed name given to a
+  new agent.
+
+### Deviations from the plan
+
+Two, both narrower than the sentence they refine, and one open question
+the plan's own test list asks for that the code cannot answer.
+
+1. **A leg is resolved on its own account, not with the turn's one
+   value.** The plan says the resolution is "one lookup per turn"
+   handed to `_turn_row`, the legs and the landing. Applied literally to
+   a leg naming a DIFFERENT agent, that would file a handover leg under
+   the turn's agent, which is a worse row than the one the amendment
+   exists to prevent. So the turn's own agent is resolved once and
+   shared with the landing, which is the whole of the P1 amendment, and
+   each leg is resolved through the same map: a leg equal to the turn's
+   agent therefore yields exactly the same value, and a leg naming a
+   second agent that was also renamed carries the name that agent has
+   now. `test_a_leg_naming_a_second_renamed_agent_moves_with_it` is the
+   case.
+
+2. **The map is read once per marker rather than once per turn.** The
+   plan says the writer resolves "once per turn at the durable-write
+   boundary", which is about WHERE the resolution happens rather than
+   how often the map is looked up. `_write` runs inside the durable
+   transaction, which is inside `_erasure_order`, and a rename holds
+   that lock across its commit AND its publication, so the map cannot
+   change while the transaction is open. One read for the whole marker
+   is therefore the same answer as one per turn, and it is the reading
+   that cannot produce a marker whose rows disagree with each other.
+
+### Discoveries
+
+- **The retirement's only observable is the batch queued behind the
+  close.** Retiring a session's translations when its close is ENQUEUED
+  rather than when it COMMITS takes them from a turn still queued in
+  front of the close, and that turn then lands under the old name and is
+  refused; that is the case, and it is what the pin asserts. Retiring
+  them LATER than the plan says, or never, has no behavioural
+  consequence at all, because a session id is never reused: the cost is
+  a leak rather than a defect. So the placement is pinned in the one
+  direction a test can see, and the other direction is the plan's design
+  bound rather than an assertion.
+
+- **A landing-only translation really does pass the thread-owner
+  assertions.** Verified by mutation rather than reasoned about: with
+  `_turn_row` and `_leg` reading the record while the landing is
+  translated, the two defect cases still pass, and what fails is the
+  case that reads the row back. That is the terra P1 finding reproduced
+  as a test result, and it is why the pin reads `turns.agent` and every
+  `legs[].agent` rather than the thread's owner.
+
+- **The publication reaches the writer register and not the listener
+  register beside it.** The memory store attaches to the second one for
+  erasures, so "not a second subscriber" is a single line in `renamed()`
+  rather than a decision spread over the call site: the function names
+  itself as the hook a change of that decision would attach to.
+
+### Open questions the plan left, and what M2 answers
+
+None left open. The follow-up the plan says this milestone files is
+filed: the memory store's untranslated window, with
+`conversations.store.renamed()` named as the hook, the asymmetry
+restated from the plan, and what a fix would have to decide. It carries
+no number in any committed sentence, per the repository's rule that
+landing code refers to a decision rather than to a tracker.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5764 passed,
+  19 skipped.
+- `uv run pytest tests/integration -q`: 243 passed.
+- `scripts/check_doc_links.py .`: clean, 206 files.
+- `uv run mypy`: clean.
+- **Every concurrency pin verified to bite, by mutation, with each
+  mutation reverted:**
+  - No translation at all (`_write` resolving against an empty map):
+    eight of the nine cases fail, and the writer's log carries the
+    `MisattributedTurn` batch drop the plan predicted. The ninth is the
+    agent nothing renamed, which is the case that must keep passing.
+  - Translation at the landing alone: five cases fail, the two
+    thread-owner cases pass, which is the terra P1 finding exactly.
+  - Publication moved outside `erasure_order()`: the ordering pin alone
+    fails, on the writer never arriving at the order, and the log again
+    carries the dropped batch.
+  - Retirement moved into `close_session`: the queued-batch pin alone
+    fails.
+  - One map for the whole process instead of one per session: the freed
+    name pin alone fails.
+- The generated-document drift checks: clean. M2 touches no generated
+  document; the census manifest is regenerated in the last commit of the
+  milestone as always.
