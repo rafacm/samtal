@@ -159,16 +159,29 @@ VINGA_DB_NAME=vinga
 VINGA_DB_USER=vinga
 VINGA_DB_PASSWORD=...
 
-# And whatever else this server should find in its environment: the
-# provider credentials the domain configuration names by variable, and
-# VINGA_MASTER_KEY once a credential is stored encrypted rather than
-# named as a reference.
+# The provider credentials the domain configuration names by variable,
+# which is what the env file is here for, and VINGA_MASTER_KEY once a
+# credential is stored encrypted rather than named as a reference.
 ANTHROPIC_API_KEY=...
 ```
 
 The file holds secrets, so create it with a `umask` that keeps it to
 you, and keep the values wherever this deployment already keeps
 secrets: the same place a restore would need them from.
+
+**The database is those five fields in this lane, and not a connection
+string.** `VINGA_DB_URL` replaces all five whole when it is set, so an
+`.env` written for a `psql` session on the host, or kept from another
+deployment, would send the container at a different database while the
+five guarded values above sat there looking authoritative. The
+production compose file closes that door rather than warning about it:
+it pins `VINGA_DB_URL` to the empty string in the container's
+environment, which the resolver reads exactly as unset, so a value in
+the env file cannot reach the server. A deployment whose convention
+really is one connection string adapts the file deliberately, by
+replacing the five guards with a guarded `VINGA_DB_URL` and removing
+the pin, rather than by adding the variable to `deploy/.env` and
+finding it ignored.
 
 ### Running it
 
