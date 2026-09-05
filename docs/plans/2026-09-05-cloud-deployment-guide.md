@@ -72,14 +72,21 @@ file is untouched and stays the executable statement of the trial
 shape that CI boots. The production file: one `vinga` service;
 `image: ${VINGA_IMAGE:?...}` required, with the refusal text telling
 the operator to pin an immutable `YYYY-MM-DD-HHmm` or
-`sha-<revision>` tag; `restart: unless-stopped`; `env_file: .env`
-required, carrying the two secrets and the `VINGA_DB_*` family
-pointed at the operator's own Postgres, with no defaults for any of
-them; `read_only: true` with `tmpfs: /tmp`; the `vinga-data` volume;
-`stop_grace_period: 30s` above the drain; port 8003; the image's own
-HEALTHCHECK left to do its job. Its header says what it is, what the
-trial file remains for, and that the guide is the page that walks
-it.
+`sha-<revision>` tag; `restart: unless-stopped`. The refusals are
+explicit `${VAR:?}` interpolation guards on every required value,
+not the `env_file`'s existence: `environment:` entries guard the two
+secrets and the five database facts
+(`VINGA_DB_HOST/PORT/NAME/USER/PASSWORD`, the server's own
+loopback-convenience password default deliberately unreachable),
+each with a value-free refusal message, because a required
+`env_file` only requires the file to exist and enforces nothing
+about what is in it. `env_file: .env` stays required beside the
+guards for what the guards cannot enumerate: provider credentials
+the domain configuration names. Then `read_only: true` with
+`tmpfs: /tmp`; the `vinga-data` volume; `stop_grace_period: 30s`
+above the drain; port 8003; the image's own HEALTHCHECK left to do
+its job. Its header says what it is, what the trial file remains
+for, and that the guide is the page that walks it.
 
 **The Ingress example is a committed manifest written against
 ingress-nginx, named, with the guide translating.** The alternative,
@@ -179,11 +186,16 @@ memory.
   checked in the step, the same discipline every pinned tool in the
   workflow follows; the pin and checksum live in the step beside a
   comment naming where new checksums come from.
-- **`docker compose config` over the production file**, with the
-  required variables supplied as obviously-dummy values in the
-  step's environment, so the file's syntax, its `:?` refusals and
-  its schema are exercised without booting anything. The trial
-  file's boot check in the `image` job is untouched.
+- **`docker compose config` over the production file, both
+  directions**, in the shape of the existing trial-file check: the
+  step creates a temporary env file at the location compose reads
+  for this file (removed by a trap), first asserts that omitting
+  each required variable in turn makes `config` fail with the
+  guard's value-free message, then asserts that the complete
+  obviously-dummy set resolves, so the refusals are proven to fire
+  rather than assumed. One successful `config` alone proves
+  nothing about the guards. The trial file's own check and boot in
+  the `image` job are untouched.
 - **The agreement test** (`test_deploy_manifests.py`, unit lane):
   parse `deploy/k8s/deployment.yaml` and
   `deploy/docker-compose.production.yml` and assert the facts CI
@@ -416,6 +428,14 @@ answer every finding, and a delta re-review confirms them.
    correctly located temporary env file, assert each omission fails
    with a value-free message, assert the complete dummy set
    resolves, and clean up with a trap.
+
+   *Resolution*: accepted in full. Every required value carries its
+   own `${VAR:?}` guard with a value-free message (the `env_file`
+   stays only for provider credentials the guards cannot
+   enumerate), and the CI step is rebuilt in the trial check's
+   shape: a temporary env file, per-variable omission proven to
+   refuse, the complete dummy set proven to resolve, a trap
+   cleaning up.
 
 7. **P2: the Kubernetes `/tmp` volume is not the promised tmpfs.**
    A default `emptyDir` is node-backed. Specify
