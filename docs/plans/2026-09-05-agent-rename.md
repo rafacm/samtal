@@ -562,6 +562,31 @@ rather than the caller: it is what makes the ascending order a property
 of the function rather than of a call site somebody has to remember. The
 two new functions say the same thing in their own words.
 
+**Each of them checks its own destination, under its own lock, in the
+transaction that would write.** Neither store can express the rule as a
+constraint: nothing in either schema stops two owners becoming one, and
+a count cannot report the difference between a destination that already
+has rows and a source that has none, since both are ordinary. So each
+function is check then update rather than update alone: it takes the
+lock, asks whether anything is filed under the new name, raises the
+typed conflict if so, and updates otherwise. The check cannot go stale
+between the two statements, because the lock it is holding is the one
+every writer of that chain takes at BEGIN, which is the property the
+competing-write pin below asserts rather than assumes. The alternative,
+one SQL expression answering both facts, was considered and left: two
+statements under a held lock are what the rest of these stores are
+written as, and a single expression would buy nothing a lock already
+gives.
+
+**And the conflict travels untranslated.** Both functions classify
+failures the way `purge` does, into the busy refusal and the storage
+refusal, and both let the typed conflict past that arm rather than
+folding it into a 500: it is a state the caller can correct, not a
+failure of the database. `_written`'s `except _Refused` arm in the
+memory store and `_transaction`'s `except ConfigError: raise` in the
+domain store are the two merged instances of exactly that shape, and the
+new exception is a `ConfigError` subclass so both already carry it.
+
 **One connection, three schemas, one database.** All three chains live
 in one Postgres database, separated by schema and by their own Alembic
 version table (`db/__init__.py:18-27`), and every table is
@@ -783,6 +808,13 @@ Reusing the assets that exist wherever the assertion already has a home.
   the rename keeps the old name in `turns.agent` while one spoken after
   it carries the new, which is the dated column saying what was true
   when.
+- **The competing write, between the check and the update.** A second
+  writer adds a fact under the destination name while a rename is
+  between its memory check and its memory update, driven by the
+  two-writer arrangement #314 built: the writer queues on the chain lock
+  the rename is holding, and the rename's decision is still true when it
+  writes. Run once per store that checks a destination, since the claim
+  is about the lock rather than about the table.
 - **The lock-order pin joins the one #83 already has.**
   `docs/plans/2026-08-30-memory-scopes.md` records a test walking the
   erasure and retention paths and asserting that every transaction
@@ -919,7 +951,8 @@ where it is enforced rather than asserting it.
   statement, and raising a classified failure; `ConfigStore.rename_agent`
   running the four phases and returning `Renamed`; the seven refusals as
   fixed sentences, each destination check run under its own store's lock
-  in the transaction that would write; the sentinel sweep, the inventory
+  in the transaction that would write and raising the typed conflict
+  through each store's classifier; the sentinel sweep, the inventory
   pin, the three collision cases, the atomicity
   pin, the reversibility pin with a stranger present, and the third path added to the
   lock-order walk. No route and no CLI, so nothing an operator can reach
@@ -1083,6 +1116,24 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    raise the typed rename conflict untranslated and then update, or
    answer with a result type that reports the collision separately. Pin
    a competing memory write between the check and the update.
+
+   *Resolution*: accepted, with the first of the two options. The
+   finding is right that no constraint expresses the rule and that a
+   count cannot carry the distinction, and it is right for the record
+   half too, so both functions are now check then update under their own
+   lock inside the transaction that would write, raising the typed
+   conflict and answering the count only on the path that renamed. The
+   result type was not taken: a raise is what every other refusal in
+   these stores does, and a caller that had to branch on a result field
+   would be the one place in the write path where a refusal is a value.
+   The plan says why the check cannot go stale, which is that the lock
+   being held is the one every writer of that chain takes at BEGIN, and
+   the competing-write pin asserts it rather than assuming it: a second
+   writer's `add` under the destination name is made to run between the
+   check and the update and is shown to queue behind the lock, using the
+   two-writer arrangement #314 built. The conflict travelling
+   untranslated is stated with its two merged instances, `_written`'s
+   `except _Refused` arm and `_transaction`'s `except ConfigError`.
 
 5. **P2: the promised 409s have no exception type and no mapping.**
    `REFUSAL_STATUS` maps a plain `ConfigError` to 422 and only the
