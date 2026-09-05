@@ -283,3 +283,71 @@ strict URL validation with the print handoff retired), the
 artifact handoff confirmed conditional on drift, and the issue job
 confirmed unreachable from a pull request. Verdict: mergeable as
 is.
+
+## M2: the floor ADR and its citation
+
+### What landed
+
+- `docs/adr/2026-09-05-supported-firmware-is-a-declared-floor.md`, in
+  the database-floor precedent's shape: Context (no published
+  specification, the notes read from pinned sources, the promise's
+  version target, and the two images observed on hardware), Decision
+  (the enumerated set, the triage question, how the floor widens and
+  how it narrows) and Consequences (what the bound buys, what it
+  costs, and where it hands off to #96).
+- The citation in the stock-firmware promise's version-target bullet
+  in `docs/architecture/product-promises.md`.
+- The `CHANGELOG.md` entry, and the census manifest it staled.
+
+### Deviations from the plan
+
+1. **The enumeration is a table, and it widens by dated addendum.**
+   The plan says the record enumerates the observed images and that
+   the floor widens when a new version is observed. It does not say
+   how the enumeration grows, and `docs/adr/README.md` says records
+   are immutable: a rewritten body is exactly what the convention
+   forbids. So the two images sit in a table (firmware, image, date
+   observed) and widening is recorded as a dated addendum naming the
+   version, the board and what the re-read moved, which is the route
+   the database-floor precedent already uses for its own exits. This
+   makes the plan's widening rule executable rather than changing it.
+2. **The citation went on the version-target bullet, not the
+   Evidence line.** The plan left the placement to whichever reads
+   better in place. The record decides one bound of the promise
+   (which versions), while the section's trailing
+   `Evidence and tradeoffs: issue #84` is about the whole promise, so
+   putting the record on the trailing line would have implied it
+   decides all of it. The bullet now reads "a set the
+   supported-firmware floor record enumerates", with the record's
+   name carrying the link, which is the phrasing `guidelines.md`
+   already uses for its own record citations.
+3. **No reconsideration-triggers block.** The plan allowed for one
+   "if the shape calls for them". It does not: the widening rule
+   inside the Decision is the trigger, and it is meant to fire
+   routinely rather than to reopen the record. The Consequences say
+   so in place, so a later reader does not take the absence for an
+   oversight.
+
+Otherwise no deviations. The promise's text is unchanged, which is
+what the plan's last risk asked this milestone to be held to: the diff
+of `product-promises.md` adds a clause naming the record and touches
+nothing else.
+
+### Verification
+
+- `python3 scripts/check_doc_links.py .`: 201 files, 0 failures. The
+  new record's internal links (the notes and their currency anchor,
+  the promise section's anchor, the manifest, the drift workflow, both
+  device guides, the database-floor record) and the promise page's new
+  citation all resolve.
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 48 passed
+  after regenerating the manifest. The census staled on line numbers
+  alone: the changelog entry shifted the quoted spellings further down
+  `CHANGELOG.md`, and the record itself quotes no command.
+- No em-dashes in the diff (`grep`).
+
+This milestone is documentation only apart from the regenerated census
+manifest, so `.github/workflows/docs.yml` is the lane that runs on it
+(the link and anchor checks, the manifest agreement check from M1, and
+the census). The server workflow's paths do not match this diff, so
+neither its `unit` and `integration` jobs nor the `image` job run.
