@@ -95,8 +95,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Connection, Engine, select, update
 
+from vinga_server.config.loader import (
+    AgentRenameConflictError,
+    DatabaseBusyError,
+    StorageError,
+)
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema, threads
 from vinga_server.conversations.records import (
@@ -108,7 +113,14 @@ from vinga_server.conversations.records import (
 )
 from vinga_server.conversations.schema import events as events_table
 from vinga_server.conversations.schema import sessions, tool_invocations, turns
-from vinga_server.db import LOCK_TIMEOUT_MS, StoreChain, advisory_key, is_busy, open_at
+from vinga_server.db import (
+    LOCK_TIMEOUT_MS,
+    StoreChain,
+    advisory_key,
+    is_busy,
+    open_at,
+    take_the_chain_lock,
+)
 from vinga_server.events import Emission, ServerEvents
 from vinga_server.events.catalog import (
     ConversationsDropped,
@@ -348,6 +360,122 @@ def erased(threads_gone: "Iterable[str]") -> None:
         writer.forget(named)
     for listener in listening:
         listener(named)
+
+
+# What a rename that would merge two histories is refused with, and the
+# pair a rename that could not be written answers.
+#
+# Neither name is in any of them, for the reason the memory store's
+# equivalents say: the new name is caller text and the old one is a
+# stored identity, and a sentence that named one and not the other would
+# read as a claim about which of them was at fault.
+#
+# The remedy is the noun's own listing and its own deletion, in the
+# spelling a server has: what composes this is a process inside the
+# image, where `vinga-server` is what a shell answers to.
+RENAME_OCCUPIED = (
+    "conversations: threads are already recorded under the new name, and a rename "
+    "may not merge two histories into one, because nothing could tell them apart "
+    "afterwards and a rename back would carry the strangers with it. Nothing was "
+    "changed, and neither name is quoted back. Rename to a name nothing holds, or "
+    "read what is recorded under this one with "
+    "`vinga-server config conversation list --agent <name>` and remove a thread "
+    "with `vinga-server config conversation delete <conversation>`"
+)
+
+RENAME_FAILED = (
+    "the recorded threads could not be moved to the new name: the database this "
+    "server keeps the conversation record in refused the write, and nothing was "
+    "changed. Nothing of the failure is repeated here, because a database error "
+    "quotes the statement it ran and the values bound into it"
+)
+
+RENAME_BUSY = (
+    "the recorded threads could not be moved to the new name: another connection was "
+    "writing to the conversation record for longer than the lock timeout allows, and "
+    "nothing was changed. The same request may simply be made again"
+)
+
+
+def rename_agent(connection: Connection, old: str, new: str) -> int:
+    """Move every thread one agent owns onto another name, on a
+    connection the caller already holds, and answer how many moved.
+
+    The record third of a rename, and the mirror of
+    `memory.store.rename_owner` beside it: this module owns the SQL and
+    the caller owns the transaction, so the agent's row, its bindings,
+    its facts and its threads move in one commit. A failure reaches the
+    caller and takes its transaction down with it.
+
+    Here rather than in `threads`, which owns the reads that filter on
+    this column, and the placement is settled by an import rather than
+    by taste. `CONVERSATIONS_CHAIN` is declared in this module and this
+    module already imports `threads`, so a locking function over there
+    would have to import the chain back and close a cycle. It also makes
+    the record half the mirror of the memory half, whose `purge` and
+    `erase_facts` live in `memory/store.py` for the reason `db` states:
+    a chain is a fact of the store that owns it. The statement reaches
+    `threads`' own table through the shared metadata, which imports
+    nothing new.
+
+    The chain's advisory lock is taken before the first statement, which
+    is what makes the ascending order `db.advisory_key` states a
+    property of this function rather than of a call site. A rename's
+    caller arrives holding key 1 and takes key 2 here, before key 3.
+
+    Check then update under that one lock, for `rename_owner`'s reasons:
+    no constraint in this schema stops two agents' histories becoming
+    one, a count cannot tell a destination that has rows from a source
+    that has none, and the check cannot go stale because the lock being
+    held is the one every writer of this chain takes at BEGIN.
+
+    Only `conversations.agent` moves, and that is the whole of what this
+    rename touches in the record. It is the one column here a live read
+    filters on: the thread listing and the spoken-description search
+    both select on it, and the thread guard refuses a turn whose agent
+    does not match it. `turns.agent`, `sessions.agent`, `sessions.agents`
+    and the agent names inside event fields are dated rows saying what
+    was true when they were written, and nothing rewrites them.
+
+    Every refusal is built inside the handler and raised outside it: a
+    SQLAlchemy failure carries the statement it ran and the parameters
+    bound into it, and the parameters here are two agent names. The
+    conflict travels untranslated past that arm, because it is a state
+    the caller can correct rather than a failure of the database.
+    """
+    moved = 0
+    occupied = False
+    problem: Exception | None = None
+    try:
+        take_the_chain_lock(connection, CONVERSATIONS_CHAIN)
+        occupied = (
+            connection.execute(
+                select(schema.conversations.c.id)
+                .where(schema.conversations.c.agent == new)
+                .limit(1)
+            ).first()
+            is not None
+        )
+        if not occupied:
+            moved = int(
+                connection.execute(
+                    update(schema.conversations)
+                    .where(schema.conversations.c.agent == old)
+                    .values(agent=new)
+                ).rowcount
+            )
+    except Exception as exc:  # noqa: BLE001 - classified, never quoted
+        # By class and never by message, through the one classifier `db`
+        # owns, which is the pair every other write in this package
+        # answers with.
+        problem = (
+            DatabaseBusyError(RENAME_BUSY) if is_busy(exc) else StorageError(RENAME_FAILED)
+        )
+    if problem is not None:
+        raise problem
+    if occupied:
+        raise AgentRenameConflictError(RENAME_OCCUPIED)
+    return moved
 
 
 def open_conversations(settings: DatabaseConfig) -> Engine:
@@ -1542,6 +1670,9 @@ def _utc_now() -> dt.datetime:
 __all__ = [
     "CONVERSATIONS_CHAIN",
     "MAX_EVENTS_IN_FLIGHT",
+    "RENAME_BUSY",
+    "RENAME_FAILED",
+    "RENAME_OCCUPIED",
     "RETENTION_DAYS_DEFAULT",
     "STOP_TIMEOUT_S",
     "TURN_WRITE_ATTEMPTS",
@@ -1557,4 +1688,5 @@ __all__ = [
     "erasure_order",
     "erasures_announced_to",
     "open_conversations",
+    "rename_agent",
 ]
