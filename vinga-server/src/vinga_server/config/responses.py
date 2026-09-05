@@ -1165,24 +1165,44 @@ class Acknowledgement(BaseModel):
     )
     notice: str = Field(
         description=(
-            "When the change takes effect, as one of a handful of sentences. A device "
-            "binding and the default agent are read by the running server as a device "
-            "asks for them, so they apply at that device's next OTA check or "
-            "connection with nothing asked of the server. Every other kind this API "
-            "writes, which is the whole of the rest of the domain half (the provider "
-            "entries, the MCP entries, the secret slots on either, the prompt "
-            "fragments, the agents and `agent_defaults`), names `POST "
-            "/runtime/config/reload`, which applies it without a restart; that "
-            "sentence also names the three moments a conversation already in progress "
-            "meets an applied change at, its tools at the next utterance, its prompt "
-            "text at the next activation, and the voice and filled pauses at the next "
-            "conversation. A binding naming an agent this server is not serving yet "
-            "carries a sentence of its own, because both halves are true at once: the "
-            "row is live, and the agent arrives at the reload that installs it. A "
-            "server serving a configuration no store describes says that the write is "
-            "stored and takes effect when a server boots from that store. Nothing this "
-            "API writes waits for a server start."
+            "When the change takes effect, as one of a handful of sentences, for a "
+            "reader rather than for a program: `applies` beside it is the same fact in "
+            "tokens, and it is the half to branch on. A device binding and the default "
+            "agent are read by the running server as a device asks for them, so they "
+            "apply at that device's next OTA check or connection with nothing asked of "
+            "the server. Every other kind this API writes, which is the whole of the "
+            "rest of the domain half (the provider entries, the MCP entries, the "
+            "secret slots on either, the prompt fragments, the agents and "
+            "`agent_defaults`), is stored and waits for the stored configuration to be "
+            "installed on the running server, which no restart is needed for. A "
+            "binding naming an agent this server is not serving yet carries a sentence "
+            "of its own, because both halves are true at once: the row is live, and "
+            "the agent arrives with the install that adds it. A server serving a "
+            "configuration no store describes says that the write is stored and takes "
+            "effect when a server boots from that store. Nothing this API writes waits "
+            "for a server start."
         )
+    )
+    applies: tuple[Applies, ...] = Field(
+        default=(),
+        description=(
+            "Which boundaries this write is waiting at, as the closed tokens the "
+            "comparison read publishes, so that a client can say what to do about it "
+            "in its own words rather than parsing the sentence beside it. A set and "
+            "not a token, because a binding naming an agent this server is not serving "
+            "yet waits at two of them at once: the row is live at the device's next "
+            "check-in, and the agent arrives at the install.\n\n"
+            "Absent rather than empty from a server older than the vocabulary, and "
+            "that is the deliberate exception to the rule the rest of this API keeps "
+            "(a field is nullable and required, never optional). An absent key here is "
+            "a successful write answered by an image that predates this field, and "
+            "turning that into a refusal would punish a client for the server's age "
+            "after the write had "
+            "already landed. Read it as absent when it carries a token you do not "
+            "know: what a closed set gains a member for is a boundary that was not "
+            "there before, and guessing what to do about one is worse than quoting the "
+            "sentence."
+        ),
     )
 
 
@@ -1238,6 +1258,15 @@ class AppliedEntry(BaseModel):
             "write of it is acknowledged with, and null for an entry that was "
             "`unchanged`, which has nothing waiting to be applied."
         )
+    )
+    applies: tuple[Applies, ...] = Field(
+        default=(),
+        description=(
+            "Which boundaries this entry is waiting at, in the same tokens and under "
+            "the same reading rule a single write's `applies` carries, and empty for "
+            "an entry that was `unchanged`, which is waiting at none. Absent from a "
+            "server older than the vocabulary, for the reason given there."
+        ),
     )
 
     @model_validator(mode="after")
