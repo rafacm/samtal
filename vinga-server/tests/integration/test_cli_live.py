@@ -82,7 +82,7 @@ from tests.support.deployment import (
     serving,
 )
 from vinga_server.build_info import revision
-from vinga_server.config import ConfigError, cli, docgen, entities
+from vinga_server.config import ConfigError, cli, docgen, entities, server_reference
 from vinga_server.config.cli import installed_version
 from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND
 from vinga_server.config.models import (
@@ -2082,7 +2082,20 @@ REFUSALS: tuple[Refusal, ...] = (
         + ", ".join(docgen.entity_names()),
         False,
     ),
-    Refusal(("reference",), ("reference", "extra"), USAGE, False),
+    # `reference` takes a selector now, so a word after it is a half
+    # rather than an extra argument, and what refuses it is the halves
+    # registry. The value handed to it is the planted credential,
+    # because the positional is where this command's own input can carry
+    # one, and unlike `schema`'s refusal above this sentence names only
+    # the halves that exist.
+    Refusal(
+        ("reference",),
+        ("reference", PLANTED),
+        server_reference.NO_SUCH_HALF.format(
+            halves=", ".join(server_reference.half_names())
+        ),
+        False,
+    ),
     Refusal(("openapi",), ("openapi", "extra"), USAGE, False),
     Refusal(("cli-reference",), ("cli-reference", "extra"), USAGE, False),
 )
