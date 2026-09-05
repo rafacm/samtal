@@ -496,3 +496,93 @@ everything run outside pytest.
   (`uv run vinga-server config reference server > ../docs/reference/server-config.md`
   is what produced the committed page), but the workflow lane has not
   run on this branch.
+
+### PR review round
+
+External review of the branch as pushed to PR #401, at `f57e7dcf`:
+backend codex (codex-cli 0.153.0), model gpt-5.6-sol, 2026-09-05,
+runtime 4m47s. Three findings, all P2, verdict as received: mergeable
+after the listed fixes. All three were confirmed against the sources
+before being fixed; none rejected.
+
+Two of the three are the same shape as M1's round, one milestone on: a
+claim that was true of the code and not of what the code now publishes.
+The third is a test that passed for a weaker reason than it stated.
+
+1. **P2: the page swallows the onboarding path.** `/x/<key>/` reaches
+   the committed page outside a code span twice, from
+   `OnboardingConfig`'s opening line and from `NOTHING_DISCOVERABLE`, so
+   a browser reads `<key>` as an unknown tag and drops it: the section
+   and the refusal both tell a reader the route is `/x//`. The
+   milestone had recorded this as a discovery and left it, on the
+   grounds that the prose was merged and not this milestone's to edit.
+   The review overrides that: the page is the surface the milestone
+   ships, and two backticks in the source fix it.
+
+   *Resolution* (`a1768f8e`): accepted in full. Both occurrences are
+   code spans, the page regenerates with them, and the comment beside
+   `NOTHING_DISCOVERABLE` says why a boot refusal carries backticks: the
+   sentence has two readers, a terminal that prints them and loses
+   nothing, and a page that would otherwise lose the segment. The
+   existing pin on that refusal reads a fragment before the change and
+   stayed green; a sweep for the sentence found nothing else pinning
+   it.
+
+2. **P2: the database names still have several authoritative copies.**
+   Moving the declarations to one home left the prose that names them
+   spelling all six by hand: `DatabaseConfig`'s four field descriptions
+   and the sentence `vinga_server.db` answers with when nothing opens.
+   A rename would move the constants, the loader and the generated page
+   together and leave those sentences naming variables nothing reads,
+   with every inclusion-only check still green.
+
+   *Resolution* (`69f40d31`): accepted in full. The field descriptions
+   and `db.UNREACHABLE` are f-strings over the constants, and the
+   rendered bytes are identical, which is what says the composition
+   reproduces what was there. The class docstring stays prose: a
+   docstring cannot be an f-string, and a `__doc__` assigned after the
+   class would move the paragraph away from the model it documents. What
+   covers it instead is the inventory assertion the finding asks for,
+   which is the stronger claim anyway: on each of the four surfaces that
+   spell a name rather than composing one (the docstring, the
+   descriptions, the rendered page, `db.UNREACHABLE`), every
+   database-shaped variable found there has to be one the constants
+   declare. Proven to bite by renaming one description's variable.
+
+3. **P2: the backward refusal check is a containment.** The registry's
+   provocations asserted the row's sentence was somewhere inside the
+   raised message, which a validator that appended the value it rejected
+   would satisfy, so the check could not see the leak it exists to
+   prevent.
+
+   *Resolution* (`fd64edb7`): accepted in full. The comparison is the
+   whole normalized message against pydantic's own rendering of the
+   sentence, so a refusal that says anything besides its rule fails.
+   Beside it, the case that says why: every row provoked through the
+   whole boot composition with a credential-shaped value in a key beside
+   the ones the rule names, asserted absent from the sentence an
+   operator reads and from the exception chain behind it. Where the
+   plant goes is derived rather than listed, since the conversations
+   section holds no free-text key: the refused model's own where it has
+   one, the enclosing `server` section where it does not. Both were
+   proven to bite by making the discoverability validator append the
+   host to its sentence.
+
+### Verification of the review round
+
+Run from `vinga-server/` on the fixed tree, with
+`PYTHONDONTWRITEBYTECODE=1` exported for everything run outside pytest.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit/test_server_reference.py tests/unit/test_config.py
+  tests/unit/test_config_docgen.py tests/unit/test_command_spellings.py -q`:
+  `253 passed`.
+- The five freshness pins run by name: `4 passed` for the four in the
+  config suites, `32 passed` for the OpenAPI file they are not in. The
+  page regeneration in the first fix keeps its own pin green, which is
+  what says the committed copy is what the models now render.
+- `python3 scripts/check_doc_links.py .` from the repository root:
+  `checked 195 files, 0 failures`.
+- The census manifest went stale twice more, from the `models.py` line
+  shifts in the first two fixes, and was regenerated the standard way in
+  each of those commits.
