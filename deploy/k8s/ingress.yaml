@@ -1,0 +1,99 @@
+# What of this server is reachable from outside the cluster, which is
+# the security boundary written down rather than left to whoever wires
+# the port up.
+#
+# The server is one process on one port, so routing that port as one
+# thing routes the configuration API with it. Exactly two paths are
+# routed here:
+#
+#   /x/            the short onboarding route, `/x/<key>/`, which is the
+#                  OTA endpoint a fresh board is pointed at and the one
+#                  address a person types into a captive portal
+#   /xiaozhi/v1/   the WebSocket a bound device holds open
+#
+# And three things are deliberately not routed:
+#
+#   /api/          the configuration surface, which holds the most
+#                  authority of anything here and is protected by a
+#                  bearer token that rides on every request. The server
+#                  README's own first answer is not to route it at all;
+#                  administer it with `kubectl port-forward` for the
+#                  length of a session, or from a shell inside the pod
+#                  where the token and the loopback address already are.
+#                  Its second answer, a separately restricted route, is
+#                  for a deployment that genuinely needs one and is a
+#                  route this file does not write.
+#   /healthz       both probes, which the kubelet reaches directly on the
+#   /readyz        pod. Nothing outside the cluster has a use for them.
+#   /xiaozhi/ota/  the legacy OTA path, which is the token issuer and so
+#                  cannot itself require a token. It is safely public
+#                  only behind a long random segment, and that is an
+#                  agreement between two files this one cannot keep on
+#                  an operator's behalf: a deployment whose boards were
+#                  provisioned on the legacy path adds a rule here for
+#                  `/xiaozhi/ota/<long-random-segment>/` and sets
+#                  `VINGA_SERVER__OTA_PATH` to the same value in
+#                  deployment.yaml. Boards onboarded through /x/ need
+#                  neither.
+#
+# The annotations below are ingress-nginx's spellings. Every controller
+# has its own name for the same two facts, so an operator running
+# something else translates the two timeouts rather than reverse
+# engineering what they were for; the guide's Kubernetes lane says what
+# each one buys.
+#
+# TLS is not an annotation but this resource's own contract: `spec.tls`
+# names a certificate Secret the operator provisions and that is never a
+# committed file. `kubectl create secret tls vinga-tls --cert=... --key=...`
+# from a certificate you already hold, or cert-manager if you would
+# rather one were issued in-cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vinga
+  labels:
+    app.kubernetes.io/name: vinga
+  annotations:
+    # How long the controller waits for the upstream to say something
+    # before it gives up on the connection. The default is 60 s, and a
+    # conversation WebSocket is quiet for far longer than that between
+    # utterances, so the default closes healthy conversations mid-sit.
+    # An hour is well above anything a session lives through; the server
+    # pings every connected device every 20 s, so a truly dead peer is
+    # found by the ping rather than by this.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    # The same, in the other direction: how long the controller waits
+    # while writing to the upstream. Raised with its twin so that a
+    # long-lived connection is not cut by whichever of the two happens
+    # to expire first.
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    # The same host the rules below route and the same host the two
+    # `VINGA_SERVER__*_URL` values in deployment.yaml name. The
+    # agreement test asserts all three are one string, because a
+    # certificate for one name and a websocket URL for another is a
+    # board that fails at the handshake with nothing obviously wrong.
+    - hosts:
+        - voice.example
+      # Provisioned by the operator, never committed. See the header.
+      secretName: vinga-tls
+  rules:
+    - host: voice.example
+      http:
+        paths:
+          - path: /x/
+            pathType: Prefix
+            backend:
+              service:
+                name: vinga
+                port:
+                  name: http
+          - path: /xiaozhi/v1/
+            pathType: Prefix
+            backend:
+              service:
+                name: vinga
+                port:
+                  name: http

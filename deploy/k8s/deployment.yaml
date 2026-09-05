@@ -1,0 +1,261 @@
+# The one vinga server, as a Kubernetes Deployment.
+#
+# Plain committed manifests rather than a chart: there is one topology
+# to describe and no variants to parameterize, so a template engine
+# would add a language between an operator and the five facts they have
+# to get right. What is here is applied with `kubectl apply -f
+# deploy/k8s/`, and the two `.example` templates beside it are outside
+# that glob deliberately, because they carry placeholder credentials
+# that would satisfy every presence check the server makes.
+#
+# Every value below that is a placeholder is a placeholder an operator
+# replaces, and each one says so where it stands: the image tag, the
+# `VINGA_DB_*` facts, and the three that wire this server to the name it
+# is reached by. Nothing here is a credential; those come from the
+# `vinga` Secret this references and never from a committed file.
+#
+# The contract this manifest is one implementation of lives in
+# `vinga-server/README.md`, under "Running in a container". This file
+# does not restate it: the agreement test
+# (`vinga-server/tests/unit/test_deploy_manifests.py`) reads the port,
+# the probe paths, the drain budget and the image's user id out of the
+# code and the Dockerfile and holds these numbers to them, so a contract
+# that moves fails a test rather than a deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vinga
+  labels:
+    app.kubernetes.io/name: vinga
+spec:
+  # One replica, and never more. Everything a running server serves from
+  # is state in its process: pending activation codes, the configuration
+  # generation an apply swaps in, and the session count the door
+  # enforces. The decision and the inventory behind it are in
+  # `docs/adr/2026-09-04-one-replica-is-the-supported-topology.md`.
+  replicas: 1
+  strategy:
+    # Recreate rather than RollingUpdate, and it is load bearing twice.
+    # A rollout must not run two servers against one database for the
+    # reason above; and the upgrade order the README states (rerun the
+    # provisioning SQL, then boot the new image) assumes the old process
+    # is gone before the new one migrates. Recreate terminates the old
+    # pod and waits for it before the new pod exists, which is exactly
+    # that. The cost is an interruption for the length of the drain,
+    # which the ADR prices and accepts.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vinga
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vinga
+    spec:
+      # Above `server.drain_s`, which is 20 s by default. SIGTERM starts
+      # a drain that lets conversations in flight finish their sentence,
+      # and Kubernetes SIGKILLs whatever is still running when this
+      # expires. The same 30 s the compose files and the README's
+      # `docker stop -t 30` name; a deployment that raises `drain_s`
+      # raises this with it.
+      terminationGracePeriodSeconds: 30
+
+      securityContext:
+        # The image runs as an unprivileged user and this says so out
+        # loud, so a rebuild that lost its `USER` line is refused rather
+        # than quietly running as root.
+        runAsNonRoot: true
+        # The one identity fact the Dockerfile establishes:
+        # `useradd --uid 1000`. The agreement test reads that line and
+        # holds this number to it, so the two cannot drift.
+        runAsUser: 1000
+        # The manifest's own contract rather than a Dockerfile fact: the
+        # image names no group id, so this declares one.
+        runAsGroup: 1000
+        # And this is the mechanism that makes the volume writable
+        # whatever group the image's user actually belongs to. fsGroup
+        # is applied to the volume itself and joins the process's
+        # supplementary groups, so `/data` is group-writable by a group
+        # this process is in, without anything here having to know what
+        # the image's own group is.
+        fsGroup: 1000
+        # Only when the volume's root is not already owned by that
+        # group. A freshly provisioned volume arrives root-owned and
+        # needs the one-time handover before the engines cache into it;
+        # a volume that has already had it should not be walked again on
+        # every start, which on a full model cache is minutes of chown
+        # before the server begins to boot.
+        fsGroupChangePolicy: OnRootMismatch
+
+      containers:
+        - name: vinga
+          # A moving tag, and the one thing here that should not stay as
+          # committed. Pin an immutable `YYYY-MM-DD-HHmm` or
+          # `sha-<revision>` tag before this runs anywhere real: `latest`
+          # is a pointer that moves under a pod that reschedules, and
+          # "Choosing an image" in the server README says the rest.
+          image: ghcr.io/rafacm/vinga-server:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            # Everything this server serves is on this one port: the
+            # WebSocket, the OTA endpoint, the short onboarding route,
+            # the configuration API and both probes. The number is
+            # `ServerConfig`'s own default, which the agreement test
+            # reads out of the model; the name is what the Service and
+            # the Ingress address it by, so the number is written once.
+            - name: http
+              containerPort: 8003
+              protocol: TCP
+
+          securityContext:
+            # Supported by the image: `HOME` points at /data and every
+            # engine caches there, so nothing this server does needs to
+            # write outside the two volumes below.
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          # The secrets, as a whole Secret rather than key by key: what
+          # is in it is exactly what the server reads from the
+          # environment, and naming each key here would be a second list
+          # to keep in step with the first. `secret.yaml.example` beside
+          # this file says what the keys are and how the real Secret is
+          # made.
+          envFrom:
+            - secretRef:
+                name: vinga
+
+          env:
+            # The four connection facts that are not secret. They are
+            # here rather than in a ConfigMap because there are four of
+            # them and one reader: a ConfigMap would be a second object
+            # to apply, to keep in step and to look in.
+            #
+            # Placeholders, all four. Point them at the Postgres this
+            # deployment provides; the database is bring-your-own and no
+            # manifest here provisions one.
+            - name: VINGA_DB_HOST
+              value: postgres.example.internal
+            - name: VINGA_DB_PORT
+              value: "5432"
+            - name: VINGA_DB_NAME
+              value: vinga
+            - name: VINGA_DB_USER
+              value: vinga
+
+            # The three that wire this server to the name it is reached
+            # by, and the reason they are values here rather than advice
+            # in a guide: each one is silently wrong by default behind a
+            # TLS-terminating proxy, and a wrong one shows up as a board
+            # that will not connect with every log line looking fine.
+            #
+            # The host in both URLs is the same placeholder host the
+            # Ingress routes and holds a certificate for, and the
+            # agreement test asserts those three are one value, so the
+            # set moves together or fails.
+            #
+            # What the OTA endpoint hands a device as the address to
+            # talk to. `wss://` because TLS ends at the ingress
+            # controller: derived from the request it would say `ws://`,
+            # since uvicorn only trusts `X-Forwarded-Proto` from an
+            # address in FORWARDED_ALLOW_IPS below.
+            - name: VINGA_SERVER__WEBSOCKET_URL
+              value: wss://voice.example/xiaozhi/v1/
+            # And what a person is told to type, which nothing in a
+            # proxied request carries: the onboarding URL is built from
+            # this.
+            - name: VINGA_SERVER__PUBLIC_URL
+              value: https://voice.example
+            # Which addresses may speak for a client. uvicorn reads this
+            # itself when the setting is not passed, and it is what
+            # makes `X-Forwarded-For` and `X-Forwarded-Proto` believed
+            # at all. Set it to the ingress controller's own address, or
+            # to the network its pods are on as here; never `*`, which
+            # trusts whatever any client says about itself.
+            - name: FORWARDED_ALLOW_IPS
+              value: 10.42.0.0/16
+
+            # `VINGA_SERVER__HOST` and `VINGA_SERVER__PORT` are
+            # deliberately not pinned here, unlike in the compose files.
+            # There they exist because a `.env` written for a host shell
+            # could reach into the container and invalidate the port
+            # mapping; here this env block is the whole of what this
+            # container gets, so the image's own defaults (0.0.0.0:8003)
+            # are already the only answer and a second statement of them
+            # would be a second thing to keep in step.
+
+          volumeMounts:
+            # What every engine caches into: whisper models and Piper
+            # voices download at first start and would otherwise
+            # download again on every reschedule.
+            - name: data
+              mountPath: /data
+            # The read-only root filesystem's one writable corner.
+            - name: tmp
+              mountPath: /tmp
+
+          # Three probes, not two, and the startup one is why the other
+          # two are safe.
+          #
+          # uvicorn binds its listener only once the lifespan's startup
+          # has finished, and that startup is what downloads and loads
+          # models: on a cold volume it can run for minutes, during
+          # which every probe meets a refused connection rather than an
+          # answer. Ordinary liveness defaults would restart the pod
+          # before /healthz could ever answer, and the restart would
+          # throw away whatever the download had got through, forever.
+          #
+          # Kubernetes suspends liveness and readiness entirely while a
+          # startupProbe is running, so the budget below is the whole of
+          # what a first boot is allowed and the two probes underneath
+          # can be as tight as a running server deserves.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            # Five minutes, generously. Raise it if the first boot of a
+            # deployment on a slow link, or with a large whisper model,
+            # is being killed part way through the download: the symptom
+            # is a pod restarting with no server error in its log, and
+            # this number is the thing to move.
+            failureThreshold: 60
+            timeoutSeconds: 3
+          livenessProbe:
+            # Restart, which is what /healthz is for: this process is
+            # alive and serving its control surface. A draining server
+            # answers 200 here deliberately, so a redeploy is not
+            # reported as a failure part way through.
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          readinessProbe:
+            # Traffic admission, which is what /readyz is for: this
+            # process may be handed a new device conversation. It
+            # answers 503 while draining and while every session slot is
+            # taken, which is precisely when nothing new should arrive.
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 3
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: vinga-data
+        - name: tmp
+          emptyDir:
+            # Memory-backed, because the contract promises a tmpfs and a
+            # default emptyDir is node-backed disk. The size limit is
+            # what keeps a runaway temporary file from being charged
+            # against the node's memory without bound; nothing here
+            # writes anything large to /tmp, so it is small on purpose.
+            medium: Memory
+            sizeLimit: 64Mi

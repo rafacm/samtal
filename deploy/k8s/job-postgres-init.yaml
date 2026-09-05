@@ -1,0 +1,134 @@
+# Provisioning the database, as a one-shot Job.
+#
+# It runs `deploy/postgres-init.sql`, which creates the three schemas
+# owned by the server role and provisions the read-only `vinga_ro`
+# analyst role. The SQL is not committed twice: this Job mounts a
+# ConfigMap the operator makes from the one committed copy, applied
+# idempotently so a rerun is the same transaction rather than a
+# different one:
+#
+#     kubectl create configmap postgres-init \
+#       --from-file=deploy/postgres-init.sql \
+#       --dry-run=client -o yaml | kubectl apply -f -
+#
+# A Job that has completed does not rerun when it is applied again, so
+# an upgrade deletes it first and lets this file recreate it:
+#
+#     kubectl delete job vinga-postgres-init --ignore-not-found
+#     kubectl apply -f deploy/k8s/job-postgres-init.yaml
+#     kubectl wait --for=condition=complete --timeout=5m job/vinga-postgres-init
+#
+# That whole sequence is what the README's upgrade order means by
+# "rerun the provisioning file, then boot": run it before the image tag
+# in deployment.yaml changes, and a Job that fails stops the upgrade
+# with the Deployment untouched.
+#
+# The credentials this needs are not the server's. Creating roles and
+# schemas is an administrative right the serving pod deliberately never
+# has, so they come from a Secret of this Job's own
+# (`secret-init.example` beside this file), and deployment.yaml
+# references no key of it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vinga-postgres-init
+  labels:
+    app.kubernetes.io/name: vinga
+spec:
+  # Two retries, which is safe because the file is repeatable by
+  # construction: every statement in it is written to be run again. What
+  # a retry buys is a transient connection failure not becoming a failed
+  # upgrade; what it cannot paper over is a SQL error, which stops the
+  # run on the statement that raised it and fails every attempt the same
+  # way.
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vinga
+    spec:
+      # Never, so a failed run is a failed pod this Job counts rather
+      # than a container looping inside it where `kubectl wait` cannot
+      # see the failure.
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        # The `postgres` user in `postgres:17-alpine`, which is uid 70
+        # on Alpine rather than the 999 the Debian-based tags use
+        # (verified against the image). The image itself starts as root
+        # because its entrypoint expects to drop privileges when it runs
+        # a server; nothing here runs a server, and psql needs no
+        # privilege at all.
+        runAsUser: 70
+        runAsGroup: 70
+      containers:
+        - name: psql
+          # The same client the compose file and the CI lanes use, so
+          # there is one psql version in this repository's story and
+          # `\getenv` in the SQL (psql 15 or later) is covered by it.
+          image: postgres:17-alpine
+          # The command the SQL file's own header documents, spelled
+          # here as an exec form so no shell stands between the Job and
+          # its exit code. `$(ADMIN_URL)` is Kubernetes' substitution
+          # from the env below, not a shell's.
+          #
+          # `-v ON_ERROR_STOP=1` is what makes a failing statement fail
+          # the Job. Without it psql reports the error, carries on
+          # through the rest of the file and exits 0, so a half
+          # provisioned database would be indistinguishable from a
+          # provisioned one.
+          command:
+            - psql
+            - $(ADMIN_URL)
+            - -v
+            - ON_ERROR_STOP=1
+            - -f
+            - /sql/postgres-init.sql
+          env:
+            # Key by key rather than a whole `envFrom`, because which
+            # keys this Job needs is the contract: the agreement test
+            # asserts these three are referenced here and that
+            # deployment.yaml references none of them.
+            #
+            # The administrative connection, able to create roles and to
+            # create schemas in the database: a superuser, or the
+            # database's owner with CREATEROLE. The server role is
+            # neither and never needs to be.
+            - name: ADMIN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: vinga-init
+                  key: ADMIN_URL
+            # Which role the schemas are created WITH AUTHORIZATION to,
+            # read by the SQL through psql's `\getenv`. It is the same
+            # value as deployment.yaml's VINGA_DB_USER, and it is a
+            # secret's key here only because it travels with the two
+            # beside it.
+            - name: VINGA_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: vinga-init
+                  key: VINGA_DB_USER
+            # The analyst role's password, required rather than
+            # defaulted. The SQL defaults it to the public string
+            # `vinga_ro` for the loopback compose case, so omitting it
+            # here would install a well-known password on a role that
+            # can read every conversation this server ever recorded.
+            - name: VINGA_DB_RO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vinga-init
+                  key: VINGA_DB_RO_PASSWORD
+          volumeMounts:
+            # Read-only: what runs here is what is committed, and this
+            # pod has no business editing the file it was handed.
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+      volumes:
+        - name: sql
+          configMap:
+            # Made from `deploy/postgres-init.sql` by the command in the
+            # header, so the one committed copy of the SQL stays the one
+            # home for it.
+            name: postgres-init
