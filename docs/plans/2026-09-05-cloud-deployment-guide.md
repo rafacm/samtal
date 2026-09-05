@@ -200,18 +200,27 @@ memory.
   nothing about the guards. The trial file's own check and boot in
   the `image` job are untouched.
 - **The agreement test** (`test_deploy_manifests.py`, unit lane):
-  parse `deploy/k8s/deployment.yaml` and
+  parse every manifest under `deploy/k8s/` plus
   `deploy/docker-compose.production.yml` and assert the facts CI
-  cannot know are the code's: the container port equals the
-  `ServerConfig` port default, the probe paths equal `HEALTH_PATH`
-  and `READY_PATH`, the liveness probe is the health path and the
-  readiness probe the ready path, and both grace periods are at
-  least the `drain_s` default plus margin (the compose file's
-  `stop_grace_period` and the Deployment's
-  `terminationGracePeriodSeconds`). This is the issue's "the CI
-  check is that agreement" made concrete: kubeconform proves the
-  manifests speak Kubernetes, the agreement test proves they speak
-  vinga.
+  cannot otherwise know are the code's and each other's. Against
+  the code: the container port equals the `ServerConfig` port
+  default; the startup and liveness probes hit `HEALTH_PATH` and
+  the readiness probe `READY_PATH`; the startup budget clears a
+  stated floor; both grace periods are at least the `drain_s`
+  default plus margin; the security context's user, group and
+  `fsGroup` equal the Dockerfile's `vinga` UID (read from the
+  Dockerfile, not restated); `/tmp` is memory-backed; the init
+  Job's env references the init-Secret's required keys and the
+  Deployment references no key of that Secret. Across the network
+  path: the Deployment's labels match the Service's selector, the
+  Service's `targetPort` reaches the Deployment's container port,
+  and every Ingress backend names that Service and its declared
+  port, so a wrong `targetPort` or selector cannot hide behind
+  schema validity. And the topology pins kubeconform cannot judge:
+  one replica, `strategy: Recreate`, the PVC's RWO access mode,
+  and the `/data` mount. This is the issue's "the CI check is that
+  agreement" made concrete: kubeconform proves the manifests speak
+  Kubernetes, the agreement test proves they speak vinga.
 
 ## The guide's structure
 
@@ -456,6 +465,13 @@ answer every finding, and a delta re-review confirms them.
    agreement, `targetPort` reach, Ingress backends, and pin one
    replica, `Recreate`, RWO, the `/data` mount and the security
    settings kubeconform cannot judge.
+
+   *Resolution*: accepted in full. The agreement test now parses
+   every manifest plus the compose file and carries the three
+   families: code agreement (port, probes, budgets, grace, UID,
+   tmpfs, the init-Secret key references), network-path agreement
+   (selectors, `targetPort`, Ingress backends) and the topology
+   pins (one replica, `Recreate`, RWO, `/data`).
 
 9. **P2: the applicable Secret template can install known
    placeholder credentials.** A `.yaml` template under `deploy/k8s/`
