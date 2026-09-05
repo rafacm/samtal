@@ -591,7 +591,7 @@ Reusing what exists wherever the assertion already has a home.
   `vinga-server/tests/unit/command-spellings.txt` regenerates through
   its own module; `CHANGELOG.md`, a dated execution record, gains the
   entry.
-- [x] **[M2: the sentence states, the client advises](2026-09-05-server-state-vocabulary-implementation.md#m2-the-sentence-states-the-client-advises)** (PR TBD). `APPLY_NOTICE`
+- [x] **[M2: the sentence states, the client advises](2026-09-05-server-state-vocabulary-implementation.md#m2-the-sentence-states-the-client-advises)** (PR #411). `APPLY_NOTICE`
   and `BINDING_UNSERVED_NOTICE` lose their command halves and state
   only what is true of the write; `cli.py` gains the table holding this
   client's sentence per boundary set, and `DIFF_INTRO` is rebuilt from
