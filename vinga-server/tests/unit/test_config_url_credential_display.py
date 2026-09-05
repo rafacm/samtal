@@ -41,13 +41,15 @@ from sqlalchemy import insert
 from tests.support.config_cli import chain, document, runner
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
-from vinga_server import logs
+from vinga_server import logs, serving
 from vinga_server.config import entities, views
 from vinga_server.config.api import build_api
-from vinga_server.config.loader import ConfigError, StorageError
+from vinga_server.config.boot import load_boot_config
+from vinga_server.config.loader import ConfigError, StorageError, compose_config
 from vinga_server.config.models import (
     AgentConfig,
     DatabaseConfig,
+    FileConfig,
     McpServerConfig,
     ProviderConfig,
     url_credential,
@@ -758,6 +760,142 @@ def test_a_device_mac_cannot_carry_one_because_the_load_path_refuses_it(
         store.load()
 
     assert "a MAC address is six colon-separated hex pairs" in str(caught.value)
+    _carries_no_sentinel(chain(caught.value))
+
+
+# The refusals, which SAY an identity rather than show one
+#
+# #382 settled that a boot refusal about the stored half names the entry
+# it refused on, in full, because that is the vocabulary the write, the
+# API and this deployment's own documents already speak: a refusal
+# saying less about a stored world than the write that stored it is
+# worth nothing to the operator holding it. That makes a refusal a place
+# an identity leaves this package by, after a field, a mapping key and
+# the name projections above, and its sentence goes somewhere none of
+# those go: a server's stderr as it fails to start, which is read by an
+# operator, by a container log and by whatever collects one.
+#
+# So the same strip is on it, at the same one door. The cases below are
+# the four sentences a stored identity can reach: the reference check
+# and the completeness check, which are the composition's own; the
+# location a per-row read refusal is built from; and the walk over a
+# validation error's locations, which is the half this issue converged.
+
+# A provider name nothing defines, so that the reference sentence is
+# about the entry rather than about the deployment being empty. Not
+# quoted back by that refusal, which is the rule it has always kept.
+GONE = "no-such-provider"
+
+
+@pytest.fixture
+def unbootable(store: ConfigStore) -> ConfigStore:
+    """A deployment named the way no write would allow, holding the one
+    mistake that refuses a boot: an agent whose stage names a provider
+    that is not there.
+
+    The provider planted beside it is what the refusal's `defined:` half
+    lists, so one sentence carries the identity twice, once as the
+    location and once in the list of what could have been meant.
+    """
+    _plant(store, "provider", ("llm", HISTORIC), ProviderConfig(type="mock"))
+    _plant(store, "agent", (HISTORIC,), AgentConfig(prompt="hi", llm=GONE))
+    planted(
+        store,
+        insert(schema.domain_settings).values(
+            key=schema.DEFAULT_AGENT_KEY, value=HISTORIC
+        ),
+    )
+    return store
+
+
+def test_a_boot_refusal_names_the_stored_entry_without_its_credential(
+    unbootable: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The whole boot, from the file half to the composition, which is
+    what a server runs and what a reload runs again."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as caught:
+        load_boot_config()
+
+    message = str(caught.value)
+    assert f"agents.{HISTORIC_SHOWN}.llm: names no llm provider that exists" in message
+    assert f"(defined: {HISTORIC_SHOWN})" in message
+    assert GONE not in message
+    _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
+def test_the_boot_refusal_reaches_stderr_carrying_no_credential(
+    unbootable: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Where an operator actually meets it: the entry point prints the
+    sentence on stderr and leaves with 1, before logging is configured
+    at all, so this is the one surface the boot refusal has and both
+    streams are held to it."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+
+    with caplog.at_level(logging.DEBUG):
+        assert serving.run(None) == 1
+
+    printed = capsys.readouterr()
+    assert f"agents.{HISTORIC_SHOWN}.llm" in printed.err
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
+
+
+def test_the_completeness_refusal_lists_the_names_without_their_credential(
+    store: ConfigStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The composition's other sentence, which lists the agents a
+    default could be set to. A list of stored names is the same
+    publication as one of them."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    _plant(store, "agent", (HISTORIC,), AgentConfig(prompt="hi"))
+
+    with pytest.raises(ConfigError) as caught:
+        load_boot_config()
+
+    assert f"set it to one of: {HISTORIC_SHOWN}" in str(caught.value)
+    _carries_no_sentinel(chain(caught.value))
+
+
+def test_an_unreadable_row_names_its_entry_without_its_credential(
+    store: ConfigStore,
+) -> None:
+    """The location every per-row refusal is composed from, which is
+    built by the store rather than walked out of a validation error. A
+    row that will not read is the case that only a stored name can be
+    in: the write path refuses this name outright."""
+    planted(store, insert(schema.agents).values(name=HISTORIC, body='{"llm": ""}'))
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    assert f"agents.{HISTORIC_SHOWN}: " in str(caught.value)
+    _carries_no_sentinel(chain(caught.value))
+
+
+def test_a_composed_locations_identity_is_named_without_its_credential() -> None:
+    """The walk over a validation error's own locations, which is what
+    #382 moved onto the shared policy.
+
+    Composed from a mapping rather than from a store, which is the shape
+    a composition with no database behind it takes, because that is the
+    route that reaches the field validators with a stored identity in
+    the location rather than with an entry already validated row by row.
+    """
+    with pytest.raises(ConfigError) as caught:
+        compose_config(
+            FileConfig(),
+            {"agents": {HISTORIC: {"prompt": "hi", "llm": ""}}},
+            "the test's database",
+        )
+
+    assert f"agents.{HISTORIC_SHOWN}.llm: " in str(caught.value)
     _carries_no_sentinel(chain(caught.value))
 
 
