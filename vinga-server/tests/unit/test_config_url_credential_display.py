@@ -151,7 +151,7 @@ def store(keys: None) -> Iterator[ConfigStore]:
 def legacy(store: ConfigStore) -> ConfigStore:
     """The store with every planted row in it."""
     for row in LEGACY:
-        _plant(store, row)
+        _plant(store, row.kind, row.identity, row.entry)
     return store
 
 
@@ -171,22 +171,24 @@ def run(monkeypatch: pytest.MonkeyPatch):
     return runner(monkeypatch)
 
 
-def _plant(store: ConfigStore, row: Legacy) -> None:
-    """One row holding a value today's write path refuses, written as a
-    row.
+def _plant(
+    store: ConfigStore, kind: str, identity: tuple[str, ...], entry: BaseModel
+) -> None:
+    """One entry written as a row rather than through a write path,
+    which is the only way most of these get in at all.
 
-    The body is the repository's own dump of the model, so what is
-    unlawful about the row is the value and nothing else: a plant that
-    hand-wrote the JSON would be exercising the parser as well.
+    The body is the repository's own dump of the model, so what today's
+    write path would object to is the value and nothing else: a plant
+    that hand-wrote the JSON would be exercising the parser as well.
     """
-    descriptor = entities.descriptor(row.kind)
+    descriptor = entities.descriptor(kind)
     table = getattr(schema, descriptor.table)
-    columns = dict(zip(descriptor.addressing, row.identity, strict=True))
+    columns = dict(zip(descriptor.addressing, identity, strict=True))
     where = [table.c[column] == value for column, value in columns.items()]
     planted(
         store,
         table.delete().where(*where),
-        insert(table).values(**columns, body=body(row.entry)),
+        insert(table).values(**columns, body=body(entry)),
     )
 
 
@@ -437,12 +439,9 @@ def test_a_string_that_is_not_a_credential_bearing_url_is_shown_as_written(
     }
     _plant(
         store,
-        Legacy(
-            kind="provider",
-            identity=("llm", "plain"),
-            entry=ProviderConfig(type="openai_compatible", egress=False, **untouched),
-            shown=(),
-        ),
+        "provider",
+        ("llm", "plain"),
+        ProviderConfig(type="openai_compatible", egress=False, **untouched),
     )
 
     entity = client.get("/providers/llm/plain").json()["entity"]
