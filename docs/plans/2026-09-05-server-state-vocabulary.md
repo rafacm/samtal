@@ -312,6 +312,18 @@ tuple of the token the diff already publishes, beside the prose.
   default under `strict=True`, and a tuple carrying one unrecognized
   member raises `ValidationError`, which is exactly the refusal the new
   rule intercepts.
+- **The import dedupe keys on whichever half is doing the work.** Today
+  it deduplicates the printed sentences (`cli._imported_entries`), so a
+  document that wrote nine entities waiting on one apply prints one
+  line. Keying on the boundary set alone would be right for a server
+  that sends one and wrong for one that does not: every entry from an
+  older server carries the same empty set, so an ordinary stored entry
+  and a device binding, two different sentences, would collapse into
+  one and an operator would be told half of what they are waiting on.
+  The key is therefore the boundary set where there is one, and the
+  sentence where there is not, which is the same rule the rendering
+  keeps one level up: a known set is spoken by the client, and an
+  unknown or absent one is quoted from the server.
 - **The prose stays, and stops naming commands.** Keeping it is what
   makes an old client safe against a new server: it prints the sentence
   verbatim, and a state-only sentence is never wrong. Removing the
@@ -468,10 +480,12 @@ Reusing what exists wherever the assertion already has a home.
 - `tests/unit/test_api_openapi.py` and `test_api_contract.py` are the
   proof the committed document moved deliberately and in one piece;
   neither needs editing.
-- The import dedupe keeps its existing case and gains one: two entries
-  waiting at the same boundary print one remedy, keyed on the boundary
-  set rather than on the sentence, so a future prose edit cannot split
-  a dedupe.
+- The import dedupe keeps its existing case and gains two: two entries
+  waiting at the same boundary print one remedy, so a future prose edit
+  cannot split a dedupe; and a mixed-version case where two entries
+  carry different notices and no `applies` at all prints both
+  sentences, which is what the old-server arm has to do and what a
+  boundary-only key would have collapsed.
 
 ## Risks
 
@@ -541,8 +555,10 @@ Reusing what exists wherever the assertion already has a home.
   it; `_acknowledged` and `_imported_entries` print the server's
   sentence with the client's remedy under it, falling back to the
   server's sentence alone for an absent, empty or unknown set, and the
-  import dedupe keys on the set; the two inverted pins, the
-  no-`PROGRAM`-in-a-sentence invariant and the three fallback cases;
+  import dedupe keys on the boundary set where there is one and on the
+  sentence where there is not; the two inverted pins, the
+  no-`PROGRAM`-in-a-sentence invariant, the fallback cases through
+  `Act.read()` and the mixed-version import case;
   the licensed substitution and the amended docstring in
   `test_config_cli_respelling.py`; the follow-up issue for class (a)'s
   five refusals is filed; a CHANGELOG `Changed` entry; the
@@ -617,6 +633,16 @@ amendments.
    distinct fallback server sentences when `applies` is absent, empty or
    unknown, and add a mixed-version import case with two different
    notices and no `applies`.
+
+   *Resolution*: accepted in full. The plan now states the dedupe key
+   as the boundary set where there is one and the sentence where there
+   is not, which is the same rule the rendering keeps one level up (a
+   known set is spoken by the client, an unknown or absent one is
+   quoted from the server), with the collapse it avoids written out:
+   an ordinary stored entry and a device binding both arriving with an
+   empty set are two different sentences and one of them would have
+   been dropped. The mixed-version import case joins the tests and the
+   M2 deliverables.
 
 3. **P2: `config/remedies.py` fails the deletion test.** Its only caller
    is `cli.py`, and inlining would still leave one table shared by
