@@ -61,7 +61,7 @@ from datetime import datetime
 from enum import Enum
 from importlib import metadata
 from pathlib import Path
-from typing import Annotated, Any, Literal, get_args, get_origin
+from typing import Annotated, Any, Literal, cast, get_args, get_origin
 from urllib.parse import quote, urlencode, urlunsplit
 
 import httpx
@@ -3363,7 +3363,20 @@ REMEDIES: dict[frozenset[Applies], str] = {
 }
 
 
-def _announced(sentence: str, applies: Sequence[object]) -> str:
+def _boundaries(applies: object) -> frozenset[Applies]:
+    """The boundaries one answer carries, as the set they are.
+
+    A body carries them as a sequence, which is JSON having no set, and
+    the field's meaning is a set: `["reload", "check-in"]` and
+    `["check-in", "reload"]` are one answer, and a token twice is the
+    same answer as a token once. Everything downstream reads them
+    through here, so the order a server happened to serialize them in
+    reaches neither the table nor the dedupe.
+    """
+    return frozenset(cast(Iterable[Applies], applies))
+
+
+def _announced(sentence: str, applies: frozenset[Applies]) -> str:
     """What one write is waiting at, as an operator reads it: the
     server's sentence, and this client's advice under it where there is
     any.
@@ -3374,7 +3387,7 @@ def _announced(sentence: str, applies: Sequence[object]) -> str:
     remedy prints the sentence alone, which is also what an older
     server's silence and a newer server's word both arrive as.
     """
-    remedy = REMEDIES.get(frozenset(applies))
+    remedy = REMEDIES.get(applies)
     return sentence if remedy is None else f"{sentence}\n{remedy}"
 
 
@@ -4503,7 +4516,11 @@ def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
     # Keyed on whichever half is doing the work, which is the same rule
     # the rendering keeps one level up: a set this client knows is
     # spoken by this client, and a set it does not is quoted from the
-    # server. So two entries waiting at one boundary are one line
+    # server. On the set itself and not on the sequence that carried
+    # it, because JSON has no set and the order a server serialized
+    # one in is not a fact about the write: two entries waiting at a
+    # reload and a check-in are one line whichever way round each of
+    # them arrived. So two entries waiting at one boundary are one line
     # however their sentences read, and two entries from a server older
     # than the vocabulary, which both carry the empty set, are told
     # apart by the only half either of them has. Keying on the set
@@ -4521,7 +4538,7 @@ def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
         # function, which has no exceptions: nothing an answer carries
         # steers a terminal.
         sentence = printable(str(entry["notice"]), UNBOUNDED)
-        applies = tuple(entry["applies"])
+        applies = _boundaries(entry["applies"])
         announced.setdefault(applies or sentence, _announced(sentence, applies))
     return tuple(announced.values())
 
@@ -4558,7 +4575,7 @@ def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
     print(
-        _announced(str(acknowledgement["notice"]), tuple(acknowledgement["applies"])),
+        _announced(str(acknowledgement["notice"]), _boundaries(acknowledgement["applies"])),
         file=sys.stderr,
     )
 

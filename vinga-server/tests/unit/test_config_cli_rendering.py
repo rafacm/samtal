@@ -1415,6 +1415,37 @@ def test_two_entries_waiting_at_one_boundary_are_advised_once(
     assert printed.err.splitlines() == [APPLY_NOTICE.sentence, RELOAD_REMEDY]
 
 
+def test_the_boundaries_are_read_as_a_set_and_not_as_a_sequence(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The same two boundaries, however a body serialized them.
+
+    JSON has no set, so `applies` arrives as a list and the order is
+    whatever the server that built it happened to produce; a token
+    listed twice is the same answer as a token listed once. Neither is
+    a fact about the write, so neither may reach the remedy lookup or
+    the dedupe: two entries waiting at a reload and a check-in are one
+    line whichever way round each of them arrived, and both of them
+    read the sentence this client has for that pair rather than one of
+    them falling back to the server's sentence alone.
+    """
+    unserved = entities.BINDING_UNSERVED_NOTICE
+    both = [Applies.RELOAD.value, Applies.CHECK_IN.value]
+    entries = [
+        _entry(identity="sam", notice=unserved.sentence, applies=both),
+        _entry(identity="alex", notice=unserved.sentence, applies=list(reversed(both))),
+        _entry(identity="kim", notice=unserved.sentence, applies=[*both, Applies.RELOAD.value]),
+    ]
+
+    cli._imported(cli.IMPORT.read({"entries": entries}))
+
+    printed = capsys.readouterr()
+    assert printed.err.splitlines() == [
+        unserved.sentence,
+        cli.REMEDIES[frozenset({Applies.RELOAD, Applies.CHECK_IN})],
+    ]
+
+
 def test_two_entries_from_an_older_server_keep_both_sentences(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
