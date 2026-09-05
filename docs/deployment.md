@@ -15,9 +15,10 @@ page and the README disagree about a fact, the README is right and this
 page is the bug.
 
 What is not here: how to configure the server once it runs. Which
-providers, which agents and which devices go in over the configuration
-API, and the file half's every key has its own generated page,
-`docs/reference/server-config.md`, rendered from the models. Onboarding
+providers, which agents and which devices a deployment has is written
+in over the configuration API, and every key of the file half is on its
+own generated page, `docs/reference/server-config.md`, rendered from
+the models. Onboarding
 a board is
 [Onboarding a device](../vinga-server/README.md#onboarding-a-device),
 and the trial path that gets a first conversation running on a laptop
@@ -194,9 +195,9 @@ change `VINGA_IMAGE` and bring it up again.
 
 ### What is in front of the port
 
-The file publishes `8003:8003`, which is the shape a trial of the
-deployment file wants and not the shape a public deployment wants: one
-port carries the configuration API along with the two device paths.
+The file publishes `8003:8003`, which is convenient while the file is
+being tried and is not what a public deployment wants: one port carries
+the configuration API along with the two device paths.
 Behind a reverse proxy, publish to loopback (`127.0.0.1:8003:8003`) and
 let the proxy route outward exactly the two paths the Kubernetes lane's
 Ingress routes, for the reasons spelled out there. The proxy also needs
