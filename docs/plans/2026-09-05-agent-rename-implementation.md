@@ -8,7 +8,7 @@ so explicitly.
 
 ## M1: one transaction, three schemas
 
-PR TBD.
+PR #415.
 
 ### What landed
 
@@ -49,13 +49,14 @@ the whole of it before anything can reach it.
   rather than a delete and an insert, so the body and any column this
   table gains later travel with the row), and the module's two own
   refusals, `AGENT_EXISTS` and `SAME_NAME`.
-- **`tests/unit/test_agent_rename.py`,** 23 cases: the sentinel sweep
+- **`tests/unit/test_agent_rename.py`,** 24 cases: the sentinel sweep
   and its converse, the result type, the operator-vocabulary assertions,
   the held fact, the inventory pin, the seven refusals one case per
   state, the mapping pin, atomicity from the last statement,
   reversibility as a byte-identical round trip and again with a stranger
-  present, and one competing-write pin per store that checks a
-  destination.
+  present, one competing-write pin per store that checks a destination,
+  and the statement-order pin those three cannot make (see the review
+  round below).
 - **`tests/unit/test_memory_store.py`** gains five direct cases for
   `rename_owner`: both areas move, the other scope is left alone, an
   occupied destination is refused and moves nothing, an owner holding
@@ -131,8 +132,8 @@ forced by something the plan itself states elsewhere.
   final rows are the same as with the lock: the destination ends up
   holding both the moved rows and the intruder either way. What differs
   is only whether the second writer was made to wait, so each pin asks
-  `pg_locks` whether an ungranted waiter is really parked on the chain's
-  key while the rename is between its two statements. Verified to bite:
+  `pg_locks` whether that writer is really parked on the chain's key
+  while the rename is between its two statements. Verified to bite:
   removing `take_the_chain_lock` from `rename_owner` fails the memory
   pin on `writer.queued`, removing it from the record's `rename_agent`
   fails the record pin the same way, and both were restored.
@@ -144,6 +145,55 @@ forced by something the plan itself states elsewhere.
   `("turns", "agent")` out of the answer and fails it the other way.
   Both mutations were reverted.
 
+- **A `begin` listener cannot see a connection before it blocks.**
+  Naming the competing writer's backend needs its pid recorded before
+  the chain's lock is asked for, and a second `begin` handler registered
+  with `insert=True` did not run in front of the write engine's own: the
+  pid arrived only once the lock had been granted, which is exactly when
+  a blocked writer stops being blocked. The `connect` event is strictly
+  earlier than any transaction and answers, which is what the pins use.
+
+### The review round
+
+Backend codex, model `gpt-5.6-sol`, against PR #415: 2 P2 and 1 P3,
+mergeable after the fixes. All three are fixed on the branch, in one
+commit each.
+
+1. **P2: the competing-write pins did not prove the lock behavior they
+   claimed.** Two holes, and both were real. The waiter predicate
+   counted ANY ungranted waiter on the chain key, and this lane runs its
+   files across worker processes against one instance, so a suite next
+   door writing to the same chain would have satisfied it; and each pin
+   releases its writer at the statement that WRITES, which is after the
+   destination check, so all three would still have passed with a
+   chain's lock taken between the check and the update rather than
+   before both. Fixed as prescribed: each competitor now runs on an
+   engine of its own whose backend pid is recorded on `connect`, and the
+   predicate requires that exact pid; and a new case asserts the
+   execution order directly, off `before_cursor_execute`, each chain's
+   lock before the first statement naming that chain's table, with the
+   ascending order read from the same list. Verified by moving
+   `take_the_chain_lock` below the destination SELECT in both helpers:
+   the three competing-write pins stayed green, which is the finding
+   reproduced, and the order assertion failed on each half in turn
+   (`assert 10 < 9` for the record chain, `assert 13 < 12` for the
+   memory chain). Both mutations were reverted, and the earlier
+   lock-removal mutation was re-run against the pid-precise predicate to
+   confirm it still bites.
+
+2. **P2: the memory collision named the listing that would not answer.**
+   `memory list agent` is who is remembering anything and
+   `memory list agent <name>` is what one of them remembers, the same
+   words one level apart, and the refusal told a caller to read what is
+   stored under the destination name with the first. The sentence now
+   names the second. The `<name>` is a placeholder rather than a value:
+   the no-echo rule the sentence itself states is unchanged, and the
+   census manifest moved with it through its own module.
+
+3. **P3: the two spellings of the PR number disagreed.** The plan's
+   milestone tick said PR #415 and this document's header still said
+   PR TBD. It says #415.
+
 ### Open questions the plan left, and what M1 answers
 
 None. M1 carries no open question of its own; the plan's own questions
@@ -152,12 +202,15 @@ boundary sentence and the verb are M2 to M4.
 
 ### Verification
 
+Re-run after the review round's fixes, which is where these numbers are
+from.
+
 - `uv run ruff check .`: clean.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5754 passed,
-  19 skipped, plus the command-spellings manifest, which stales on every
-  change to a tracked file and is regenerated in the last commit of the
-  milestone.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5756 passed,
+  19 skipped. The command-spellings manifest stales on every change to a
+  tracked file and is regenerated through its own module.
 - `uv run pytest tests/integration -q`: 243 passed.
-- `scripts/check_doc_links.py .`: clean.
-- The generated-document drift checks: clean. M1 touches no generated
-  document; the two migrations and the regenerated references are M3's.
+- `scripts/check_doc_links.py .`: 206 files, 0 failures.
+- The generated-document drift checks: all seven current, none
+  regenerated. M1 touches no generated document; the two migrations and
+  the regenerated references are M3's.
