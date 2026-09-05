@@ -295,9 +295,15 @@ module's.
   reachable, no configuration file and no key in the environment,
   and succeeds.
 - **Deterministic**: two renders are byte-equal.
-- **Names every field**: every field path reachable from
-  `ServerConfig` appears in the page (reflection sweep, the
-  `test_the_reference_names_every_field_of_every_entity` shape).
+- **Names every field, per section**: the test splits the page at
+  its section headings and asserts, per section, the exact
+  reflected field sequence of that section's model (declaration
+  order, all rows, nothing extra), and asserts the section
+  inventory itself equals the reflected model graph. Unscoped
+  name-appears-somewhere checking is explicitly not enough here:
+  the server models repeat `enabled`, `port` and `max_session_s`
+  across sections, so one rendered row could mask a missing row or
+  a whole missing section elsewhere.
 - **Constraints render, completely**: a reflection sweep asserts
   that for every field reachable from `ServerConfig`, every
   `FieldInfo.metadata` bound appears rendered in that field's row
@@ -521,6 +527,12 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    delimit each section and assert its exact reflected field
    sequence there, and assert the reflected model-section inventory
    so a missing nested section cannot hide behind another's rows.
+
+   *Resolution*: accepted in full. The coverage test now splits the
+   page at its headings, asserts each section's exact reflected
+   field sequence in place, and asserts the section inventory
+   equals the reflected model graph, with the duplicate leaf names
+   named as the reason unscoped checking is insufficient.
 
 8. **P2: M1 depends on an interface not made public until M2.** The
    M1 coverage test must walk the model graph, but the promotion of
