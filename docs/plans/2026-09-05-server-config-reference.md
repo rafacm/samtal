@@ -99,7 +99,18 @@ So `reference` gains one optional positional, `HALF`, choices
 `domain` and `server`, default `domain`: the bare invocation stays
 byte-identical, every existing CI line and documentation sentence
 stays true, and the new page is
-`vinga-server config reference server`. The byte-identical claim is
+`vinga-server config reference server`. The halves are one
+structure, not three: `server_reference.py` declares an ordered
+registry `HALVES: tuple[tuple[str, Callable[[], str]], ...]`
+mapping `domain` to `docgen.reference` and `server` to its own
+renderer (no import cycle: `docgen` never imports the new module),
+with a `render(half)` beside it that looks the name up and refuses
+an unknown one. The CLI's dispatch calls `render`, the positional's
+help lists the registry's keys, and the fixed refusal names them
+from the same tuple, so there is no catch-all branch that would
+accept an accidental value and no second copy of the set anywhere:
+adding a half is one registry row, per the derived-grammar rule in
+the CLI guide. The byte-identical claim is
 proven by sequencing, not asserted: the selector lands in a commit
 that touches neither `docgen.reference()` nor
 `docs/reference/domain-config.md`, so the existing committed-copy
@@ -235,10 +246,12 @@ order, no timestamps, no set iteration).
   application import. Callers stop having to know how model
   metadata becomes markdown.
 - `config/cli.py` (M2): `reference` gains the optional `HALF`
-  selector (a new declare in the `_of_an_entity` style, or
-  `_rendered` widened; whichever reads better in place), routing
-  `server` to the new module and everything else through the
-  existing path; the unknown-half refusal is a fixed sentence.
+  selector (a new declare in the `_of_an_entity` style, scoped to
+  the `reference` row so `openapi` and `cli-reference` do not grow
+  it), dispatching through `server_reference.render(half)`; the
+  positional's help and the fixed unknown-half refusal both derive
+  from the `HALVES` registry's keys, and there is no catch-all
+  branch.
 - `docs/reference/server-config.md` (M2): the committed page.
 - `.github/workflows/vinga-server.yml` (M2): one more
   regenerate-and-diff step beside the domain one.
@@ -409,6 +422,12 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    one ordered mapping from `domain` and `server` to their
    renderers; dispatch, help text and the fixed unknown-half refusal
    derive from its keys, with no catch-all branch.
+
+   *Resolution*: accepted in full. `server_reference.py` declares
+   the ordered `HALVES` registry and a `render(half)` that refuses
+   an unknown name; the CLI dispatch, the positional's help and the
+   refusal all derive from the registry's keys, and the catch-all
+   routing sentence is gone from the plan.
 
 4. **P2: `BOOT_REFUSALS` is checked only in the easy direction.**
    The tests prove every registry member is rendered and raisable,
