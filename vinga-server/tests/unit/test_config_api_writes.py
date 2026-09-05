@@ -400,7 +400,7 @@ def test_every_notice_this_server_composes_announces_a_known_boundary() -> None:
         value for value in vars(entities).values() if isinstance(value, entities.Notice)
     ]
 
-    assert len(composed) == 5
+    assert len(composed) == 6
     for notice in composed:
         assert notice.applies, notice.sentence
         assert set(notice.applies) <= set(Applies), notice.sentence
