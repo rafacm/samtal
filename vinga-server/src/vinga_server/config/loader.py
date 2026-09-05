@@ -28,7 +28,11 @@ from pydantic_settings.exceptions import SettingsError
 
 from vinga_server.config import entities
 from vinga_server.config.models import (
+    DATABASE_ENV_NAMES,
+    DATABASE_ENV_PREFIX,
+    DATABASE_GENERIC_ENV_PREFIX,
     DOMAIN_KEYS,
+    ENV_PREFIX,
     PROGRAM,
     SERVER_PROGRAM,
     Config,
@@ -86,12 +90,13 @@ NEEDS_THE_SIM_EXTRA = (
     "command again; `simulator check-in` needs none of it and works as it is"
 )
 
-# The prefix a configuration override carries. Only the domain names
-# below are scanned for: everything else under this prefix is either a
-# key the file half still owns or a variable that carries a value rather
-# than naming a section (VINGA_CONFIG, VINGA_MASTER_KEY,
-# VINGA_AUTH_SECRET), and none of those moved anywhere.
-ENV_PREFIX = "VINGA_"
+# The prefix a configuration override carries is `ENV_PREFIX`, declared
+# beside the settings model that reads it and imported above. Only the
+# domain names below are scanned for under it: everything else under
+# this prefix is either a key the file half still owns or a variable
+# that carries a value rather than naming a section (VINGA_CONFIG,
+# VINGA_MASTER_KEY, VINGA_AUTH_SECRET), and none of those moved
+# anywhere.
 
 # What writes each moved section now, so the refusal answers the question
 # it raises. Read off the descriptors rather than written out again: the
@@ -153,34 +158,13 @@ RETIRED_SECTIONS: dict[str, str] = {
     ),
 }
 
-# The database section's own environment spellings.
-#
-# One key, one variable, and the variable is the short one. The generic
-# `VINGA_SERVER__DATABASE__HOST` would work by accident of the nesting
-# scheme, and letting it would give every connection fact two names: the
-# compose file feeds the Postgres image from the short spellings, which
-# is the whole point of having them, and two spellings that must agree
-# are one spelling with a bug pending.
-#
-# Outside the section scheme rather than inside it, the way
-# `VINGA_MASTER_KEY` is: what these name is where the server's own state
-# lives, which a deployment sets beside its credentials rather than in
-# the file it edits.
-DATABASE_SECTION = "database"
-
-DATABASE_ENV_PREFIX = f"{ENV_PREFIX}DB_"
-
-# The four the YAML also carries. The password and the whole-URL
-# override have no YAML key at all and are read where the URL is built
-# (`vinga_server.db`), so they are deliberately not here: this table is
-# what maps a field of `DatabaseConfig` onto its variable, and neither
-# of those is a field.
-DATABASE_ENV_NAMES: dict[str, str] = {
-    "host": f"{DATABASE_ENV_PREFIX}HOST",
-    "port": f"{DATABASE_ENV_PREFIX}PORT",
-    "name": f"{DATABASE_ENV_PREFIX}NAME",
-    "user": f"{DATABASE_ENV_PREFIX}USER",
-}
+# The database section's own environment spellings are declared beside
+# `DatabaseConfig` and imported above: `DATABASE_ENV_PREFIX`, the four
+# `DATABASE_ENV_NAMES` this module applies over the section, and the
+# generic `DATABASE_GENERIC_ENV_PREFIX` it refuses in favour of them.
+# They moved there when the generated server reference became a fourth
+# reader of the same six names, and the reasoning is on the model's own
+# docstring, which is what that page publishes.
 
 
 class ConfigError(Exception):
@@ -766,7 +750,7 @@ def _check_database_environment() -> None:
     so a case-sensitive scan would leave exactly the spellings that do
     apply unrefused.
     """
-    prefix = f"{ENV_PREFIX}SERVER__{DATABASE_SECTION.upper()}__"
+    prefix = DATABASE_GENERIC_ENV_PREFIX
     found = [name for name in sorted(os.environ) if name.upper().startswith(prefix)]
     if not found:
         return
