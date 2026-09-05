@@ -373,9 +373,19 @@ The deliberate artifact moves:
 
 - `docs/reference/api-openapi.json`, twice. M1 adds the two `applies`
   fields, the fourth enum member and the corrected
-  `Acknowledgement.notice` description; M2 carries no schema change but
-  no description change either, so it regenerates only if a description
-  moves. Regenerated with
+  `Acknowledgement.notice` description; M2 rewrites
+  `AppliedEntry.notice`'s description and `_one_outcome`'s error text,
+  so it regenerates too. One consequence of the narrowing is worth
+  naming before a reviewer meets it in the diff, because it is larger
+  than it sounds: pydantic renders a `Literal` of enum members inline
+  rather than as a `$ref`, so the seven diff fields stop pointing at
+  the `Applies` component and carry a three-value enum each. The
+  component survives, referenced by the two new `applies` fields, which
+  is where the whole vocabulary is now published. The trade is
+  deliberate: an inline `Literal` in this document is the merged
+  precedent already (`AppliedEntry.section`), and a field declaring a
+  value it never sends is the thing the honest-seam rule exists to
+  refuse. Regenerated with
   `uv run vinga-server config openapi > ../docs/reference/api-openapi.json`,
   which `tests/unit/test_api_openapi.py` names in its own staleness
   message.
@@ -444,6 +454,14 @@ Reusing what exists wherever the assertion already has a home.
 - **The closed-set pin.** `set(get_args(DiffApplies)) | {Applies.STORE_BOOT}
   == set(Applies)`, so a fifth boundary cannot be added on one side
   only, and every `Notice.applies` member is an `Applies` member.
+- **And the pin that proves the narrowing is enforced**, which the one
+  above does not: it is membership bookkeeping, and seven annotations
+  could still be typed `Applies` while it passes. So each of the seven
+  diff models is constructed with `Applies.STORE_BOOT` and asserted to
+  raise, which is what says the narrowing reached the fields rather
+  than only the alias. Verified against pydantic while amending: a
+  `Literal` of enum members rejects a member outside it and accepts
+  every member inside it.
 - **The invariant that keeps the class closed.** No `Notice.sentence`
   contains `PROGRAM`. This is the guard #386 asks for, scoped to the
   surface it is true of: it is one line, it fails loudly on a
@@ -496,10 +514,11 @@ Reusing what exists wherever the assertion already has a home.
 ## Risks
 
 - **The `Applies` widening reaches the diff's contract.** Mitigated by
-  the narrowed alias, which keeps the diff declaring three, and by the
-  equality pin, which fails if either side gains a member alone. The
-  regenerated OpenAPI document is where a reviewer sees the whole
-  effect in one diff.
+  the narrowed alias, which keeps the diff declaring three, by the
+  equality pin, which fails if either side gains a member alone, and by
+  the rejection pin, which fails if a field kept the wide annotation.
+  The regenerated OpenAPI document is where a reviewer sees the whole
+  effect in one diff, the inlining included.
 - **The shape rule in `_declared` reaches further than one field.** It
   is written for a sequence of closed tokens, and today there is
   exactly one such shape in `responses.py`, the field this plan adds.
@@ -684,6 +703,26 @@ amendments.
    and add a contract test proving each diff model rejects
    `STORE_BOOT`: the enum-set equality pin proves membership
    bookkeeping, not that the seven annotations enforce the narrowing.
+
+   *Resolution*: the second half accepted, the first refuted with
+   evidence. The narrowing is one alias with three members,
+   `Literal[Applies.RESTART, Applies.RELOAD, Applies.CHECK_IN]`, and
+   `Applies.RESTART` is in it, so the fixture's constructions stay
+   valid and M1 stays releasable; this was checked by constructing the
+   models rather than reasoned about. The fixture's boundaries are not
+   a claim about `diff.py`'s table either: its docstring says it
+   composes "every kind present with its own regime", which is variety
+   for the cases that read it, and the real table has its own pin. So
+   the fixture is left alone, and touching it would be churn in the
+   milestone that must move no printed byte. The pin the finding asks
+   for is right and is added: each of the seven diff models is
+   constructed with `STORE_BOOT` and asserted to raise, since
+   membership bookkeeping would pass while seven fields kept the wide
+   annotation. Amending also turned up a consequence the plan had not
+   named: a `Literal` of enum members renders inline rather than as a
+   `$ref`, so the seven diff fields stop pointing at the `Applies`
+   component, which now survives through the two new fields. That is
+   recorded with the artifact moves, with the reason the trade is taken.
 
 5. **P2: `AppliedEntry.notice` remains a stale served contract.** The
    plan rewrites only `Acknowledgement.notice`'s description;
