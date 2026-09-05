@@ -1,0 +1,786 @@
+# One name, rewritten everywhere it is still read
+
+Plan for [#356](https://github.com/rafacm/vinga/issues/356).
+Implementation notes land in the companion
+`2026-09-05-agent-rename-implementation.md`, one section per milestone,
+appended in the change that ticks the milestone here.
+
+## Goal
+
+Renaming an agent today is delete plus create, and nothing can recognize
+the pair as a rename, so every reference keyed by the name is left
+pointing at a name nothing answers to. The store refuses the delete half
+while a device binding or the default agent names it
+(`config/store.py:429-432`), so the operator's route is: unbind the
+board, clear the default, delete, create under the new name, bind again,
+set the default again, and lose the memory. Six writes and a silent
+loss, for one act.
+
+This plan builds the act: `vinga agent rename <old> <new>`, one
+transaction, every live reference rewritten or nothing written at all.
+After it, a rename keeps what the agent remembered, what boards are
+bound to it, whether it is the default, and the conversations it can
+still be asked to resume.
+
+What it deliberately does not do is rewrite the record of what happened.
+A turn spoken last month was spoken by an agent whose name at the time
+was the old one, and the row that says so is evidence rather than a
+reference. The line between the two is drawn below from the code rather
+than from intuition, and drawing it moved one column across from where
+the issue put it.
+
+## The issue's decisions, restated
+
+- **A rename is one transactional rewrite, not a compensating sequence.**
+  Settled, and not re-argued here.
+- **The verb follows the CLI guide**: noun `agent`, verb `rename`, the
+  address first and the new name as the payload behind it. Settled; the
+  spelling is worked through against the guide's practices below.
+- **Sequenced after #83**, which shipped the name keys and the
+  documented orphaning. Both are merged (PRs #359 to #363), so the
+  ground this stands on is in place.
+- **Confirmation is this plan's to decide.** Resolved below.
+- **The record schema stays as written.** This is the one line the plan
+  reopens, and it reopens it on evidence rather than on preference:
+  `record.conversations.agent` is not a dated row, it is the filter two
+  live reads run at request time. See the census, and the resolution
+  under [What is a live reference, measured](#what-is-a-live-reference-measured).
+  The rest of the record (turns, sessions, tool calls, events, capture
+  manifests) stays exactly as the issue says.
+
+## Where the references are, and the census
+
+Every count below is from a command, and every command is written out so
+a reviewer can re-run it. Run from `vinga-server/` unless the command
+says otherwise.
+
+**The tables, read off the metadata rather than off a grep**, because a
+column that holds an agent name is a fact of the declaration and a grep
+for the word "agent" answers with prose:
+
+```bash
+uv run python -c "
+from vinga_server.db import schema as domain
+from vinga_server.conversations import schema as record
+from vinga_server.memory import schema as memory
+for name, module in (('domain', domain), ('record', record), ('memory', memory)):
+    for table in module.metadata.sorted_tables:
+        print(name, table.name, [c.name for c in table.columns])
+"
+```
+
+Sixteen tables across the three schemas. The ones holding an agent name,
+and nothing else does:
+
+| Where | Shape | Read as |
+| --- | --- | --- |
+| `domain.agents.name` | text primary key | the identity itself |
+| `domain.devices.agents` | JSON array of names | live, per check-in |
+| `domain.domain_settings` where `key='default_agent'` | JSON scalar | live, per check-in |
+| `memory.facts.owner` where `scope='agent'` | text | live, per turn |
+| `record.conversations.agent` | text | **live**, per resume and per listing |
+| `record.sessions.agent` | text | record |
+| `record.sessions.agents` | JSON array | record |
+| `record.turns.agent` | text | record |
+| `record.turns.legs[].agent` | inside JSON | record |
+| `record.events.fields` | inside JSON | record |
+
+**Nothing cascades, anywhere, by construction.**
+
+```bash
+grep -rn "ForeignKey" src/ | wc -l   # 0
+```
+
+`db/schema.py:41-51` states the decision: "Referential integrity lives
+in the repository rather than in database foreign keys." So there is no
+`ON UPDATE CASCADE` to lean on and no constraint to be refused by: every
+reference above is an uncorrelated copy of a string, and the rewrite has
+to name each one.
+
+**What the repository itself calls a reference to an agent** is one
+function, and it is the inventory this plan rewrites the domain half
+against rather than a list written beside it:
+
+```bash
+grep -n "snapshot.agents" src/vinga_server/config/models.py
+```
+
+`check_references` (`models.py:3216-3271`) walks exactly two: the
+default agent, and every entry of every device binding. It already runs
+inside every write, which is what refuses the delete half today, and it
+is what the rename runs to prove it left nothing dangling.
+
+**The memory half is one column under one scope.**
+
+```bash
+grep -rn "facts\.c\.owner" src/vinga_server/memory/store.py | wc -l   # 13
+grep -n "class MemoryScope" -A 20 src/vinga_server/memory/scopes.py
+```
+
+`owner` means an agent name when `scope = 'agent'`, a canonical MAC when
+`scope = 'device'`, and the conversation scope never reaches `facts` at
+all (`scopes.py:24-47`, `FACT_SCOPES = (AGENT, DEVICE)`). `memory.state`
+is keyed by conversation and holds no agent name. Held rows, the ones a
+soft forgetting parked with `forgotten_at`/`forgotten_in`, carry `owner`
+like any other row, so they move with the rename and a restore after it
+still finds them.
+
+### What is a live reference, measured
+
+The issue's line is the right one and one column sits on the wrong side
+of it. The line: **a reference something reads to decide what happens
+next is live; a column recording what was true at a moment is record.**
+Applied with a grep rather than with a reading:
+
+```bash
+grep -rn "conversations\.c\.agent" src/   # 5 sites, two of them filters
+grep -rn "turns\.c\.agent" src/           # 0 sites
+grep -rn "sessions\.c\.agent" src/        # 1 site, a projection in a listing
+```
+
+- `conversations.c.agent == agent` at `conversations/threads.py:540`
+  (the thread listing's filter) and `:661` (`candidates`, "the threads of
+  one agent a spoken description might have meant"). `resumption.py`
+  keys its offers and its awaits on the agent name (`:141-163`,
+  `:200-257`) and re-checks ownership at `:362-366`, and
+  `threads.py:103,293` refuses a thread whose agent does not match with
+  `ANOTHER_AGENT`. So a rename that leaves this column alone detaches
+  every past thread from the agent that owns it: resume by description
+  goes empty, `vinga conversation list --agent` goes empty, and the
+  thread guard refuses the agent its own history. Silently, because
+  `AgentQuery` is "matched exactly and not refused for shape"
+  (`conversations/api.py:354-364`), so a name nothing answers to is an
+  empty page rather than a mistake.
+- `turns.agent` appears in **no** WHERE clause in the tree. It is
+  written and displayed. `sessions.agent` is projected into a listing and
+  filtered on nothing. `turns.legs[].agent` and the event fields are
+  inside JSON that nothing queries by agent.
+
+So `conversations.agent` moves and the rest of the record does not, and
+the mismatch that leaves is the honest one: a thread belongs to the
+agent under its current name, and each turn inside it records the name
+the agent had when it spoke. That is stated where both are rendered
+rather than left for somebody to find.
+
+### The rest of the surface, and why it needs nothing
+
+**In-process structures keyed by agent name** were swept
+(`grep -rn "agents\[" src/`, plus a read of each): `ProviderWorld.agents`
+(`providers/world.py:90-104`), `Fillers` (`filler.py:96-149`),
+`McpSlice.grants` (`tools/mcp/slice.py:209-292`),
+`PipelineRuntime._agents`/`_conversations` (`runtime/pipeline.py:687-698`),
+`resumption._offered`/`_awaiting`, and the `switch_agent` tool's enum
+(`tools/builtin.py:80-107`). Every one of them is rebuilt from the
+configuration at the apply that installs it, and none is written back to
+a store. A rename therefore reaches them the way every other domain
+write does, at the boundary the acknowledgement names, and needs no
+invalidation of its own.
+
+**A conversation in flight keeps the world it opened with**, which is
+already designed for and already tested. `_activate_agent` reads through
+`_world_of` (`runtime/pipeline.py:851-870`), whose whole job is "the
+session's own [world] when the current world has never heard of this
+agent, which is exactly the state an apply that deleted it leaves
+behind" (#191). A rename looks like exactly that to a live session, so
+it lands on a path that exists: the session goes on talking as the old
+name, and its `switch_agent` list keeps working. Two consequences are
+stated rather than fixed, under [the two windows](#the-two-windows).
+
+**Nothing else addresses an agent by name.** The simulator addresses a
+board and lets the binding resolve (`grep -rn "agent" src/vinga_server/simulator/*.py`
+finds two prose lines and no lookup). `prompt_fragments`, `providers`,
+`mcp_servers` and `agent_defaults` hold no agent name: they are
+referenced **by** an agent, never the other way, and `agents.body` holds
+outbound references only, the name living in the primary key alone
+(`db/schema.py:1-52`). Pending device claims carry the agent in the
+request and store none.
+
+### What an agent name is allowed to be
+
+The rename's validation cannot be stricter than the `set` that created
+the name, and cannot be looser than the path that addresses it.
+
+```bash
+grep -n "NonBlankStr = " -A 2 src/vinga_server/config/models.py   # 165-167
+grep -n "def _identifier" -A 8 src/vinga_server/config/store.py   # 2110-2115
+grep -n "def _check_addressable" -A 12 src/vinga_server/config/store.py  # 2467
+```
+
+The whole rule: stripped, non-empty, no `/`, no C0/C1 control
+character. There is no regex, no length cap, no reserved word and no
+case folding, and `events/values.py:262-276` says so in as many words
+("an agent called `secondary"agent` is lawful configuration today").
+Names are therefore case-sensitive, may hold dots, spaces, quotes and
+anything outside ASCII, and `sam` and ` sam ` are one agent because
+every path strips first (`store.py:1556-1580`, `models.py:3596`).
+
+Two consequences the rename inherits rather than decides:
+
+- **A stored name can violate the rule**, because the load path never
+  re-checks (`_check_addressable`'s docstring says so). Such a row is
+  unaddressable over the API today and stays unaddressable after this:
+  `POST /agents/{name}/rename` cannot reach a name holding a slash, for
+  the same reason `GET /agents/{name}` cannot. This is measured already
+  by `config/views.py:127-144` and is not this issue's to fix.
+- **A stored name can carry a URL credential**, which is why #381 put
+  every display through `without_url_credential` and #382 put every
+  refusal that names a stored identity through it too
+  ([the boot refusal's location policy](../features/2026-09-05-boot-refusal-location-policy.md)).
+  The rename's sentences follow that policy exactly, below.
+
+## Open questions, resolved
+
+### Confirmation: none, and the guide's own line is why
+
+The CLI guide's line is that "a verb destroys when its effect cannot be
+undone by running another command with information the operator still
+has" (`cli-guide.md:947-951`), which is why a delete confirms and a
+`set` does not. A rename is undone by `vinga agent rename <new> <old>`,
+with information the operator has in the shell history of the command
+they just typed, and it moves the memory back with it. So
+`destroys=False`, no confirmation, no `--force` row, and the verb does
+not join the destructive rows in `cli.py`
+(`grep -n "destroys=True" src/vinga_server/config/cli.py` finds nine,
+one of them generated per entity kind).
+
+That is only true while the rename cannot merge two things into one,
+which is what makes the collision rule below load-bearing rather than
+tidy: renaming onto a name that already holds memory would be a merge,
+and no second rename could separate what merged. **The refusals are what
+keep the verb reversible, and the reversibility is what keeps it out of
+the confirmation table.** If a later change ever licenses a merge, the
+verb becomes destructive on that day and the row says so.
+
+Rejected alternative: confirming anyway, because a rename "feels"
+alarming. The guide's counterexample to that is its own rule that the
+line is drawn by reversibility rather than by alarm, and a prompt in
+front of a reversible act teaches an operator to type `--force`
+everywhere, which is where the prompt in front of an irreversible one
+stops being read.
+
+### Which refusals exist, as a closed set
+
+Six, and the set is closed because each is a state the transaction can
+be in before it writes anything. Each is one fixed sentence in
+`config/store.py` beside the sentences the other writes use.
+
+| State | Answer | Status |
+| --- | --- | --- |
+| no agent under the old name | `NO_SUCH_AGENT`, the sentence every agent read already uses | 404 |
+| an agent already exists under the new name | fixed sentence, naming neither | 409 |
+| memory rows already exist under the new name | fixed sentence, naming neither | 409 |
+| the new name is not addressable (slash, control character, empty once stripped) | `_identifier`/`_check_addressable`, unchanged and reused | 422 |
+| the new name is the old name once stripped | fixed sentence | 422 |
+| the database is contended, or a lock times out | `DatabaseBusyError`, unchanged | 409 |
+
+Notes on three of them.
+
+- **The memory collision is a real state and not a theoretical one.**
+  Memory rows outlive the agent they belong to by design: the listings
+  answer "every name that has a row, whether or not this deployment
+  still has an agent of that name" (`memory/api.py:453-459`), which is
+  the audit door #83 built. So an operator renaming onto a name that a
+  deleted agent used still has rows under is asking for a merge. It is
+  refused, and the remedy is a verb that already exists,
+  `vinga memory delete agent <name> --all`, which the refusal names in
+  the server's own spelling exactly as the five refusals catalogued by
+  [the state-vocabulary plan](2026-09-05-server-state-vocabulary.md) do.
+  That class is [#410](https://github.com/rafacm/vinga/issues/410)'s to
+  fix wholesale, and this refusal joins it rather than inventing a
+  seventh shape.
+- **Renaming the default agent, and renaming a bound agent, are
+  ordinary.** They are the cases the six-write workaround cannot do at
+  all, and they are the reason the rewrite is one transaction:
+  `check_references` runs at the end over the candidate state and finds
+  nothing unresolved, because the binding and the setting moved with the
+  row.
+- **Case is a rename like any other.** `Sam` and `sam` are two keys, so
+  `rename Sam sam` is a real rename, and there is no folding anywhere to
+  make it a no-op. Renaming to a name that differs only in trailing
+  whitespace is the same-name refusal, because everything strips first.
+
+**And the sentences quote nothing the caller typed.** The converged
+location policy says a stored entity's name is repository vocabulary a
+refusal may speak, stripped through `without_url_credential`, while a
+key the operator typed is not. In a rename the two provenances are one
+argument apart: the **old** name is a stored identity, and the **new**
+name arrived in this request, so it is caller text and is never echoed,
+in any refusal, on either side of the API. The collision refusals
+therefore name the rule and not the value, which is also what
+`check_references` does with every name it could not resolve
+(`models.py:3227-3238`) and what `defined()` licenses instead: the names
+that DO exist may be listed, because this deployment wrote them.
+
+### The route: a POST on the agent, and what it answers
+
+`POST /agents/{name}/rename`, body `{"to": "<new name>"}`.
+
+- **Why a POST.** The rename is not idempotent: run twice, the second
+  run finds no agent under the old name and answers 404. `PUT` would
+  promise a repeatable write and `PUT /agents/{name}/name` would read as
+  an attribute with a `GET` beside it, which there is not. The merged
+  precedent for a non-idempotent action on an addressed row is
+  `POST /devices/pending/{code}` (claim), and `POST /apply` beside it.
+- **Why the path shape.** `rename` is a trailing segment with no
+  identity after it, which under the CLI guide's derivation rule
+  (`cli-guide.md:404-434`) is an attribute of its parent and becomes a
+  verb on the noun. `/agents/{name}/rename` therefore yields
+  `agent rename <name>` with the payload behind it, and the identity
+  depth stays at one.
+- **Why a body rather than a second path segment.** A second segment
+  would make the new name part of the address, which it is not: it is
+  what the request carries. `_sole_value(body, "to", ...)` is the merged
+  reader for exactly this shape (`config/api.py:2773` reads the device
+  binding's `agents` key the same way), and the handler hands the value
+  to the repository unread, per the rule that a body may carry a pasted
+  credential and FastAPI's own validation echoes what it rejects
+  (`config/api.py:2141-2147`).
+- **The answer is `Acknowledgement`**, the shape every domain write
+  answers with: `wrote`, `notice`, and the `applies` tuple #386 landed.
+  The line is composed from what the transaction did rather than from
+  what the request said, the way `bind_device`'s is
+  (`config/api.py:2499-2504`), and the old name goes through
+  `without_url_credential` on the way into it because it is a stored
+  identity that predates nothing.
+- **No counts in the body.** How many facts and how many threads moved
+  is information about this invocation rather than about the artifact,
+  the `Acknowledgement` shape is one shape for every domain write, and
+  the audit door for what memory holds is the memory listing. Recorded
+  as a decision rather than an omission; what would change it is an
+  operator who cannot tell whether the memory moved, and the answer then
+  is a stderr line rather than a widened wire shape.
+
+### The boundary it announces: three arms, and one new sentence
+
+A rename crosses two clocks at once, and which ones depends on what it
+rewrote. The `applies` vocabulary is exactly the tool for that, and this
+is its first user that computes the set rather than reading it off a
+descriptor.
+
+| What moved | `applies` | Sentence |
+| --- | --- | --- |
+| the agents row alone | `(RELOAD,)` | `APPLY_NOTICE`, unchanged |
+| a binding or the default agent moved with it | `(RELOAD, CHECK_IN)` | a sixth `Notice`, new |
+| the server was handed its configuration | `(STORE_BOOT,)` | `SNAPSHOT_NOTICE`, unchanged |
+
+The middle arm needs its own sentence and cannot borrow
+`BINDING_UNSERVED_NOTICE`. That one says "The binding applies at the
+device's next OTA check", which is a sentence about one binding written
+for `device bind`; a rename may have moved several bindings and the
+default agent, and none of them is what the operator just wrote. The new
+sentence says what is true of a rename: the stored references now carry
+the new name, the running server is still serving the old one, and a
+bound device reaches the renamed agent at the check-in after the
+install. It names no command, per #386, and the client answers the token
+set out of `cli.REMEDIES`.
+
+**And it does not consult the loaded agents, deliberately**, which is
+where it differs from `device bind`. `_binding_notice` asks whether the
+running server already serves the named agent, and for a bind that
+question is sound. For a rename it is not: the running server may serve
+an agent under the new name and it will not be this one, because a
+rename is precisely the act that moves a name onto a different body. An
+"already serving" claim built on that lookup would be wrong exactly when
+it mattered, so the middle arm is chosen by what the transaction
+rewrote, which is a fact of this write.
+
+### The two windows
+
+Both are stated rather than closed, because closing either costs more
+than it buys and neither is new.
+
+- **Between the write and the apply**, the running server serves the old
+  name. A conversation started in that window remembers under the old
+  name, and those rows are new orphans the rename did not move. The
+  window is the one every domain write has, it is exactly what the
+  `applies` token tells the operator to close, and the memory listing is
+  where an orphan from it shows up. Moving the memory at apply time
+  instead was considered and rejected: it would split one transaction
+  across two clocks and make the rewrite conditional on an apply that
+  may never come.
+- **A conversation in flight** keeps the world it opened with, per
+  `_world_of`, so it goes on talking as the old name until it ends, and
+  writes memory there. This is the merged behavior for an agent deleted
+  underneath a live session, and a rename is not entitled to a better
+  one.
+
+### The cross-schema transaction: three chains, ascending
+
+The issue calls this a first. It is the first pairing of the domain
+chain with the memory chain; the discipline, the helper and the stated
+order are merged already, and the rename reuses them rather than
+inventing anything.
+
+`db.advisory_key`'s docstring (`db/__init__.py:239-257`) is where the
+rule lives: "A transaction that writes two stores takes both chains'
+locks, and the rule is that it takes them in ASCENDING key order". The
+keys are domain 1, record 2, memory 3, all namespaced under `"ving"`.
+The merged instance is a thread erasure, which holds 2 and then 3
+(`conversations/api.py:803-856`, `memory/store.py:1207-1276`).
+
+The rename's transaction is opened on the domain write engine, whose
+begin listener has already taken key 1, and then takes 2 and 3 in that
+order as it reaches each store. Ascending, and therefore incapable of
+closing a cycle with the erasure that takes 2 then 3.
+
+**The shape is `purge`'s, copied deliberately.** Each store publishes
+one module-level function taking the caller's connection, taking its own
+chain's lock as its first statement, and raising a classified failure
+rather than swallowing one:
+
+- `memory.store.rename_owner(connection, scope, old, new) -> int`,
+  beside `erase_facts`, whose signature it follows.
+- `conversations.threads.rename_agent(connection, old, new) -> int`,
+  beside the other connection-taking functions in that module.
+
+`purge`'s docstring already states why the function takes the lock
+rather than the caller: it is what makes the ascending order a property
+of the function rather than of a call site somebody has to remember. The
+two new functions say the same thing in their own words.
+
+**One connection, three schemas, one database.** All three chains live
+in one Postgres database, separated by schema and by their own Alembic
+version table (`db/__init__.py:18-27`), and every table is
+schema-qualified on its metadata, so one connection addresses all three
+without a `search_path`. Failure atomicity is therefore free: any
+refusal or any driver failure rolls the whole transaction back, and
+there is no half-renamed state to compensate for. The pin below asserts
+it by making the last statement fail.
+
+**When a schema is absent or empty.** An empty memory or record schema
+is nothing: the two UPDATEs match no rows and answer zero. An *absent*
+one is a database no current build has ever booted, since every boot
+opens and migrates all three chains unconditionally (`app.py:295-360`,
+"Unconditionally, and behind no section at all"), and the API route runs
+inside such a server. The one path that reaches a store without a server
+is the CLI's local door, and on a database whose memory chain is not at
+head the UPDATE fails, the transaction rolls back whole, and the
+operator gets the storage refusal rather than a half-rename. That is the
+honest outcome and it is what the atomicity pin already proves; probing
+for the table first was considered and rejected, because a probe that
+answers "no table" would let a rename report success while leaving
+memory behind, which is the exact defect this issue exists to end.
+
+**Imports rather than injection.** `config/store.py` gains two imports,
+`memory.store` and `conversations.threads`. Neither closes a cycle
+(`memory.store` imports `config.loader` and `config.models`;
+`conversations.threads` imports `config.models`; neither imports
+`config.store`), and neither reaches the CLI, whose import inventory
+does not contain `config.store` at all
+(`tests/unit/test_cli_import_weight.py:95-124`). The alternative,
+handing the two functions in as parameters the way `app.py` hands
+`purge_memory=purge` to the conversation store, exists to break a cycle
+that is not here, and would put wiring in the composition root for a
+fact that is not a choice: there is exactly one way to rewrite an agent
+name in each store.
+
+### What the rename is not
+
+- **Not a document operation.** `import` is additive and names entries
+  by their identity, so a rename is not expressible in it and none is
+  added: a document says what should exist, and a rename is a thing that
+  happens. An export taken after a rename carries the new name and
+  imports back onto itself, which is the round trip the guide asks for.
+- **Not visible to `diff` as a rename.** `config/reload.py:604-624`
+  reports one removal and one addition, which is what the difference
+  between a stored configuration and a running one honestly is: the
+  running server is serving an agent that is gone and not serving one
+  that arrived. Teaching the diff to recognize a pair as a rename would
+  be a second encoding of an act the store already recorded, with
+  nothing connecting the two.
+- **Not an agent identifier.** The real end of name-keyed references is
+  a stable id under every name, and it is a schema-wide change touching
+  three chains, every listing and every event field. It is not this
+  issue, and this issue does not make it harder: the rewrite is the same
+  act an id would make unnecessary.
+
+## Module layout
+
+No new module, and the deletion test is why: every piece of this lands
+beside the decision it belongs to.
+
+- **`config/store.py` gains one repository verb**, `rename_agent(old,
+  new) -> Renamed`, beside `apply` and the entity writes. It runs the
+  same four phases every write runs (prepared outside the lock, staged
+  inside it, checked once by `check_references`, persisted), which is
+  what keeps a rename and a document from validating differently. The
+  semantics belong here for the reason the module docstring gives:
+  "Every semantic decision about the domain configuration lives here and
+  not in the code that calls it."
+- **`Renamed` is the frozen result**, beside `BoundDevice` and
+  `Applied`: the two names, the MACs whose bindings moved, whether the
+  default agent moved, and the two row counts. It is what the route
+  reads to choose the boundary set and what the tests read to say what
+  happened; nothing recovers either fact by re-reading the store.
+- **`memory/store.py` gains `rename_owner`**, one statement under the
+  chain's lock, beside `erase_facts` which it mirrors.
+- **`conversations/threads.py` gains `rename_agent`**, the same shape,
+  beside the reads that filter on the column it moves.
+- **`config/entities.py` gains one `Notice`**, the sixth, in the file
+  that already owns the pairing of a sentence with the boundaries it
+  announces.
+- **`config/api.py` gains one route**, which makes one repository call
+  and answers with what it did, per the handler contract already stated
+  there.
+- **`config/cli.py` gains one `Command` row and one `Act`**, plus one
+  `declare` for the shape "one address, one payload word", and one
+  payload field on `Invocation` beside `agents`, `file` and `pairs`.
+  No new module: the design guide names a `config/cli_render.py` that
+  exists only because `cli.py` is long as the counterexample, and #386's
+  review round applied it to exactly this file three days ago.
+
+**The seam that is new** is the one crossing into two foreign schemas,
+and it is stated as two function signatures rather than as a shared
+object: each store owns its SQL, the caller owns the transaction, and
+the lock order is a property of the functions rather than of the call
+site. That is `purge`'s seam widened by one store, and it is why the
+plan adds no store-to-store dependency in either direction.
+
+## Documentation footprint
+
+Named by role, per [`docs/README.md`](../README.md)'s taxonomy.
+
+**Generated references, which move through their generators, never by
+hand:**
+
+- `docs/reference/api-openapi.json`, in M2: the new route, its request
+  body model and its responses. Regenerated with
+  `uv run vinga-server config openapi > ../docs/reference/api-openapi.json`.
+- `docs/reference/domain-config.md`, in M2: the agent descriptor's note
+  is where the orphaning caveat lives
+  (`config/entities.py:526-532`), and it is rewritten to say what a
+  rename now does. This is the caveat the issue set out to remove, and
+  it is generated, so the change is to the descriptor.
+- `docs/reference/cli.md`, in M3: the generated half grows the new
+  command's help page.
+- `vinga-server/tests/unit/command-spellings.txt`, in every milestone:
+  the manifest records physical line positions across every tracked
+  file, so this plan's own document and the CHANGELOG entries stale it
+  whatever the code does. Regenerated with
+  `uv run python -m tests.unit.test_command_spellings` before the unit
+  lane.
+
+**A maintained map**, `vinga-server/README.md`, in M2: two paragraphs
+state the orphaning as a standing fact, at `:855-857` (the listings
+answer owners nothing is configured under, "renaming an agent orphans
+what it remembered") and at `:3159-3161` (the memory is the one thing an
+apply does not move). Both become false at M2 and are rewritten there.
+`docs/architecture/observability-surfaces.md:37` carries the same claim
+in half a sentence and moves with them.
+
+**A schema comment, which needs a migration.** `memory.facts.owner`'s
+column comment says "Renaming an agent orphans its rows, exactly as it
+orphaned its file" (`memory/schema.py:103-112`), and it is committed DDL:
+`2002_memory_scopes` set it, and
+`test_the_baseline_builds_exactly_what_the_tables_declare` compares the
+built schema with the declared metadata through Alembic's own
+autogeneration. Alembic 1.18.5 compares column comments by default
+(`alembic/autogenerate/compare/comments.py`), so editing `schema.py`
+alone fails that test, and a migrated database would keep saying
+something false either way. So M2 carries `2003_rename_moves_memory`,
+down-revision `2002_memory_scopes`, altering that one comment and
+nothing else. It is the smallest honest migration and the CI wheel step
+exercises it.
+
+**Docstrings that are the contract at their own surface**, in M2:
+`memory/api.py:453-459` (the owners listing explains itself by the
+orphaning) and `:630-633` (erasing an agent's memory is "the verb for an
+orphan the listings turned up: a renamed agent's rows have no other way
+out"). Both stay true for a *deleted* agent and stop being true for a
+renamed one, so both are corrected where they are written.
+
+**Dated execution records:** `CHANGELOG.md` gains an entry per
+milestone, and this plan's companion implementation doc gains a section
+per milestone in the change that ticks it.
+
+**Not touched, and stated so a reviewer does not go looking:**
+`docs/reference/conversations-schema.md` (the columns it documents do
+not change, only rows move), `docs/reference/events.md`,
+`config.example.yaml` and the preset examples (none of them documents
+the caveat; the orphaning text the issue remembers as living in the
+example configuration moved into the agent descriptor's note when memory
+moved into Postgres), and `docs/concepts.md`, whose memory section
+describes scopes rather than renaming.
+
+## Tests
+
+Reusing the assets that exist wherever the assertion already has a home.
+
+- **The sentinel sweep, which is the plan's central pin.** Build a store
+  holding one agent under a sentinel name, referenced from every live
+  place at once: two device bindings, the default agent, memory facts
+  including one held (forgotten) row, and two conversation threads with
+  turns. Rename it, then assert the sentinel appears in **no** live
+  reference, by reading every row of the three schemas and checking each
+  column the census names, rather than by asserting the five rewrites
+  one at a time. The record's dated columns are asserted to still carry
+  it, which is the same pin from the other side: the sweep proves both
+  halves of the line this plan drew.
+- **The inventory pin**, so the sweep cannot silently stop covering the
+  domain half: after the rename, `check_references` over the stored
+  snapshot is empty, and the set of sections it walks is read from the
+  function rather than restated.
+- **The lock-order pin joins the one #83 already has.**
+  `docs/plans/2026-08-30-memory-scopes.md` records a test walking the
+  erasure and retention paths and asserting that every transaction
+  taking both chains' locks takes them in ascending key order. The
+  rename's transaction joins that walk as a third path, taking all three
+  keys.
+- **Atomicity, driven from the last statement.** With the memory rewrite
+  forced to fail, the whole rename rolls back: the agents row, the
+  bindings, the default agent and the threads are all as they were, and
+  the refusal is the classified one rather than a driver message.
+  Reverting a fix in place to watch a sentinel appear is the repository's
+  standing way of proving a pin bites, and it applies here (copy the
+  file aside and `touch` it on the way back, never `git checkout`, per
+  `AGENTS.md`).
+- **The refusals, one case each**, asserting the fixed sentence and, for
+  the two collisions, that neither name appears in it. The no-leak case
+  plants a name carrying a URL credential as the *old* name and asserts
+  the acknowledgement's line carries the stripped form, which is #381's
+  door and #382's policy in this surface's terms.
+- **The boundary arms, through `Act.read()` rather than the renderer**,
+  which is the shape #386's review round settled: a rename that moved
+  only the row prints the apply notice and its remedy; one that moved a
+  binding prints the new sentence and both remedies; a snapshot-only
+  server prints the store-boot arm. The producer-side pin from that plan
+  covers the sixth notice for free, since it asserts every
+  `Notice.applies` member is an `Applies` member and no `Notice.sentence`
+  contains `PROGRAM`.
+- **The reversibility claim is a test rather than a sentence**, because
+  it is what the confirmation decision rests on: rename and rename back,
+  and the store, the memory rows (held ones included) and the threads are
+  byte-identical to what they were.
+- **Existing suites that translate rather than grow**:
+  `test_config_api_writes.py` gains the route's cases beside the other
+  writes; `test_memory_store.py` and `test_memory_api.py` gain the owner
+  rewrite beside `erase_facts`; `test_config_cli_respelling.py` gains one
+  licensed substitution for the new stderr text; the command-spellings
+  census covers the new CLI sentence with no new code, which is the
+  property #386 bought.
+- **The contract check needs no editing**: `test_api_contract.py` reads
+  the committed OpenAPI document as bytes and holds every declared act
+  against it, so regenerating the document is what keeps it green.
+
+## Risks
+
+- **The record column is a scope change against the issue's own text.**
+  Mitigated by measuring rather than arguing (two WHERE clauses, zero for
+  `turns.agent`), by keeping the rest of the record untouched, and by
+  putting the finding in front of the plan review rather than inside a
+  milestone. If the review or the issue's owner refuses it, the fallback
+  is to leave `record.conversations.agent` alone and file the detached
+  history as its own issue; the rest of this plan is unchanged either
+  way, which is why the record rewrite is one function call and one pin.
+- **A rename holds three advisory locks while it updates rows.** The
+  work is bounded by one agent's bindings, facts and threads, and both
+  UPDATEs are index-driven (`ix_facts_scope` on `(scope, owner, id)`,
+  `ix_conversations_agent_activity` on `(agent, last_active_at, id)`).
+  A contended database answers the retryable refusal every other write
+  answers, which is `LOCK_TIMEOUT_MS` doing its job rather than a new
+  failure mode. Worth naming because it is the first transaction in the
+  server that can hold all three at once.
+- **The middle boundary arm is chosen by what was rewritten**, so a
+  future rewrite target added without extending that choice would
+  announce too little. Held by the result type: the arm reads
+  `Renamed`'s own fields, so a new field with no reader is visible in
+  review rather than silently ignored.
+- **A migration whose whole content is a comment** looks like churn.
+  Priced above with the test that fails without it and the database that
+  keeps lying without it, and it is forward-only, so the standing
+  compatibility promise is untouched.
+- **The census manifest stales on this plan's own files.** It does,
+  every time; regenerate through its module before the unit lane.
+- **The two windows leave orphans nothing sweeps.** The memory sweep
+  takes conversation-state orphans, not agent ones (`memory/store.py:150-155`,
+  `schema.py:217`), so a fact written under the old name in the window
+  stays until an operator deletes it. Stated in the docs the rename
+  rewrites, and the listing is where it shows.
+
+## The standing lenses, answered
+
+Each is answered where the territory touches it, and each answer names
+where it is enforced rather than asserting it.
+
+- **No leak.** Three surfaces, one rule. A refusal names the rule and
+  never the value, which is `check_references`'s shape already; the new
+  name is caller text on both sides of the API and is echoed in nothing;
+  the old name is a stored identity, so it may be spoken and goes
+  through `without_url_credential` first, per
+  [the converged location policy](../features/2026-09-05-boot-refusal-location-policy.md).
+  The one place a name is printed after a successful rename is the
+  acknowledgement's line, composed from the transaction's own result and
+  stripped, and there is a test that plants a credential-bearing old name
+  to prove it.
+- **Closed sets at decision sites.** Two decision sites, both closed and
+  both pinned. The refusals are a six-state set, each state a condition
+  of the transaction before it writes. The boundary is the `Applies`
+  vocabulary #386 landed, chosen in three arms from `Renamed`'s own
+  fields, with the producer-side pin that every `Notice.applies` member
+  is an `Applies` member already in place. Nothing branches on a
+  substring or on a sentence's wording anywhere in this change.
+- **Honest seams.** The crossing into two foreign schemas is two
+  function signatures, each owned by the store whose SQL it is, each
+  taking its own chain's lock so that the ordering is a property of the
+  function. No store holds a reference to another, no shared mutable
+  object crosses, and the caller owns the transaction. The result type is
+  the seam back: what the write did travels as fields rather than being
+  recovered by re-reading the store.
+- **Tooling-backed inventories.** The domain half's references are
+  `check_references`'s own walk rather than a list in this plan; the
+  tables are read off the three metadata objects; the live-versus-record
+  line is drawn by grepping for filters rather than by reading intent;
+  and the sweep asserts the absence of a sentinel across every column
+  the census names, so a reference added later without a rewrite fails a
+  test rather than aging into a bug.
+- **Pin before reshape.** M1 adds behavior behind no reachable surface
+  and pins it whole, including atomicity and reversibility, before M2
+  gives it a door. The documents that describe the old behavior are
+  corrected in the milestone that makes them false, and the one
+  committed artifact that would otherwise drift silently, the column
+  comment, moves through a migration that a merged test already holds.
+
+## Milestones
+
+- [ ] **M1: one transaction, three schemas.**
+  `memory.store.rename_owner` and `conversations.threads.rename_agent`,
+  each taking the caller's connection, its own chain's lock as its first
+  statement, and raising a classified failure; `ConfigStore.rename_agent`
+  running the four phases and returning `Renamed`; the six refusals as
+  fixed sentences; the sentinel sweep, the inventory pin, the atomicity
+  pin, the reversibility pin, and the third path added to the
+  lock-order walk. No route and no CLI, so nothing an operator can reach
+  changes and main stays releasable; the risky half, which is the
+  cross-schema transaction, sits alone in its own review. Design
+  footprint: deepens `config/store.py` (one verb whose caller learns
+  nothing about three schemas), `memory/store.py` and
+  `conversations/threads.py` (one function each, beside the ones they
+  mirror); one new frozen result type beside the two that exist; no new
+  module and no new seam beyond the two signatures. Documentation
+  footprint: `CHANGELOG.md`, a dated execution record; the census
+  manifest; the implementation-doc section.
+- [ ] **M2: the route, the boundary it announces, and the caveat it
+  retires.** `POST /agents/{name}/rename` with its request model and
+  `Acknowledgement` answer; the sixth `Notice` and the three-arm choice;
+  the acknowledgement's line composed from `Renamed` with the old name
+  stripped; the route's cases and the boundary arms through `Act.read()`;
+  `2003_rename_moves_memory` altering the `facts.owner` comment, with
+  `memory/schema.py` moved in the same commit; the agent descriptor's
+  note rewritten, which moves `docs/reference/domain-config.md`;
+  `docs/reference/api-openapi.json` regenerated; the two README
+  paragraphs, the observability line and the two `memory/api.py`
+  docstrings; a CHANGELOG `Added` entry; the census manifest; the
+  implementation-doc section. Behavior becomes reachable here and sits
+  alone in this review, and every document that this makes false is
+  corrected in the same change rather than in a later tidy-up, which is
+  the rule #386 settled. Design footprint: one route making one
+  repository call; `entities.py` deepens by one notice; no new module.
+- [ ] **M3: the verb.** `vinga agent rename <old> <new>` as one
+  `Command` row with one `Act`, `destroys=False` with the reasoning in a
+  comment on the row; the payload field on `Invocation`; the `declare`
+  for one address and one payload word; `docs/reference/cli.md`
+  regenerated; the licensed substitution in the respelling suite; the
+  census manifest; a CHANGELOG `Added` entry; the implementation-doc
+  section. The client half lands alone, so the review sees the terminal
+  output it adds and nothing else. Design footprint: no new module, one
+  row in the table everything else about a command is read from.
