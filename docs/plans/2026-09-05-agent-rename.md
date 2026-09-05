@@ -25,9 +25,13 @@ still be asked to resume.
 What it deliberately does not do is rewrite the record of what happened.
 A turn spoken last month was spoken by an agent whose name at the time
 was the old one, and the row that says so is evidence rather than a
-reference. The line between the two is drawn below from the code rather
-than from intuition, and drawing it moved one column across from where
-the issue put it.
+reference: no row that exists when the rename runs is edited by it. The
+line between a record and a reference is drawn below from the code
+rather than from intuition, and drawing it moved one column across from
+where the issue put it. What a session still in flight writes *after*
+the rename is a third case, and it is a new write rather than an edit:
+[the order that covers those writers](#the-sessions-in-flight-and-the-order-that-covers-them)
+says what each row it makes then carries.
 
 ## The issue's decisions, restated
 
@@ -156,11 +160,14 @@ grep -rn "sessions\.c\.agent" src/        # 1 site, a projection in a listing
   filtered on nothing. `turns.legs[].agent` and the event fields are
   inside JSON that nothing queries by agent.
 
-So `conversations.agent` moves and the rest of the record does not, and
+So `conversations.agent` moves and no other record row is edited, and
 the mismatch that leaves is the honest one: a thread belongs to the
 agent under its current name, and each turn inside it records the name
 the agent had when it spoke. That is stated where both are rendered
-rather than left for somebody to find.
+rather than left for somebody to find. The one thing this table does not
+settle is what a row *written after* the rename by a session that has
+not heard about it should carry, which is a question about a write
+rather than about an edit and is answered in full below.
 
 ### The rest of the surface, and why it needs nothing
 
