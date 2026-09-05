@@ -351,3 +351,20 @@ manifest, so `.github/workflows/docs.yml` is the lane that runs on it
 (the link and anchor checks, the manifest agreement check from M1, and
 the census). The server workflow's paths do not match this diff, so
 neither its `unit` and `integration` jobs nor the `image` job run.
+
+### PR review round (M2)
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-terra`, sandbox
+read-only, 2026-09-05, against commit 8946df28 of PR #406; the
+reviewer ran 1m17s. One P1, mergeable after the fix.
+
+1. **P1: the promise edit was not citation-only.** The bullet gained
+   "a set the supported-firmware floor record enumerates", which
+   changes the version-bound's semantics from prose the promise
+   already owned to a delegation the record now carried. The plan
+   held this milestone to a citation with the promise unchanged.
+
+   *Resolution*: fixed; the original sentence stands verbatim and
+   the record is attached as a bare parenthetical citation, the way
+   the section's other bullets cite. The link checker and census
+   re-verified after the fix.
