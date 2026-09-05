@@ -325,3 +325,76 @@ markdown links is a one-line edit per site once #396 M2 is on `main`.
 - The full unit lane was deliberately not run: M2 is a documentation
   diff, and the two suites above plus the link checker are what it can
   actually stale.
+
+### PR review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-terra`, 2026-09-05,
+against commit 472d936e of PR #403; the reviewer ran 2m02s. Verdict:
+mergeable after one P1 and one P2, both answered below. Finding 1 has
+an artifact half as well as a guide half, and the artifact half lands
+on the M1 branch; what is recorded here is the guide's.
+
+1. **P1: the Docker lane's `.env` walkthrough invites a stale
+   `VINGA_DB_URL`.** The example block ended on a comment offering the
+   file for "whatever else this server should find in its
+   environment", and `VINGA_DB_URL` is exactly the variable that
+   replaces all five discrete database facts whole when it is set. An
+   env file written for a `psql` session on the host, or carried over
+   from another deployment, would therefore send the container at a
+   different database while the five guarded values above it looked
+   authoritative and did nothing.
+
+   *Resolution*: accepted in full. The comment now names what the env
+   file is for (the provider credentials the guards cannot enumerate,
+   and `VINGA_MASTER_KEY`) instead of offering it for anything, and a
+   paragraph under the block states the lane's stance: the production
+   compose file pins `VINGA_DB_URL` to the empty string in the
+   container's environment, which the resolver reads exactly as unset,
+   so a value in `deploy/.env` cannot reach the server at all; a
+   deployment whose convention really is one connection string adapts
+   the file deliberately, replacing the five guards with a guarded
+   `VINGA_DB_URL` and removing the pin. The pin itself is the artifact
+   half of this finding and lands on the M1 branch; it was not yet in
+   this branch's tree when the paragraph was written, so the guide
+   states the file's agreed behavior ahead of the file, and the two
+   have to land together.
+
+2. **P2: the init transaction's Secret step is not idempotent.** The
+   ConfigMap step went through a dry-run pipe and the Secret step did
+   not, so a plain `kubectl create secret generic` fails with
+   `AlreadyExists`. A failed Job deliberately leaves the Secret
+   behind, which means the retry the same section prescribes died on
+   the step before the one that had actually failed.
+
+   *Resolution*: accepted in full. The Secret goes through the same
+   dry-run pipe, so applying it over itself is the same operation as
+   creating it, and a paragraph after the block states rerunnability as
+   the property every step is written for. The delete-after-success
+   sentence is kept rather than dropped, because an administrative
+   credential with no reader between transactions should not sit in the
+   cluster, and it now says step 2 remakes the Secret whether or not a
+   failed run left one behind.
+
+   One thing was fixed beside the finding, in the same block.
+   `VINGA_DB_RO_PASSWORD` was spelled `$(openssl rand -hex 32)` inline,
+   which a rerunnable transaction turns into a bug: the SQL rotates the
+   analyst role's password rather than failing on it, so a fresh random
+   value on every upgrade would silently invalidate whatever credential
+   the last analyst session was using. It is now a kept value, with the
+   generate-once-and-keep instruction in the prose.
+
+   Noted and not changed here: `deploy/k8s/secret-init.example`'s own
+   header shows the same non-idempotent `create` and the same inline
+   `openssl rand`, and it is an M1 artifact rather than this
+   milestone's file.
+
+### Verification after the review round
+
+- `python3 scripts/check_doc_links.py .`: 197 files, 0 failures.
+- `uv run pytest tests/unit/test_command_spellings.py -q`: green after
+  the manifest was regenerated. Both fixes add lines above the guide's
+  two quoted invocations, so the two rows moved from 534 and 536 to 565
+  and 567; nothing was reclassified and no invocation changed.
+- `uv run pytest tests/unit/test_deploy_manifests.py -q`: green, and
+  untouched by this round, which changes no manifest.
+- No em-dashes in the round's diff.
