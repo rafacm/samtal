@@ -326,14 +326,25 @@ def with_device(session: DeviceSession, mac: str) -> DeviceSession:
 
 
 def served(
-    config: Config, websocket: LoopingSocket, conversations: Any = None
+    config: Config,
+    websocket: LoopingSocket,
+    conversations: Any = None,
+    generations: Generations | None = None,
 ) -> DeviceSession:
     """A session built the way `ws.py` builds one, so `run` is what the
     test drives rather than a hand-assembled close path. `conversations`
     is the store, which reaches a session twice over: through the factory
     that binds its turn recorder, and as the collaborator the session
-    opens and closes."""
-    generations = world(config, providers=built_world(config))
+    opens and closes.
+
+    `generations` is the holder, for the one kind of test that has to
+    publish something to it: a world hears about an agent rename, and a
+    suite about what a session opened under an unchanged world writes has
+    to hold the same holder the session binds. Everything else gets a
+    holder over the configuration it passed, which is the world that
+    server serves."""
+    if generations is None:
+        generations = world(config, providers=built_world(config))
     factory = bespoke_runtime_factory(
         generations, McpServers({}), lane_memory(), conversations
     )
@@ -343,12 +354,22 @@ def served(
 
 
 async def open_session(
-    config: Config, conversations: Any = None
+    config: Config,
+    conversations: Any = None,
+    generations: Generations | None = None,
 ) -> tuple[DeviceSession, LoopingSocket, Any]:
     """A live session with its hello exchanged, its `run` in flight."""
     websocket = LoopingSocket()
-    session = served(config, websocket, conversations)
+    session = served(config, websocket, conversations, generations)
     task = asyncio.create_task(session.run())
+    await handshaken(session, websocket)
+    return session, websocket, task
+
+
+async def handshaken(session: DeviceSession, websocket: LoopingSocket) -> DeviceSession:
+    """Wait until this session is past every rejection and inside the
+    guard, which is what `open_session` waits for and what a test that
+    withheld the hello has to wait for on its own."""
     for _ in range(200):
         await asyncio.sleep(0.01)
         # White-box, deliberately: this is the handshake's completion,
@@ -363,8 +384,29 @@ async def open_session(
         # somewhere else entirely.
         if session.runtime is not None and session._opened_at is not None:
             if websocket.inbox.empty():
-                return session, websocket, task
+                return session
     raise AssertionError("the session never opened")
+
+
+async def bound_to_its_world(session: DeviceSession) -> DeviceSession:
+    """Wait until this session has captured the world it will serve and
+    is parked on the device's hello.
+
+    The other half of the handshake, and the one a suite about a store
+    change landing mid-connection needs: `run` captures the generation
+    and builds the runtime from it with no await between the statements,
+    and then awaits the hello. A test that has withheld the hello is
+    therefore holding the session in exactly the window between the two,
+    which is where a change to what an agent is called can land.
+
+    White-box for the same reason `handshaken` is: the capture is the
+    state under test and nothing public reports it.
+    """
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if session._generation is not None:
+            return session
+    raise AssertionError("the session never bound a world")
 
 
 def listening_in(session: DeviceSession, mode: str) -> None:

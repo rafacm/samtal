@@ -741,7 +741,30 @@ class DeviceSession:
         """
         if self._conversations is None or self._opened_at is None:
             return
-        self._conversations.open_session(self.session_id, self._opened_at, manifest)
+        # What this conversation's world has not heard, handed over as a
+        # thunk the store calls at the instant it registers this session.
+        #
+        # The generation is the anchor rather than this moment, and the
+        # difference is a window with two ends. This session bound its
+        # world before the hello it has just awaited, and it will go on
+        # speaking that world's names until it ends; a rename published
+        # in between, or one published before this device connected and
+        # still waiting for its apply, moved rows this session is about
+        # to write onto. Neither reaches a store that only marks the
+        # sessions it already has. A thunk rather than a list because
+        # reading it here and passing the answer would leave a third,
+        # smaller window between the two statements.
+        generation = self._generation
+        self._conversations.open_session(
+            self.session_id,
+            self._opened_at,
+            manifest,
+            renames=(
+                None
+                if generation is None
+                else lambda: self._generations.renames_for(generation)
+            ),
+        )
         self._record = SessionSink(self._conversations, self.session_id)
         self._events.attach(self._record)
 
