@@ -753,6 +753,7 @@ def test_a_device_mac_cannot_carry_one_because_the_load_path_refuses_it(
     the row is refused by the load, so it never reaches a view at all
     and a strip on that key would be code nothing can run. The refusal
     names the rule and not the value.
+
     """
     planted(store, insert(schema.devices).values(mac=HISTORIC, agents=["sam"]))
 
@@ -897,6 +898,61 @@ def test_a_composed_locations_identity_is_named_without_its_credential() -> None
 
     assert f"agents.{HISTORIC_SHOWN}.llm: " in str(caught.value)
     _carries_no_sentinel(chain(caught.value))
+
+
+# The two columns a location used to be built from before anything had
+# checked them
+#
+# The rule the cases above keep is that a stored IDENTITY may be said,
+# because a write accepted it. Two of the load path's own refusals were
+# composed from a row's columns with nothing between: the stage a
+# provider row is filed under, which is not an identity at all when it
+# is not one of the four words, and a device's MAC, which is checked by
+# the model AFTER the location for the column beside it has already
+# been built. Neither column has passed anything at that point, so what
+# they hold is what a hand edit, a restore or another build put there.
+
+# A stage column holding what no stage is. The credential is in the
+# token itself, which is the sharper half: a refusal that named the
+# stage would publish it whatever it did about the entry beside it.
+NOT_A_STAGE_AT_ALL = f"https://user:{KEY_SENTINEL}@{HOST}/stage"
+
+
+def test_a_row_filed_under_no_stage_names_neither_the_stage_nor_its_entry(
+    store: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A provider row whose stage column is not a stage, under a name no
+    write would accept.
+
+    Both halves are refused into one rule: the stage is not this
+    repository's vocabulary, so it is answered by the rule it broke, and
+    an entry addressed under a stage that cannot be named is addressed
+    relative to nothing this refusal may print.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    planted(
+        store,
+        insert(schema.providers).values(
+            stage=NOT_A_STAGE_AT_ALL, name=HISTORIC, body=body(ProviderConfig(type="mock"))
+        ),
+    )
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    message = str(caught.value)
+    assert "the stage has to be one of" in message
+    assert NOT_A_STAGE_AT_ALL not in message
+    assert HISTORIC_SHOWN not in message
+
+    with caplog.at_level(logging.DEBUG):
+        assert serving.run(None) == 1
+
+    printed = capsys.readouterr()
+    _carries_no_sentinel(chain(caught.value), printed.out, printed.err, *_logged(caplog))
 
 
 # The record path, which asks the same question and keeps its answer

@@ -1661,10 +1661,19 @@ def _read_domain(connection: Connection) -> DomainConfig:
             # A stored row, not an argument: the same sentence the stage
             # check raises for a caller's typo, but nothing the caller
             # can do about it, so it is a storage failure here.
-            raise StorageError(
-                f'providers.{row.stage}.{row.name}: "{row.stage}" is not a provider '
-                f"stage; expected one of: " + ", ".join(PROVIDER_STAGES)
-            )
+            #
+            # The sentence itself rather than a second one built around
+            # the column, which is what this said before and what put
+            # two unchecked values into a boot's stderr. A word that is
+            # not one of the four is not this repository's vocabulary,
+            # so the converged policy answers it by the rule it broke
+            # (#382); and the entry under it is addressed relative to
+            # that word, so the honest location is the section, exactly
+            # as `safe_location` truncates to the nearest parent it may
+            # name. Neither column has passed anything at this point:
+            # what they hold is what a hand edit, a restore or another
+            # build put there.
+            raise StorageError(f"{_NOT_A_STAGE}; the row cannot be read as configuration")
         providers[row.stage][row.name] = _from_row(_PROVIDER, row)
 
     # The rows are read one by one above and assembled here, and the
