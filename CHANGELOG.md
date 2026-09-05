@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-05
+
+### Added
+
+- **The identity's leading claim is recorded.** A new decision record,
+  `docs/adr/2026-09-05-pluggability-leads-self-hosting-supports.md`,
+  states that when vinga explains itself, mix-and-match leads (every
+  stage the server runs is a slot the user fills) and self-hosting is
+  the ground that makes the choice real, with a fully local deployment
+  as the limiting case of the blend. The guidelines' identity section
+  cites the record and draws the altitude line that keeps it compatible
+  with "not another pluggable VAD/ASR/LLM/TTS server": the promise is
+  choice among engines, delivered behind stable slots, never by making
+  the pipeline machinery the product.
+
 ## 2026-09-04
 
 ### Added

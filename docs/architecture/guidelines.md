@@ -62,6 +62,17 @@ taught which concerns are inherently vinga's and which are generic
 conversational infrastructure. That knowledge, not the pipeline, is
 the durable asset.
 
+When vinga explains itself, the mix leads: every stage the server
+runs is a slot, and which service fills it is the user's choice,
+stage by stage, revisable at will. Self-hosting is the ground that
+makes the choice real rather than the headline, and a fully local
+deployment is the limiting case of the blend. This is an emphasis
+about the promise, not a soft retraction of the paragraph above: the
+user is promised choice among engines, and vinga keeps that promise
+by hosting engines behind stable slots, never by becoming a pipeline
+framework
+([decision record](../adr/2026-09-05-pluggability-leads-self-hosting-supports.md)).
+
 Every guideline below is a consequence of that split, which is why it
 opens the page rather than sitting among them.
 
