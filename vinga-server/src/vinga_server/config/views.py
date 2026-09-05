@@ -24,6 +24,14 @@ valid environment reference is masked, whatever it is, because a value
 that got in another way may be a plaintext credential and the command an
 operator runs to find that mistake must not be the one that prints it.
 
+There are two rules, and the second one looks at values rather than at
+names. A URL is the shape that carries a credential under a key
+admitting to nothing, so what a display shows of one is the address
+without it, whatever key it sits under and at whatever depth (#381).
+Both write paths refuse such a URL, and both refuse only at write time,
+so this is what stands between a row that predates the rule and a
+caller. `_shown` below is where it happens and says why it is one site.
+
 What is displayed fails open, which is the other half of the same
 decision (#176). A body is derived from the entry's model rather than
 written key by key, so a field added to a model appears in `config show`
@@ -192,7 +200,8 @@ def devices(snapshot: Snapshot) -> dict[str, object]:
 def entity_body(descriptor: entities.EntityDescriptor, entry: object) -> dict[str, object]:
     """One entry of one kind as it may be displayed: every field its
     model declares, masked at every depth by the kind's own
-    secret-shaped-name rule.
+    secret-shaped-name rule, and every string in it shown without what a
+    URL of it carries as a credential.
 
     One builder for the five kinds, specialized by the descriptor, in
     place of the five that were written key by key. Which fields exist
@@ -284,6 +293,29 @@ def _shown(value: object, secret_key: Callable[[str], bool]) -> object:
     and headers are mappings whose values were once masked only at the
     top (#171). All three are the same question asked at a different
     depth, and a walk that stops anywhere answers it wrong there.
+
+    The bottom is where the second rule is applied: a displayed string
+    is shown without what a URL carries in front of its host or in a
+    credential-shaped parameter (#381). Both write paths refuse such a
+    URL now, an MCP server's `url` and a provider's `base_url` alike,
+    but write time is all they are, and their own docstrings say a row
+    written before the rule still boots and still reads. It does, and
+    until this it read back verbatim: everything a caller is shown is
+    built through `entity_body` or `_body`, so a single read, a listing,
+    the whole-configuration document, the API routes over them and the
+    CLI renderings over those were one leak with five spellings. Here
+    rather than at each of them because this is where both kinds and
+    every depth already meet, and because a rule applied field by field
+    would be a list of field names to keep in step with the models.
+
+    Display fidelity is not what it costs: `url_credential` answers None
+    to anything that is not a URL actually carrying one, so every other
+    string, prose holding an address included, is shown byte for byte.
+    What it does change is an outcome rather than a rendering, and for
+    the better. An export is this document in the shape an import takes,
+    and an import runs the write path, so a store holding such a row
+    used to export a document nothing could take, its own store
+    included.
     """
     if isinstance(value, BaseModel):
         return _declared(value, secret_key)
@@ -291,6 +323,8 @@ def _shown(value: object, secret_key: Callable[[str], bool]) -> object:
         return {key: _masked(key, nested, secret_key) for key, nested in value.items()}
     if isinstance(value, (list, tuple)):
         return [_shown(item, secret_key) for item in value]
+    if isinstance(value, str):
+        return without_url_credential(value)
     return value
 
 
