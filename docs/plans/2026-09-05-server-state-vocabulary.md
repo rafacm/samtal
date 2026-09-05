@@ -272,15 +272,15 @@ tuple of the token the diff already publishes, beside the prose.
   test. A validator on a shared model would fire on the client and
   punish it for the server's age, which is the same defect as the
   required field.
-- **The client maps tokens to its own sentence.** A new module,
-  `config/remedies.py`: one sentence per boundary set, in this client's
-  grammar. `DIFF_INTRO`'s gloss is rebuilt from the same table, so the
-  `{PROGRAM} apply` at `cli.py:3290` and the one in the new advice are
-  one string rather than two. Because the spelling now lives in a
-  client module, the command-spellings census guard covers it
-  automatically: a future rename that missed it fails a test in the
-  same checkout, which is exactly the reach #386 says the census does
-  not have across the boundary.
+- **The client maps tokens to its own sentence**, from one table in
+  `cli.py` beside the three renderings that read it. `DIFF_INTRO`'s
+  gloss is rebuilt from that table, so the `{PROGRAM} apply` at
+  `cli.py:3290` and the one in the new advice are one string rather
+  than two. Because the spelling now lives on the client's side of the
+  boundary, the command-spellings census guard covers it: a future
+  rename that missed it fails a test in the same checkout, which is
+  exactly the reach #386 says the census does not have across the
+  boundary.
 - **The forward-compatibility rule: an unknown token renders as the
   state's own words, never a guessed command.** The client renders its
   remedy when every token in `applies` is one it knows; when the field
@@ -399,17 +399,23 @@ untouched, both being class (c) and (b) respectively.
 
 ## Module layout
 
-One new module, and two deepened.
+No new module. Four deepened, and one client-side table that stays
+beside its callers.
 
-- **`vinga_server/config/remedies.py` (new).** What this client says to
-  do about a boundary the server reported: one sentence per boundary
-  set, in this client's own grammar. It imports `Applies` and
-  `PROGRAM` and nothing else, so it costs the CLI nothing at import
-  time, and it is the single home for the fact "which of my commands
-  crosses each boundary", which `DIFF_INTRO` and the acknowledgement
-  renderer both read. It survives the deletion test: inlined into
-  `cli.py` it would be two tables that must agree, which is the
-  duplication it exists to end.
+- **`config/cli.py` gains the remedy table**, beside `DIFF_INTRO`,
+  `_acknowledged` and `_imported_entries`, which are its three
+  consumers and all of them are here. It does not become a module of
+  its own, and the deletion test is why: inlining it leaves one table
+  read from three places in the same file, which is not two structures
+  that must agree, and a `config/remedies.py` is then a name that hides
+  nothing. The design guide names that shape directly, as a
+  `config/cli_render.py` "that exists only because `cli.py` is long",
+  and records the merged instance of the positive form: the derived
+  `outcomes` fact "lives in `cli.py` now, beside the renderer that is
+  its only caller" (`design-guide.md:99-124, 258-266`). What the table
+  ends is still real and is what the milestone claims: the
+  `{PROGRAM} apply` at `cli.py:3290` and the acknowledgement's advice
+  become one string instead of two.
 - **`config/entities.py` deepens.** A notice stops being a bare string
   and becomes the pair it always was, so nothing downstream has to
   recover the boundary from the words.
@@ -446,9 +452,9 @@ Reusing what exists wherever the assertion already has a home.
   `tests/unit/test_config_api_writes.py` rather than the census, whose
   three classes are about file-and-line spellings across the tree and
   cannot express "reaches a response body".
-- **The census stays where it is** and picks up `remedies.py` with no
-  change: a new file with `respell`-class spellings is swept and held to
-  the registered tree by the guard already in
+- **The census stays where it is** and covers the remedy table with no
+  change: `cli.py` is already swept, and every `respell`-class spelling
+  in it is held to the registered tree by the guard in
   `tests/unit/test_command_spellings.py`. That the spelling is now
   inside the guard's reach is the plan's central claim, and the guard
   proving it needs no new code is the evidence.
@@ -550,7 +556,7 @@ Reusing what exists wherever the assertion already has a home.
   entry.
 - [ ] **M2: the sentence states, the client advises.** `APPLY_NOTICE`
   and `BINDING_UNSERVED_NOTICE` lose their command halves and state
-  only what is true of the write; `config/remedies.py` holds this
+  only what is true of the write; `cli.py` gains the table holding this
   client's sentence per boundary set, and `DIFF_INTRO` is rebuilt from
   it; `_acknowledged` and `_imported_entries` print the server's
   sentence with the client's remedy under it, falling back to the
@@ -563,11 +569,11 @@ Reusing what exists wherever the assertion already has a home.
   `test_config_cli_respelling.py`; the follow-up issue for class (a)'s
   five refusals is filed; a CHANGELOG `Changed` entry; the
   implementation-doc section. Behavior changes sit alone in this
-  review. Design footprint: one new module, `config/remedies.py`, whose
-  one sentence is "what this client says to do about a boundary the
-  server reported"; the seam it closes is the acknowledgement's, which
-  now crosses as a token rather than as a sentence with a command in
-  it; `cli.py` loses a duplicated spelling rather than gaining a layer.
+  review. Design footprint: no new module; the seam that changes is the
+  acknowledgement's, which now crosses as a token rather than as a
+  sentence with a command in it, and the client's answer to it is one
+  table in `cli.py` beside its three consumers, so `cli.py` loses a
+  duplicated spelling rather than gaining a layer.
   Documentation footprint:
   `docs/architecture/cli-guide.md` is the guideline that must move, its
   practice "A write says what it did and when it takes effect"
@@ -651,6 +657,22 @@ amendments.
    only caller and names a `config/cli_render.py` extraction as the
    counterexample (`design-guide.md:99-124, 258-266`). Keep the remedy
    table and its rendering helper in `cli.py` beside their consumers.
+
+   *Resolution*: accepted in full, and the citation checked before
+   accepting: the guide's counterexample is a `config/cli_render.py`
+   "that exists only because `cli.py` is long", and its worked example
+   records the positive form as merged, the derived `outcomes` fact
+   living "in `cli.py` now, beside the renderer that is its only
+   caller". The plan's justification was simply wrong: inlining leaves
+   one table read from three places in one file, not two structures
+   that must agree. The module is gone from the plan; the module-layout
+   section now opens "No new module" and says where the table lives and
+   why, the replacement-pattern bullet and the M2 design footprint
+   follow, and the census bullet no longer claims a new file is what
+   brings the spelling into the guard's reach, since `cli.py` is
+   already swept. What the table ends is unchanged and is still
+   claimed: `DIFF_INTRO`'s spelling and the acknowledgement's advice
+   become one string.
 
 4. **P2: M1's narrowed diff types leave an existing CI fixture
    invalid.** `test_config_api_runtime.answer()` constructs the
