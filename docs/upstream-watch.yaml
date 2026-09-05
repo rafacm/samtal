@@ -1,0 +1,73 @@
+# The upstream wire contract, and where it was last read from.
+#
+# vinga speaks a protocol it does not own. Every maintained protocol
+# fact in docs/xiaozhi-notes.md was read out of an upstream source at a
+# recorded commit, so this file names those sources: per upstream
+# repository, the clone URL, the commit the notes were read against,
+# the date they were read, and the paths that carry the contract.
+#
+# It is the machine home of the pinned commits. The currency table in
+# docs/xiaozhi-notes.md carries the same commits and dates as human
+# context, and the docs workflow holds the two to full agreement in
+# both directions (scripts/upstream_watch.py check), so bumping one
+# without the other turns the docs lane red rather than lying quietly.
+#
+# .github/workflows/upstream-drift.yml reads this file weekly, diffs
+# the watched paths from each pinned commit to upstream's HEAD and to
+# its latest release, and opens or updates one drift-report issue.
+#
+# The resolution loop, when a drift report arrives:
+#
+#   1. Read the changed upstream source in a clone. The report names
+#      files and commit subjects on purpose; it carries no patch text,
+#      because the first step is reading the source, not reviewing a
+#      diff in an issue.
+#   2. Update the affected sections of docs/xiaozhi-notes.md to say
+#      what is true now.
+#   3. Bump the pinned commit and the read date here and in the notes'
+#      currency table, together.
+#   4. Adjust implementation and tests only where the wire actually
+#      moved. Most upstream commits touch neither.
+#
+# Adding a path: a path joins this file when a maintained section of
+# docs/xiaozhi-notes.md is read from it. That rule is what keeps the
+# report signal rather than noise, since one upstream protocol change
+# arrives alongside dozens of board-support files that mean nothing
+# here.
+#
+# What a report can undercount: only the deletion side of a rename is
+# dependable. A file renamed to a destination outside these paths shows
+# up as a delete and nothing else, because git diff cannot report a
+# destination the pathspec excludes. So a report is a prompt to
+# re-read, never a claim that the listed files are all that moved;
+# locating a moved file's replacement is a human triage step.
+repositories:
+  - repository: 78/xiaozhi-esp32
+    url: https://github.com/78/xiaozhi-esp32
+    pinned: dd99da00dc4c89ed4ab07fcec038c03f13f4de50
+    read: "2026-07-29"
+    # The device half of the contract: the protocol document upstream
+    # publishes, the transport implementations behind it, the OTA
+    # check-in and activation client, and the application state machine
+    # that drives both.
+    paths:
+      - docs/websocket.md
+      - main/protocols/
+      - main/ota.cc
+      - main/application.cc
+
+  - repository: xinnan-tech/xiaozhi-esp32-server
+    url: https://github.com/xinnan-tech/xiaozhi-esp32-server
+    pinned: de45f73efdd24e9343427a56b5d22f857b6bb7a7
+    read: "2026-07-28"
+    # The server half. The first two are the manager-api endpoints the
+    # activation ceremony was reconstructed from, since no public spec
+    # of the OTA exchange exists. The last two are the handshake core:
+    # connection.py reads the device-id header, mints the session id
+    # and sends the welcome hello, and helloHandle.py consumes the
+    # device's hello (audio parameters, feature flags, MCP).
+    paths:
+      - main/manager-api/src/main/java/xiaozhi/modules/device/controller/OTAController.java
+      - main/manager-api/src/main/java/xiaozhi/modules/device/service/impl/DeviceServiceImpl.java
+      - main/xiaozhi-server/core/connection.py
+      - main/xiaozhi-server/core/handle/helloHandle.py
