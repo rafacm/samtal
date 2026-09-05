@@ -597,10 +597,11 @@ class DatabaseConfig(BaseModel):
     host: str = Field(
         default="127.0.0.1",
         description=(
-            "The host the Postgres instance is reached on. `VINGA_DB_HOST` "
-            "overrides it, and that is the documented spelling. The default is the "
-            "development instance `docker compose up -d --wait` starts from the "
-            "repository root, so a checkout runs with no configuration at all."
+            f"The host the Postgres instance is reached on. "
+            f"`{DATABASE_ENV_NAMES['host']}` "
+            f"overrides it, and that is the documented spelling. The default is the "
+            f"development instance `docker compose up -d --wait` starts from the "
+            f"repository root, so a checkout runs with no configuration at all."
         ),
     )
     port: int = Field(
@@ -608,27 +609,30 @@ class DatabaseConfig(BaseModel):
         ge=1,
         le=65535,
         description=(
-            "The port the Postgres instance listens on. `VINGA_DB_PORT` overrides "
-            "it, and that is the documented spelling."
+            f"The port the Postgres instance listens on. "
+            f"`{DATABASE_ENV_NAMES['port']}` overrides "
+            f"it, and that is the documented spelling."
         ),
     )
     name: str = Field(
         default="vinga",
         description=(
-            "The database this server keeps both of its halves in. `VINGA_DB_NAME` "
-            "overrides it, and that is the documented spelling. The domain "
-            "configuration lives in this database's `domain` schema, the "
-            "conversation record in a `record` schema and each agent's memory in a "
-            "`memory` schema beside it, so one instance is one deployment's whole "
-            "state."
+            f"The database this server keeps both of its halves in. "
+            f"`{DATABASE_ENV_NAMES['name']}` "
+            f"overrides it, and that is the documented spelling. The domain "
+            f"configuration lives in this database's `domain` schema, the "
+            f"conversation record in a `record` schema and each agent's memory in a "
+            f"`memory` schema beside it, so one instance is one deployment's whole "
+            f"state."
         ),
     )
     user: str = Field(
         default="vinga",
         description=(
-            "The role the server connects as. `VINGA_DB_USER` overrides it, and "
-            "that is the documented spelling. The password has no key on this "
-            "model at all: it is `VINGA_DB_PASSWORD` and only that."
+            f"The role the server connects as. `{DATABASE_ENV_NAMES['user']}` "
+            f"overrides it, and "
+            f"that is the documented spelling. The password has no key on this "
+            f"model at all: it is `{DATABASE_PASSWORD_ENV}` and only that."
         ),
     )
 

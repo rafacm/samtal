@@ -29,6 +29,7 @@ from vinga_server.config.models import (
     API_MOUNT_PATH,
     BOOT_REFUSALS,
     DATABASE_ENV_NAMES,
+    DATABASE_ENV_PREFIX,
     DATABASE_GENERIC_ENV_PREFIX,
     DATABASE_PASSWORD_ENV,
     DATABASE_URL_ENV,
@@ -422,6 +423,54 @@ def test_the_page_carries_the_environment_names_the_loader_applies() -> None:
     for variable in DATABASE_ENV_NAMES.values():
         assert variable in rendered, variable
     assert DATABASE_GENERIC_ENV_PREFIX in rendered
+
+
+# Any name shaped like one of the database variables, wherever one is
+# written. Built from the prefix the constants declare, so a rename of
+# the prefix finds nothing anywhere and the vacuity guard below is what
+# fails, while a rename of one name leaves the old spelling behind as a
+# name this pattern finds and the inventory does not admit.
+_DATABASE_VARIABLE = re.compile(rf"{DATABASE_ENV_PREFIX}[A-Z0-9_]+")
+
+
+def test_no_surface_names_a_database_variable_the_constants_do_not() -> None:
+    """The six names, on every surface that spells one, held to the
+    inventory rather than to inclusion.
+
+    Inclusion is what the case above checks, and it is half the claim: a
+    page that names all six and one more is a page telling an operator
+    to set a variable nothing reads. These four surfaces are the ones
+    that spell a name in prose rather than composing it from the
+    constant, so they are where a rename leaves a stale copy: the
+    model's docstring, its field descriptions, the rendered page and the
+    sentence the database package answers with when nothing opens.
+
+    `DatabaseConfig.__doc__` is prose on purpose, since a docstring
+    cannot be an f-string and a `__doc__` assigned after the class would
+    move the paragraph away from what it documents. This is what covers
+    it instead.
+
+    `vinga_server.db` is imported here rather than at the top of the
+    file: importing it reaches SQLAlchemy, and this suite's first case
+    is that rendering the page reaches nothing of the sort.
+    """
+    from vinga_server import db
+    from vinga_server.config.models import DatabaseConfig
+
+    declared = {*DATABASE_ENV_NAMES.values(), DATABASE_PASSWORD_ENV, DATABASE_URL_ENV}
+    surfaces = {
+        "the DatabaseConfig docstring": DatabaseConfig.__doc__ or "",
+        "a DatabaseConfig field description": " ".join(
+            info.description or "" for info in DatabaseConfig.model_fields.values()
+        ),
+        "the rendered page": server_reference.reference(),
+        "db.UNREACHABLE": db.UNREACHABLE,
+    }
+
+    for where, text in surfaces.items():
+        found = set(_DATABASE_VARIABLE.findall(text))
+        assert found, f"{where} names none of the database variables"
+        assert found <= declared, f"{where} names {sorted(found - declared)}"
 
 
 def test_the_page_names_the_two_values_with_no_key() -> None:
