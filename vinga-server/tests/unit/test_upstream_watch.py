@@ -48,6 +48,13 @@ GIT_ENV = {
     "GIT_COMMITTER_EMAIL": "tests@example.invalid",
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_SYSTEM": os.devnull,
+    # No background repack. It rewrites the object store under a clone
+    # that is copying it, which is both a flake this suite has already
+    # seen and the reason the corruption test below can rely on loose
+    # objects staying loose.
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "gc.auto",
+    "GIT_CONFIG_VALUE_0": "0",
 }
 
 
@@ -577,6 +584,80 @@ def test_an_unparseable_manifest_is_a_sentence_not_a_traceback(
     assert done.stdout == ""
     assert len(done.stderr.strip().splitlines()) == 1
     assert "Traceback" not in done.stderr
+
+
+def test_a_git_that_cannot_list_tags_refuses(tmp_path: Path) -> None:
+    """"No release tag" and "we could not look" are opposite claims.
+
+    An unusable `tag.sort` makes git refuse to enumerate tags while
+    leaving every other command working, which is the shape of the bug
+    being pinned: the old code read the failure as an empty result and
+    reported "no tag matches the release policy".
+    """
+    repo = upstream(tmp_path, "acme__thing")
+    pinned = head_of(repo)
+    commit(repo, {"watched/one.txt": "second\n"}, "move the wire")
+    manifest, clones = stage(tmp_path, [("acme/thing", repo, pinned, ["watched/"])])
+    git(clones / "acme__thing", "config", "tag.sort", "nonsense")
+    done, out = report(tmp_path, manifest, clones)
+    assert done.returncode == 1
+    assert done.stderr.strip() == "acme/thing: git could not list its tags"
+    assert "Traceback" not in done.stderr
+    assert not out.exists()
+
+
+def test_a_git_that_cannot_walk_history_refuses(tmp_path: Path) -> None:
+    """A broken clone must not become a claim about upstream's history.
+
+    merge-base --is-ancestor answers 0 or 1; 128 is git failing. Read
+    as "not an ancestor" it would have turned this corrupt clone into a
+    report saying upstream had diverged.
+    """
+    repo = tmp_path / "upstream" / "acme__thing"
+    repo.mkdir(parents=True)
+    git(repo, "init", "--quiet", "--initial-branch=main")
+    pinned = commit(repo, {"watched/one.txt": "first\n"}, "the pin")
+    middle = commit(repo, {"watched/one.txt": "second\n"}, "the middle")
+    commit(repo, {"watched/one.txt": "third\n"}, "the tip")
+
+    # A local-path clone copies the object store as it stands, and a
+    # repository this young has only loose objects, so one commit can
+    # be corrupted without touching the two the validation reads.
+    clones = tmp_path / "clones"
+    clones.mkdir()
+    target = clones / "acme__thing"
+    done = subprocess.run(
+        ["git", "clone", "--no-hardlinks", "--no-checkout", "--quiet",
+         str(repo), str(target)],
+        capture_output=True, text=True, env=GIT_ENV, timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    (target / ".git" / "objects" / middle[:2] / middle[2:]).write_bytes(b"garbage")
+
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        yaml.safe_dump(
+            {
+                "repositories": [
+                    {
+                        "repository": "acme/thing",
+                        "url": repo.as_uri(),
+                        "pinned": pinned,
+                        "read": "2026-07-29",
+                        "paths": ["watched/"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    done, out = report(tmp_path, manifest, clones)
+    assert done.returncode == 1
+    assert done.stderr.strip() == (
+        "acme/thing: git could not compare the pinned commit with a target"
+    )
+    assert "Traceback" not in done.stderr
+    assert not out.exists()
 
 
 # ----------------------------------------------------------------- clone

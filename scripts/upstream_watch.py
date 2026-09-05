@@ -431,11 +431,18 @@ def cmd_clone(args) -> int:
     return 0
 
 
-def latest_release_tag(repo: Path):
-    """The highest tag matching the stated release policy, or None."""
+def latest_release_tag(repo: Path, name: str):
+    """The highest tag matching the stated release policy, or None.
+
+    None means the repository has no tag the policy accepts, which is
+    an ordinary state a report says out loud. A git that could not list
+    the tags at all is not that state and must not be read as it: it is
+    a refusal, because "no releases" and "we could not look" lead a
+    reader to opposite conclusions.
+    """
     done = git(repo, "tag", "--list")
     if done.returncode != 0:
-        return None
+        raise Refusal(f"{name}: git could not list its tags")
     best = None
     for line in done.stdout.splitlines():
         m = TAG_RE.match(line.strip())
@@ -445,6 +452,18 @@ def latest_release_tag(repo: Path):
         if best is None or key > best[0]:
             best = (key, line.strip())
     return None if best is None else best[1]
+
+
+def is_ancestor(repo: Path, name: str, earlier: str, later: str) -> bool:
+    """Whether `earlier` is an ancestor of `later`, or a refusal.
+
+    Only 0 and 1 are answers. See the caller for why the difference
+    matters.
+    """
+    done = git(repo, "merge-base", "--is-ancestor", earlier, later)
+    if done.returncode not in (0, 1):
+        raise Refusal(f"{name}: git could not compare the pinned commit with a target")
+    return done.returncode == 0
 
 
 def fence_for(text: str) -> str:
@@ -511,7 +530,7 @@ def cmd_report(args) -> int:
         lines.append("")
 
         targets = [("upstream HEAD", "origin/HEAD", head_sha)]
-        tag = latest_release_tag(repo)
+        tag = latest_release_tag(repo, name)
         if tag is None:
             lines.append(
                 "No tag matches the release policy, so only upstream HEAD "
@@ -529,12 +548,15 @@ def cmd_report(args) -> int:
             targets.append((f"release {tag}", tag, tag_sha.stdout.strip()))
 
         for label, rev, sha in targets:
-            ahead = git(repo, "merge-base", "--is-ancestor", row["pinned"], rev)
-            if ahead.returncode != 0:
-                behind = git(repo, "merge-base", "--is-ancestor", rev, row["pinned"])
+            # merge-base --is-ancestor documents exactly two answers:
+            # 0 for an ancestor and 1 for anything else it could
+            # compute. Every other exit code is git failing, and
+            # reading one of those as "not an ancestor" turns a broken
+            # clone into a confident claim about upstream's history.
+            if not is_ancestor(repo, name, row["pinned"], rev):
                 relation = (
                     "is behind the pinned commit"
-                    if behind.returncode == 0
+                    if is_ancestor(repo, name, rev, row["pinned"])
                     else "has diverged from the pinned commit"
                 )
                 lines.append(f"### {label} (`{sha}`)")
