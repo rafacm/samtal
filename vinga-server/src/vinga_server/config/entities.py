@@ -199,18 +199,22 @@ BINDING_NOTICE = Notice(
 # One line, and that is a decision rather than an accident (#371). This
 # is printed on every entry of every domain-half write, so a script that
 # writes nine of them prints it nine times, and a sentence long enough
-# to be worth reading once is a wall of text at that count. What is left
-# is the two things an operator acts on: the command that installs, and
-# the command that says what is waiting. The three clocks a change
-# converges at are still true and still published; they moved to
-# `vinga apply --help` and to the domain-config reference, which is
-# where somebody asking that question is already looking.
+# to be worth reading once is a wall of text at that count. The three
+# clocks a change converges at are still true and still published; they
+# moved to `vinga apply --help` and to the domain-config reference,
+# which is where somebody asking that question is already looking.
+#
+# And it names no command, which is the other half of what it is
+# allowed to say (#386). What a write is waiting at is a fact of this
+# server and travels beside the sentence as `applies`; which command
+# crosses that boundary is a fact of a client's grammar, and a client
+# is a program this one neither ships nor versions. So the sentence
+# states, and the client advises out of `cli.REMEDIES`.
 APPLY_NOTICE = Notice(
     applies=(Applies.RELOAD,),
     sentence=(
-        f"This is stored and not yet serving: `{PROGRAM} apply` installs the stored "
-        f"configuration on the running server, and `{PROGRAM} diff` lists everything "
-        "pending."
+        "This is stored and not yet serving: the running server goes on serving what "
+        "it already has until the stored configuration is installed on it."
     ),
 )
 
@@ -224,8 +228,8 @@ BINDING_UNSERVED_NOTICE = Notice(
     applies=(Applies.RELOAD, Applies.CHECK_IN),
     sentence=(
         "The binding applies at the device's next OTA check or connection, but this "
-        f"server is not serving the agent it names yet: `{PROGRAM} apply` installs the "
-        "stored agents, and the device reaches it at the check-in after that."
+        "server is not serving the agent it names yet: the agent arrives with the "
+        "install that adds it, and the device reaches it at the check-in after that."
     ),
 )
 
