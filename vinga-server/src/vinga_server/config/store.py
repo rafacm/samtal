@@ -1763,10 +1763,19 @@ def _device(row: Row) -> tuple[str, list[object]]:
     (#205) and its sentence is `NOT_A_MAC`, the rule rather than the
     value, which is what makes it safe to put in front of a column
     nothing has read yet.
+
+    Through `str` for the reason `normalize_device_bindings` calls it
+    that way, which is the model's own reading of the same column: one
+    rule, one call shape, and anything that is not a string lands on
+    `NOT_A_MAC` rather than inside `normalize_mac`. Defence in depth
+    and not a fix. The column is Postgres `text` and this build opens
+    nothing else, so what psycopg hands back is a `str`: an int, a
+    float and a bytes value written into it all read back as one, which
+    was measured rather than assumed (#382).
     """
     problem: str | None = None
     try:
-        mac = normalize_mac(row.mac)
+        mac = normalize_mac(str(row.mac))
     except ValueError as exc:
         problem = str(exc)
     if problem is not None:
