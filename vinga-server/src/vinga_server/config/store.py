@@ -1698,10 +1698,9 @@ def _read_domain(connection: Connection) -> DomainConfig:
                 }
                 for descriptor in _KEYED_BY_NAME
             },
-            devices={
-                row.mac: _list(f"devices.{row.mac}", "agents", row.agents)
-                for row in connection.execute(select(schema.devices))
-            },
+            devices=dict(
+                _device(row) for row in connection.execute(select(schema.devices))
+            ),
         )
     except ValidationError as exc:
         # The sentence only, for the reason `_stored` records: unreadable
@@ -1738,8 +1737,52 @@ def _read_domain(connection: Connection) -> DomainConfig:
     return domain
 
 
+def _device(row: Row) -> tuple[str, list[object]]:
+    """One stored device row: the MAC made a MAC first, then the column
+    beside it read at the location that makes.
+
+    The order is the whole of this function, and a comprehension could
+    not state it. A MAC is checked on the way out as well as on the way
+    in, which is what lets every surface above say that a device key
+    cannot carry what a name can; but the check lives on the model, and
+    the model runs after this row's `agents` column has been read at a
+    location built by pasting the MAC into a string. A row holding both
+    mistakes at once, a MAC nothing would accept and an `agents` column
+    that is not an array, answered with the column's refusal carrying
+    the raw MAC (#382).
+
+    The key stays the column as stored, and only the location is the
+    canonical form. Normalizing the key here would swallow the one
+    thing the model's own walk is left to find: two rows spelling one
+    MAC two ways are two keys until it normalizes them, and it refuses
+    that pair; a mapping built from canonical keys would keep the last
+    of them and lose the other in silence.
+
+    Recorded inside the handler and raised outside it, the rule every
+    refusal here follows. `normalize_mac` carries nothing to reach
+    (#205) and its sentence is `NOT_A_MAC`, the rule rather than the
+    value, which is what makes it safe to put in front of a column
+    nothing has read yet.
+    """
+    problem: str | None = None
+    try:
+        mac = normalize_mac(row.mac)
+    except ValueError as exc:
+        problem = str(exc)
+    if problem is not None:
+        raise StorageError(f"devices: {problem}; the row cannot be read as configuration")
+    return row.mac, _list(f"devices.{mac}", "agents", row.agents)
+
+
 def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretStore:
     envelopes: dict[SecretLocation, object] = {}
+    # Every identity here is a column this function did not check, and
+    # every one of them has been checked by the time it runs: `load`
+    # reads the domain half first, which refuses a stage that is not one
+    # and a MAC that is not one, so a row surviving to here is filed
+    # under an identity the reader above accepted. `_location` strips
+    # what such a name may still carry (#381). Reordering those two
+    # reads would put an unchecked column back into a location.
     for descriptor in _SECRET_HOLDERS:
         for row in connection.execute(select(_table(descriptor))):
             identity = tuple(getattr(row, part) for part in descriptor.addressing)
