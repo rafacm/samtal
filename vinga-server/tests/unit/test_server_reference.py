@@ -42,8 +42,15 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.secrets import MASTER_KEY_ENV
 
-COMMITTED_DOMAIN = (
-    Path(__file__).resolve().parents[3] / "docs" / "reference" / "domain-config.md"
+REFERENCE = Path(__file__).resolve().parents[3] / "docs" / "reference"
+COMMITTED = REFERENCE / "server-config.md"
+COMMITTED_DOMAIN = REFERENCE / "domain-config.md"
+
+# The regenerate command in the spelling the failure message uses, which
+# is the long one: that is a command to paste into a checkout rather than
+# a line of a rendered page.
+REGENERATE = (
+    "uv run vinga-server config reference server > ../docs/reference/server-config.md"
 )
 
 
@@ -490,4 +497,24 @@ def test_every_cross_field_validator_is_claimed_by_the_registry() -> None:
     assert declared, "no model declares a cross-field validator, so this is vacuous"
     assert declared <= claimed, sorted(
         f"{model.__name__}.{name}" for model, name in declared - claimed
+    )
+
+
+# The committed copy
+
+
+def test_the_committed_reference_matches_the_models(packaged_database) -> None:
+    """The same check CI runs, run here too: locally it fails in the
+    suite rather than after a push.
+
+    Under `packaged_database`, and this is the one page that needs it.
+    The lane moves `DatabaseConfig`'s four defaults onto the database
+    this run provisioned, which is invisible in the domain reference and
+    is a Default cell here; what CI regenerates, outside pytest, is what
+    a deployment is shipped pointing at. So the comparison is made under
+    the shipped condition rather than against a page nobody could
+    reproduce.
+    """
+    assert COMMITTED.read_text(encoding="utf-8") == server_reference.reference(), (
+        f"docs/reference/server-config.md is stale; regenerate it with `{REGENERATE}`"
     )
