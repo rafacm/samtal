@@ -750,7 +750,7 @@ Commands:
   simulator        a simulated board, checking in the way one with a screen
                    would
   schema           the JSON Schema of one entity, or of the whole domain half
-  reference        the markdown reference, generated from the models
+  reference        the markdown reference of one half, generated from the models
   openapi          the configuration API's OpenAPI document, generated from its
                    routes
   cli-reference    the generated half of the CLI reference: the recipes read out
@@ -2794,9 +2794,12 @@ Options:
 ### `vinga reference`
 
 ```
-Usage: vinga reference [OPTIONS]
+Usage: vinga reference [OPTIONS] [HALF]
 
-  the markdown reference, generated from the models
+  the markdown reference of one half, generated from the models
+
+Arguments:
+  HALF  domain, server (default: domain)
 
 Options:
   -h, --help  Show this message and exit.

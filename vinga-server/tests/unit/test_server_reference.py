@@ -16,13 +16,15 @@ section's rows.
 """
 
 import re
+from pathlib import Path
 
 import annotated_types
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from tests.support.config_cli import SECRET, chain
 from tests.support.isolation import ALLOWED_IMPORTS, imported_alone
-from vinga_server.config import docgen, server_reference
+from vinga_server.config import cli, docgen, server_reference
 from vinga_server.config.models import (
     API_MOUNT_PATH,
     BOOT_REFUSALS,
@@ -38,6 +40,29 @@ from vinga_server.config.models import (
     EnvName,
     ServerConfig,
 )
+from vinga_server.config.secrets import MASTER_KEY_ENV
+
+COMMITTED_DOMAIN = (
+    Path(__file__).resolve().parents[3] / "docs" / "reference" / "domain-config.md"
+)
+
+
+@pytest.fixture
+def run(monkeypatch: pytest.MonkeyPatch):
+    """This command reads the models and nothing else, so the fixture
+    takes away everything else: no config file, no reachable database, no
+    encryption key."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.delenv(MASTER_KEY_ENV, raising=False)
+    # A port nothing listens on, so a command that opened the database
+    # would refuse here rather than print.
+    monkeypatch.setenv("VINGA_DB_PORT", "1")
+
+    def _run(*argv: str) -> int:
+        return cli.main(list(argv))
+
+    return _run
+
 
 # The model graph, walked the way the renderer walks it
 #
@@ -156,11 +181,69 @@ def test_the_server_reference_renders_from_the_models_alone() -> None:
     assert alone["rendered"] > 0
 
 
+def test_reference_server_needs_no_database_and_no_key(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The port the fixture names has nothing on it and no key is set, so
+    a command that opened the database or loaded the keys would fail here
+    rather than print."""
+    assert run("reference", "server") == 0
+
+    assert capsys.readouterr().out.startswith("# Server configuration reference")
+
+
 def test_the_reference_is_deterministic() -> None:
     """The committed page is diffed byte for byte, so anything that
     varied between two runs would turn the lane red on an unrelated
     change."""
     assert server_reference.reference() == server_reference.reference()
+
+
+# The selector
+#
+# The bare verb rendered the domain page before there was a second half,
+# and every committed line that runs it has to stay true. The proof that
+# it did not move is the sequencing rather than these assertions: the
+# commit that added the selector touched neither `docgen.reference()` nor
+# the committed domain page, so the domain suite's freshness pin passing
+# there is what says the bytes are the same bytes.
+
+
+def test_the_bare_verb_still_renders_the_domain_half(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("reference") == 0
+    bare = capsys.readouterr().out
+
+    assert run("reference", "domain") == 0
+    named = capsys.readouterr().out
+
+    assert bare == named == docgen.reference()
+    assert bare == COMMITTED_DOMAIN.read_text(encoding="utf-8")
+
+
+def test_a_half_that_is_neither_names_the_two_that_are(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One fixed sentence, exit 1, and nothing of what was typed.
+
+    A selector is an argument like any other, so it is a place a
+    credential gets pasted; the planted value stands in for one and is
+    asserted absent from both streams and from the exception chain, which
+    is the surface no assertion about a stream can reach.
+    """
+    assert run("reference", SECRET) == 1
+
+    captured = capsys.readouterr()
+    for half in server_reference.half_names():
+        assert half in captured.err
+    assert "Traceback" not in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+
+    with pytest.raises(cli.ConfigError) as caught:
+        server_reference.render(SECRET)
+    assert SECRET not in chain(caught.value)
 
 
 def test_the_default_half_is_the_registrys_first_row() -> None:

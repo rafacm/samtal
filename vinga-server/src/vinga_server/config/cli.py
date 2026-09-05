@@ -95,7 +95,7 @@ from typer.core import TyperCommand, TyperGroup
 
 from vinga_server import device_endpoint
 from vinga_server.broken_pipe import reader_stopped_reading
-from vinga_server.config import docgen, entities
+from vinga_server.config import docgen, entities, server_reference
 from vinga_server.config.loader import (
     CONFIG_ENV_VAR,
     # Defined one module down and re-exported here, because `main.py`
@@ -985,6 +985,12 @@ class Invocation:
     # registry holds one type name in more than one stage.
     type_name: str = ""
 
+    # Which half of the configuration a reference is asked for. Its
+    # default is the registry's first row rather than a word written
+    # here, so the bare verb and the positional cannot come to disagree
+    # about what nothing means.
+    half: str = server_reference.DEFAULT_HALF
+
     # The conversation store's session, and the two things a listing and
     # a purge are narrowed by that are not a device. `mac` carries the
     # device for both of them, reused from the verbs that already take
@@ -1163,9 +1169,16 @@ def _schema(args: Invocation) -> None:
 
 
 def _reference(args: Invocation) -> None:
-    """The markdown reference, the same document CI diffs the committed
-    copy against."""
-    print(docgen.reference(), end="")
+    """One half's markdown reference, the same documents CI diffs the
+    committed copies against.
+
+    Dispatched through the halves registry rather than branched on here,
+    so the accepted names, the positional's help and the refusal for a
+    name that is neither all read one tuple. Reads the models and nothing
+    else, whichever half is asked for: no database, no configuration
+    file, no encryption key, no server.
+    """
+    print(server_reference.render(args.half), end="")
 
 
 def _openapi(args: Invocation) -> None:
@@ -7515,11 +7528,50 @@ def _of_an_entity(row: Command) -> Callable[..., None]:
 
 
 def _rendered(row: Command) -> Callable[..., None]:
-    """The two documents rendered from the models and from the routes,
-    which take no arguments at all."""
+    """The two documents rendered from the routes and from the command
+    tree, which take no arguments at all."""
 
     def run(context: typer.Context) -> None:
         row.perform(_invocation(row, context))
+
+    return run
+
+
+def _of_a_half(row: Command) -> Callable[..., None]:
+    """The markdown reference, which names one half of the configuration
+    or neither.
+
+    One optional positional, in the `_of_an_entity` shape and for the
+    same reason: the act is one act, and what follows the verb says which
+    document of it. Scoped to this row alone, so `openapi` and
+    `cli-reference` keep taking no arguments at all; each of those renders
+    the one document it is about, and a selector on them would name
+    nothing.
+
+    The choices are not listed here. The help lists the registry's keys
+    and the default is the registry's first row, so a third half would be
+    a row there rather than an edit here, and an unnamed one is refused by
+    `render` with the same tuple's words.
+    """
+
+    def run(
+        context: typer.Context,
+        half: Annotated[
+            str,
+            typer.Argument(
+                metavar="HALF",
+                help=", ".join(server_reference.half_names())
+                + f" (default: {server_reference.DEFAULT_HALF})",
+                # The default is in the help sentence beside the names it
+                # is one of, so Click's own copy of it would be the same
+                # word twice on one line. The `--mac` option is the
+                # precedent, and `schema`'s ENTITY reads this way because
+                # its default is None.
+                show_default=False,
+            ),
+        ] = server_reference.DEFAULT_HALF,
+    ) -> None:
+        row.perform(_invocation(row, context, half=half))
 
     return run
 
@@ -8072,8 +8124,8 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         words=("reference",),
         does=_reference,
-        declare=_rendered,
-        help="the markdown reference, generated from the models",
+        declare=_of_a_half,
+        help="the markdown reference of one half, generated from the models",
     ),
     Command(
         words=("openapi",),
