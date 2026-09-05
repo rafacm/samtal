@@ -27,6 +27,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   opened or updated with the files and commit subjects that moved. A
   week with no drift writes nothing.
 
+- **The supported firmware is a declared floor.** A new decision
+  record, `docs/adr/2026-09-05-supported-firmware-is-a-declared-floor.md`,
+  enumerates the firmware releases vinga promises to speak: the two
+  images actually observed on boards, 2.2.4 on the AMOLED-2.16 and
+  2.4.0 on the Touch-LCD-1.54. That set is what every drift report is
+  triaged against (does this change move anything inside the floor?),
+  it widens by dated addendum when a new version is observed on a
+  board and the protocol notes are re-read against it, and it narrows
+  only by a superseding record. The stock-firmware promise's
+  version-target bound cites the record; the promise itself is
+  unchanged.
+
 - **The server half has a generated reference.**
   `docs/reference/server-config.md` documents every key of the
   `server:` section: its type, its default, the bounds pydantic
