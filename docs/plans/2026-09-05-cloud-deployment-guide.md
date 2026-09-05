@@ -261,3 +261,101 @@ convention permits.
   issue filed by the coordinator after merge. Design footprint:
   none in code. Documentation footprint: the five pages above, all
   named in "Documentation footprint".
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-05, against commit a58717a7 of this plan; the
+reviewer ran about 6m20s. Verdict: not ready; the amendments below
+answer every finding, and a delta re-review confirms them.
+
+1. **P1: the Postgres init Job has no secure credential contract.**
+   The Job "mounts a ConfigMap" while `secret.example.yaml` carries
+   only the two server secrets and `VINGA_DB_PASSWORD`;
+   `postgres-init.sql` needs an administrative connection able to
+   create roles and schemas, consumes `VINGA_DB_USER` and
+   `VINGA_DB_RO_PASSWORD`, and without the latter installs the
+   public default read-only password the README warns about. Define
+   a separate init-only Secret (the administrative connection,
+   `VINGA_DB_USER`, a required `VINGA_DB_RO_PASSWORD`), reference
+   its keys from the Job, run `psql "$ADMIN_URL"`, never give the
+   Deployment the administrative credential, and test that the Job
+   references the required keys and no default password appears in
+   an applicable manifest.
+
+2. **P1: the documented upgrade path cannot rerun or wait for the
+   one-shot Job.** `kubectl create configmap` fails once the name
+   exists, applying a completed Job does not rerun it, and apply
+   does not wait; the contract requires rerunning the SQL before
+   booting a new image, with no old-new overlap during incompatible
+   migrations. Specify a repeatable transaction: idempotent
+   ConfigMap apply, delete-then-create Job, wait for
+   `condition=complete`, stop on failure without touching the
+   Deployment, then the tag change and the `Recreate` rollout, with
+   the no-overlap property stated.
+
+3. **P1: the PVC may be unwritable by the image's non-root user.**
+   The image runs as UID 1000 and writes caches under `/data`; a
+   fresh volume can arrive root-owned, kubeconform accepts it, and
+   the agreement test looks elsewhere. Give the pod a concrete
+   writable-volume contract (`runAsNonRoot`, `runAsUser`/`runAsGroup`
+   1000, `fsGroup: 1000` with a change policy) and assert the UID
+   against the Dockerfile's in the agreement test.
+
+4. **P1: liveness can kill a healthy cold start indefinitely.** The
+   listener binds only after lifespan startup, which can load models
+   for minutes; ordinary liveness defaults restart the pod before
+   `/healthz` can ever answer. Add a `startupProbe` on `/healthz`
+   with a documented budget sized for first-run downloads, gate the
+   other probes behind it, and pin the structure in the agreement
+   test.
+
+5. **P1: the Ingress design leaves the public security boundary
+   undefined.** No routed paths were named, and the
+   `websocket_url`/`public_url`/`FORWARDED_ALLOW_IPS` wiring stayed
+   prose; the README says `/api/` should normally not be routed
+   externally and the legacy OTA path is only safely public behind a
+   random segment. Name the exact external routes (`/x/` and
+   `/xiaozhi/v1/`), exclude `/api/` and the probes, unmount the
+   legacy OTA route or require a randomized `VINGA_SERVER__OTA_PATH`
+   that agrees with the Ingress, put the explicit `wss://` websocket
+   URL, HTTPS public URL and narrow trusted-proxy value in
+   `deployment.yaml`, and document API administration through
+   port-forwarding or a separately restricted route.
+
+6. **P1: the production compose refusal and its CI check do not
+   work as described.** A required `env_file` only requires the file
+   to exist; one successful `docker compose config` cannot prove the
+   `:?` refusals fire; the existing trial check creates and removes
+   a real `.env` and exercises refusal and success. Put explicit
+   `${VAR:?}` guards on every required value, and have CI create the
+   correctly located temporary env file, assert each omission fails
+   with a value-free message, assert the complete dummy set
+   resolves, and clean up with a trap.
+
+7. **P2: the Kubernetes `/tmp` volume is not the promised tmpfs.**
+   A default `emptyDir` is node-backed. Specify
+   `emptyDir.medium: Memory` with a size limit and assert it in the
+   agreement test.
+
+8. **P2: the agreement test omits the network path that must agree
+   on port 8003.** A Service with the wrong `targetPort` or an
+   Ingress naming the wrong backend stays schema-valid. Parse
+   `service.yaml` and `ingress.yaml` too; assert selector/label
+   agreement, `targetPort` reach, Ingress backends, and pin one
+   replica, `Recreate`, RWO, the `/data` mount and the security
+   settings kubeconform cannot judge.
+
+9. **P2: the applicable Secret template can install known
+   placeholder credentials.** A `.yaml` template under `deploy/k8s/`
+   rides along on `kubectl apply -f deploy/k8s/` and nonempty
+   placeholders satisfy the presence checks. Make the template
+   non-applicable as committed (`secret.yaml.example`), create the
+   real Secret from an ignored local file or a
+   `kubectl create secret` command in the guide, and test that no
+   applicable manifest carries placeholder or default credentials.
+
+10. **P2: M1 omits the census regeneration its own files can
+    stale.** The new artifact headers quote commands and M1 runs the
+    full unit suite. Regenerate and commit the manifest in M1 after
+    the artifact files are tracked, and again in M2.
