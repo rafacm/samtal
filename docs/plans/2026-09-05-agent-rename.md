@@ -784,3 +784,96 @@ where it is enforced rather than asserting it.
   section. The client half lands alone, so the review sees the terminal
   output it adds and nothing else. Design footprint: no new module, one
   row in the table everything else about a command is read from.
+
+## Plan review round
+
+Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
+`064607a1`; the reviewer ran 6m01s. Verdict: NOT READY, 2 P1, 6 P2 and
+1 P3.
+
+1. **P1: destination conversation rows are an unrefused, irreversible
+   merge.** The plan refuses a destination collision in `domain.agents`
+   and in `memory.facts` and not in `record.conversations`, which has no
+   foreign key and whose rows survive the agent that wrote them
+   (`conversations/schema.py:257-294`). Threads already recorded under
+   the new name are therefore merged into the renamed agent's history,
+   and a rename back moves them too, so the reversibility the
+   confirmation decision rests on does not hold. Add a destination
+   conversation collision to the closed refusal set, checked under the
+   record chain's lock in the same transaction that would update; answer
+   409 without naming caller text; document the remedy; test a
+   destination holding orphaned threads and test that a rename back
+   leaves them where they were.
+
+2. **P1: renaming a thread's agent breaks the sessions in flight on it.**
+   `threads.landed()` raises `MisattributedTurn(ANOTHER_AGENT)` when an
+   arriving turn's agent does not match the stored `conversations.agent`
+   (`threads.py:261-294`), and the durable writer answers that exception
+   by dropping the marker's whole batch
+   (`conversations/store.py:1038-1074`), so a live session's later turns
+   are lost. A thread that has not materialized yet takes the other
+   branch and INSERTs a fresh row under the old name, recreating exactly
+   the detached live reference the rename set out to remove. Define an
+   ordering and handoff protocol covering stale conversation writers
+   rather than only the lock order inside the rename, prevent both the
+   mismatch drop and the old-name insertion, and test both with forced
+   interleaving.
+
+3. **P2: the record helper cannot take its chain's lock from
+   `threads.py`.** `CONVERSATIONS_CHAIN` is declared in
+   `conversations/store.py`, which already imports `threads`, so
+   importing it back closes a cycle. Put the locking seam in
+   `conversations/store.py`, or move the chain declaration to a
+   dependency-neutral owner; a small chain module passes the deletion
+   test if more than one caller needs one authoritative definition.
+
+4. **P2: `rename_owner`'s advertised signature cannot enforce the memory
+   collision.** Nothing in the schema prevents the merge, and an `int`
+   cannot distinguish a destination that already has rows from a source
+   that has none. Have it take the memory lock, check the destination,
+   raise the typed rename conflict untranslated and then update, or
+   answer with a result type that reports the collision separately. Pin
+   a competing memory write between the check and the update.
+
+5. **P2: the promised 409s have no exception type and no mapping.**
+   `REFUSAL_STATUS` maps a plain `ConfigError` to 422 and only the
+   listed subclasses to 409 (`config/api.py:307-342`), and no milestone
+   names one. Add a dedicated rename conflict exception in
+   `config/loader.py`, map it to 409 in `config/api.py`, and keep it
+   intact across the sanitizing boundaries of all three stores.
+
+6. **P2: the record schema's own contract goes stale.**
+   `conversations.agent`'s column comment says the thread has one agent
+   "and the only one it will ever have" (`conversations/schema.py:283-293`),
+   which this plan's premise correction falsifies. Update the comment to
+   say the rename rewrites the current owner's name while the dated rows
+   are unchanged, add the forward migration on the record chain, and
+   regenerate `docs/reference/conversations-schema.md`.
+
+7. **P2: the milestone that adds the route cannot run the client tests
+   it claims.** The rename's `Act` arrives with the CLI, a milestone
+   later, and `Act.read()` validates an answer rather than rendering it.
+   Test the API-produced notice and `applies` directly in the milestone
+   that adds the route, and put the end-to-end registered-command cases
+   in the milestone that adds the verb: the POST path, the raw
+   `{"to": ...}` body, the acknowledgement's rendering, and the remedy
+   for each of the three boundary arms.
+
+8. **P2: the credential-bearing old name cannot be reached through the
+   route.** A URL carrying a credential contains a slash, and a
+   path-segment route cannot address such a name, which the existing
+   sentinel already proves. Make the sanitizing of a legacy stored
+   identity a focused unit test of the formatter with the
+   unreachability stated, and make the reachable no-leak tests use
+   credential-bearing caller text as the NEW name, asserting it appears
+   in no body, header, stdout, stderr or log line.
+
+9. **P3: the sentinel sweep does not deliver the inventory guarantee it
+   claims.** Metadata cannot say which text or JSON fields hold an agent
+   name, so the sweep cannot promise that a reference added later fails
+   a test. Narrow the claim to the references enumerated today, or
+   introduce an authoritative per-store registry of live agent
+   references that both the rename and the coverage test read. Choose
+   with the design guide in hand: two structures that must agree are one
+   structure with a bug pending, so if a registry is the answer, the
+   rename itself has to read it.
