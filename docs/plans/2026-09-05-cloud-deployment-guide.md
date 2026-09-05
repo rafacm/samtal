@@ -113,7 +113,13 @@ memory.
   `terminationGracePeriodSeconds: 30` above the drain, the read-only
   root filesystem with a `/tmp` emptyDir, `/data` from the PVC, env
   from the Secret and a plain ConfigMap-free env section for the
-  `VINGA_DB_*` facts), `service.yaml`, `ingress.yaml` (above),
+  `VINGA_DB_*` facts, and a pod security context that makes the PVC
+  writable by the image's non-root user: `runAsNonRoot`,
+  `runAsUser: 1000` and `runAsGroup: 1000` matching the Dockerfile's
+  `vinga` user, `fsGroup: 1000` with
+  `fsGroupChangePolicy: OnRootMismatch` so a freshly provisioned
+  root-owned volume is handed over before the engines try to cache
+  into it), `service.yaml`, `ingress.yaml` (above),
   `pvc.yaml` (RWO), `secret.example.yaml` (the Deployment's Secret:
   the two server secrets plus `VINGA_DB_PASSWORD`),
   `job-postgres-init.yaml` (a one-shot Job running
@@ -334,6 +340,12 @@ answer every finding, and a delta re-review confirms them.
    writable-volume contract (`runAsNonRoot`, `runAsUser`/`runAsGroup`
    1000, `fsGroup: 1000` with a change policy) and assert the UID
    against the Dockerfile's in the agreement test.
+
+   *Resolution*: accepted in full. The Deployment gains the full
+   security context (`runAsNonRoot`, user and group 1000, `fsGroup`
+   with `OnRootMismatch`), and the agreement test reads the
+   Dockerfile's `vinga` user id and asserts the manifest's numbers
+   equal it, beside the `/data` mount assertion.
 
 4. **P1: liveness can kill a healthy cold start indefinitely.** The
    listener binds only after lifespan startup, which can load models
