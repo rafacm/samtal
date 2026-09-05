@@ -1093,8 +1093,10 @@ apply` builds the next snapshot and swaps to it instead:
 ```console
 $ vinga-server config mcp-server set weather -f weather.yaml
 wrote mcp-server weather
-This is stored and not yet serving: `vinga apply` installs the stored
-configuration on the running server, and `vinga diff` lists ...
+This is stored and not yet serving: the running server goes on
+serving what it already has until the stored ...
+`vinga apply` installs the stored configuration on the running
+server, and `vinga diff` lists everything pending.
 $ vinga-server config agent set house -f house.yaml
 $ vinga-server config apply
 mcp:
@@ -1131,7 +1133,11 @@ and stops there, and this is the command that installs what it wrote.
 Two commands rather than one, which is what a rebuild needs anyway,
 since a document's credentials go in between them. The per-entity
 writes say which boundary they are waiting at for the same reason,
-because nothing installs one until somebody asks.
+because nothing installs one until somebody asks. The sentence saying
+so is the server's and the line under it is the CLI's: a server ships
+in an image and cannot know the grammar of the client somebody has
+installed beside it, so it states the boundary and the client names the
+command that crosses it.
 
 **What it applies** is the whole domain half, re-read from the
 configuration database: the `providers` entries and the `mcp_servers`
@@ -1751,21 +1757,24 @@ than a fragment: that one, a device binding (`{"agents": [...]}`), and
 the default agent (`{"name": "..."}`), whose DELETE clears it.
 
 **A successful write says when it takes effect.** It answers
-`{"wrote": "...", "notice": "..."}`, and the notice is one of a handful
-of sentences. A device binding and the default agent carry the one about
-a device asking, because a running server reads them as it asks: they
-apply at that device's next OTA check or connection. Every other kind
-this API writes, which is the whole of the rest of the domain half,
-carries the one that names the apply above; it says the write is
-stored and not yet serving, names the command that installs it and the
-read that lists everything pending, and leaves the three moments a
-conversation meets an installed change at to that command's own help.
-A binding naming an agent this server is not serving yet carries a
-sentence of its own, and it is the one an operator is most likely to
-need, because both halves of it are true at once: the row is live, and
-the agent arrives at the apply that installs it. Nothing about a
-running conversation changes when a write lands, in any of these
-cases.
+`{"wrote": "...", "notice": "...", "applies": [...]}`: a sentence for a
+reader, and the boundaries it is waiting at as the closed tokens the
+comparison read publishes, which is the half a program branches on. A
+device binding and the default agent carry the one about a device
+asking, because a running server reads them as it asks: they apply at
+that device's next OTA check or connection. Every other kind this API
+writes, which is the whole of the rest of the domain half, carries the
+one that says the write is stored and not yet serving, and leaves the
+three moments a conversation meets an installed change at to the
+installing command's own help. A binding naming an agent this server is
+not serving yet carries a sentence of its own, and it is the one an
+operator is most likely to need, because both halves of it are true at
+once: the row is live, and the agent arrives at the apply that installs
+it. No sentence names a command: which command crosses a boundary is a
+fact of the client's grammar, and a client is a program this server
+neither ships nor versions, so the CLI reads the tokens and prints its
+own advice under the sentence. Nothing about a running conversation
+changes when a write lands, in any of these cases.
 
 **A refusal is an RFC 9457 problem document**, served as
 `application/problem+json`, and carries the sentence the CLI prints in

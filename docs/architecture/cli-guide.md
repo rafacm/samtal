@@ -612,13 +612,31 @@ different clocks, and a command that changed the first says which.
 
 **Example.** Five sentences in `config/entities.py`, one per answer,
 each a fact of what was written rather than of the command that wrote
-it. `APPLY_NOTICE` names the boundary and the two commands either side
-of it: `vinga apply` installs what is stored, and `vinga diff` lists
-what is pending. `BINDING_UNSERVED_NOTICE` exists because a binding
-whose agent this server is not serving yet is true two ways at once,
-and neither of the other sentences would have been honest. `import`
-prints each distinct notice once, because a document that wrote nine
-entities is waiting on one apply, not nine.
+it. `APPLY_NOTICE` says the write is stored and not yet serving, and
+the boundary it is waiting at travels beside it as `applies`, a token
+of the same closed set the comparison read publishes.
+`BINDING_UNSERVED_NOTICE` exists because a binding whose agent this
+server is not serving yet is true two ways at once, and neither of the
+other sentences would have been honest, which is why the token is a set
+rather than a word. `import` prints each distinct notice once, because
+a document that wrote nine entities is waiting on one apply, not nine,
+and it deduplicates on that set where there is one.
+
+**The sentence states and the client advises** (#386). None of the five
+names a command. A server ships in an image and a client is installed
+beside it, so a command spelling in a sentence the server composes is
+advice about a grammar the server does not own and cannot see change:
+an image built before a verb rename told an operator to run a command
+the client no longer had, and both halves were internally consistent.
+So the server states the boundary and the CLI answers it, from
+`cli.REMEDIES`, keyed by the boundary set and holding this grammar's own
+words: `vinga apply` installs the stored configuration and `vinga diff`
+lists what is pending. The spelling is then on the side that owns the
+word and inside the command-spellings census's reach, where a rename
+that missed it fails a test in the same checkout. A set the client
+cannot name, which is what a boundary from a newer server arrives as, is
+answered with the server's sentence alone: an unknown state is quoted,
+never guessed at.
 
 **The sentence is as short as the boundary allows** (#371). The three
 clocks an installed change converges at (tools at the next utterance,
