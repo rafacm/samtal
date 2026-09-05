@@ -155,8 +155,15 @@ memory.
   `fsGroupChangePolicy: OnRootMismatch` so a freshly provisioned
   root-owned volume is handed over before the engines try to cache
   into it), `service.yaml`, `ingress.yaml` (above),
-  `pvc.yaml` (RWO), `secret.example.yaml` (the Deployment's Secret:
-  the two server secrets plus `VINGA_DB_PASSWORD`),
+  `pvc.yaml` (RWO), `secret.yaml.example` (the Deployment's Secret:
+  the two server secrets plus `VINGA_DB_PASSWORD`; the `.example`
+  suffix is load-bearing, since a `.yaml` template rides along on
+  `kubectl apply -f deploy/k8s/` and nonempty placeholders satisfy
+  every presence check, leaving a deployment protected by known
+  strings; the guide creates the real Secret with
+  `kubectl create secret generic` from values kept wherever the
+  deployment keeps secrets, never by editing the template in
+  place),
   `job-postgres-init.yaml` (a one-shot Job running
   `psql "$ADMIN_URL" -f` over the mounted ConfigMap). The Job's
   credentials are an init-only Secret of their own
@@ -185,7 +192,9 @@ memory.
 
 - **kubeconform over `deploy/k8s/`**, `-strict -summary`, in the
   server workflow's `unit` job (it is seconds of work and needs no
-  service). The binary is a pinned release download with its sha256
+  service), with the two `.example` Secret templates passed by
+  explicit path so they are schema-checked without being
+  apply-shaped. The binary is a pinned release download with its sha256
   checked in the step, the same discipline every pinned tool in the
   workflow follows; the pin and checksum live in the step beside a
   comment naming where new checksums come from.
@@ -287,8 +296,14 @@ convention permits.
 ## Tests
 
 - The agreement test above (new, unit lane, no service needed;
-  reads the two files with `yaml.safe_load`, plain parsing, no
+  reads the files with `yaml.safe_load`, plain parsing, no
   kubernetes client).
+- The applicable-manifest guard, in the same test file: no file
+  matching `deploy/k8s/*.yaml` is a Secret and none carries a
+  placeholder or default credential value (the templates are
+  `.example` and outside the glob), so a
+  `kubectl apply -f deploy/k8s/` can never install known
+  credentials.
 - The docs workflow's link checker covers `docs/deployment.md` and
   the README edits; the census sweeps the new files' quoted
   commands (`kubectl`, `docker compose`, `psql` lines), so the
@@ -481,6 +496,13 @@ answer every finding, and a delta re-review confirms them.
    real Secret from an ignored local file or a
    `kubectl create secret` command in the guide, and test that no
    applicable manifest carries placeholder or default credentials.
+
+   *Resolution*: accepted in full. Both Secret templates carry the
+   `.example` suffix and sit outside the apply glob, kubeconform
+   checks them by explicit path, the guide creates the real Secrets
+   with `kubectl create secret generic`, and the
+   applicable-manifest guard asserts no `deploy/k8s/*.yaml` is a
+   Secret or carries a placeholder credential.
 
 10. **P2: M1 omits the census regeneration its own files can
     stale.** The new artifact headers quote commands and M1 runs the
