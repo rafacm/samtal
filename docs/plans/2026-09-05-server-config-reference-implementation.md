@@ -262,14 +262,16 @@ Run from `vinga-server/`, against the development Postgres on 5432.
 
 ### What was done
 
-Nine commits, ordered so that the one claim this milestone cannot
-assert is proven by where it sits. They are, in order: the database
-environment names moved to one home; `paragraph` and `cell` promoted;
-`BOOT_REFUSALS` declared; the renderer and its suite; the `HALF`
-selector with the regenerated `cli.md`; the committed page with its CI
-step and freshness pin; the domain preamble pointed at the new page,
-regenerating `domain-config.md`; the cross-links and the changelog; and
-the CLI's import inventory.
+Ordered so that the one claim this milestone cannot assert is proven by
+where it sits. The commits, in order: the database environment names
+moved to one home; `paragraph` and `cell` promoted; `BOOT_REFUSALS`
+declared; the renderer and its suite; the `HALF` selector with the
+regenerated `cli.md`; the committed page with its CI step and freshness
+pin; the domain preamble pointed at the new page, regenerating
+`domain-config.md`; the cross-links and the changelog; the CLI's import
+inventory; this record with the milestone tick and the census; and the
+live lane's refusal row, which the integration lane turned up after the
+tick and which is the eighth deviation below.
 
 **`config/models.py` is the one home of the database environment
 names.** `DATABASE_ENV_PREFIX` and the four `DATABASE_ENV_NAMES` came
@@ -344,7 +346,7 @@ commit, with its own regeneration of `domain-config.md`.
 
 ### Deviations from the plan
 
-Seven, none of them a change of direction, all recorded rather than
+Eight, none of them a change of direction, all recorded rather than
 absorbed.
 
 **The override scheme's own constants moved with the database names.**
@@ -388,6 +390,15 @@ already ends in `(default: domain)`. `show_default=False` is the
 `--mac` precedent, and `schema`'s `ENTITY` avoids the question only
 because its default is `None`.
 
+**The live lane's refusal table gained a sentence.** `reference extra`
+was a usage error while the verb took no arguments; the word is a half
+now, so the row that holds this command family to the whole of its
+stderr moves to the registry's sentence, read from the constant. The
+value it hands the command is the planted credential, because the
+positional is where this command's own input can carry one, and both
+cases over that table already assert the plant reaches neither stream,
+neither the server's logs nor the exception chain.
+
 **`test_cli_import_weight.py` gained a row.** That suite pins the
 grammar's whole import inventory in both directions, so the new module
 appearing on the CLI's path is a failure until it is named. It is named
@@ -424,18 +435,22 @@ Run from `vinga-server/`, against the development Postgres on 5432, with
 `PYTHONDONTWRITEBYTECODE=1` exported for everything run outside pytest.
 
 - `uv run ruff check .`: `All checks passed!`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`, which is how CI
-  runs the lane: `5558 passed, 19 skipped in 84.62s`.
 - `uv run pytest tests/unit -q` (serial): `5558 passed, 19 skipped in
-  600.60s`.
-- `uv run pytest tests/integration -q`: `243 passed in 356.99s`
+  588.09s`.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, which is how CI
+  runs the lane, on the finished tree: `5558 passed, 19 skipped in
+  85.69s`.
+- `uv run pytest tests/integration -q`: `243 passed in 354.36s`, after
+  the refusal row above; the run before it had that one row's two cases
+  red, which is how the changed behavior was found.
 - `python3 scripts/check_doc_links.py .` from the repository root:
-  `checked 196 files, 0 failures`.
+  `checked 195 files, 0 failures`.
 - The census manifest went stale, as the plan's risk list predicted: the
-  new page, the two READMEs, the changelog and the example file's header
-  quote command spellings. Regenerated with
+  new page, the two READMEs, the changelog, the example file's header and the
+  workflow's new step quote command spellings. Regenerated with
   `uv run python -m tests.unit.test_command_spellings` after staging the
-  documents, never by hand, in the same commit.
+  documents, never by hand, in the same commit; and again with the live
+  lane's refusal row, since the manifest records a file and a line.
   `uv run pytest tests/unit/test_command_spellings.py -q`: `48 passed`.
 - The five generated artifacts are what their generators render:
   `domain-config.md` (regenerated with the preamble change),
