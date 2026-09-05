@@ -114,15 +114,22 @@ memory.
   root filesystem with a `/tmp` emptyDir, `/data` from the PVC, env
   from the Secret and a plain ConfigMap-free env section for the
   `VINGA_DB_*` facts), `service.yaml`, `ingress.yaml` (above),
-  `pvc.yaml` (RWO), `secret.example.yaml` (the two secrets plus
-  `VINGA_DB_PASSWORD`, values as placeholders with the
-  refuse-to-guess header), `job-postgres-init.yaml` (a one-shot
-  `psql` Job that mounts a ConfigMap named in the guide). The SQL is
-  NOT committed twice: the guide documents
+  `pvc.yaml` (RWO), `secret.example.yaml` (the Deployment's Secret:
+  the two server secrets plus `VINGA_DB_PASSWORD`),
+  `job-postgres-init.yaml` (a one-shot Job running
+  `psql "$ADMIN_URL" -f` over the mounted ConfigMap). The Job's
+  credentials are an init-only Secret of their own
+  (`secret-init.example`: `ADMIN_URL`, the administrative connection
+  able to create roles and schemas; `VINGA_DB_USER`; and
+  `VINGA_DB_RO_PASSWORD`, required rather than defaulted so the
+  public `vinga_ro` convenience password cannot be installed by
+  omission), and the Deployment never references that Secret: the
+  administrative credential has no business in the serving pod. The
+  SQL is NOT committed twice: the guide documents
   `kubectl create configmap postgres-init
-  --from-file=deploy/postgres-init.sql` followed by applying the
-  Job, so the one committed copy of the SQL stays the one home and
-  the ConfigMap is derived from it at deploy time.
+  --from-file=deploy/postgres-init.sql` applied idempotently, so the
+  one committed copy of the SQL stays the one home and the ConfigMap
+  is derived from it at deploy time.
 - `deploy/docker-compose.production.yml` (new): above.
 - `docs/deployment.md` (new): the guide.
 - `.github/workflows/vinga-server.yml`: the validation steps (below;
@@ -282,6 +289,13 @@ answer every finding, and a delta re-review confirms them.
    Deployment the administrative credential, and test that the Job
    references the required keys and no default password appears in
    an applicable manifest.
+
+   *Resolution*: accepted in full. The layout now names
+   `secret-init.example` with exactly those three keys, the Job
+   draws from it and runs `psql "$ADMIN_URL" -f`, the Deployment is
+   barred from referencing it, and the agreement test asserts the
+   Job's env references those keys while the placeholder scan
+   (finding 9's) covers the default-password half.
 
 2. **P1: the documented upgrade path cannot rerun or wait for the
    one-shot Job.** `kubectl create configmap` fails once the name
