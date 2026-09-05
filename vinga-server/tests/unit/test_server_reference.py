@@ -514,22 +514,105 @@ def test_the_refusal_section_carries_exactly_the_registrys_sentences() -> None:
     assert rendered == [" ".join(row.sentence.split()) for row in BOOT_REFUSALS]
 
 
+# How pydantic renders a validator's own `ValueError` in `errors()`: a
+# fixed prefix, then the sentence and nothing else. Written out because
+# what the case below does is compare the whole message rather than look
+# for the sentence inside it: a validator that appended the value it
+# rejected would satisfy a containment check and leak on every surface
+# that renders one of these.
+RAISED = "Value error, {sentence}"
+
+
 @pytest.mark.parametrize(
     "refusal", BOOT_REFUSALS, ids=[row.validator for row in BOOT_REFUSALS]
 )
 def test_each_registry_row_is_provoked_by_its_own_misconfiguration(refusal) -> None:
     """A row that cannot be provoked is a rule the page publishes and the
     server does not enforce, which is the failure a rendered string
-    cannot show on its own."""
+    cannot show on its own.
+
+    One error, and its message is the row's sentence whole. Equality
+    rather than containment for the reason above it: the whole of what a
+    boot refusal says is a sentence this repository wrote, and anything
+    else in there is something a reader was not meant to be shown.
+    """
     with pytest.raises(ValidationError) as caught:
         refusal.model(**refusal.provoked_by)
 
     raised = [problem["msg"] for problem in caught.value.errors()]
-    assert len(raised) == 1, raised
-    assert refusal.sentence in raised[0]
-    for other in BOOT_REFUSALS:
-        if other.sentence != refusal.sentence:
-            assert other.sentence not in raised[0]
+    assert raised == [RAISED.format(sentence=refusal.sentence)]
+
+
+# Where a credential gets pasted while another key is misconfigured
+#
+# A boot refusal is composed from the fields it names, and the fields
+# beside those are whatever an operator wrote. One of them holding a
+# credential is an ordinary mistake, and the rule for every refusal in
+# this repository is that it names a place and a rule rather than
+# repeating a value, so a plant in a neighbouring key must reach neither
+# the sentence nor the chain it travels on.
+
+
+def free_text(model: type[BaseModel]) -> str | None:
+    """A field of this model that holds any string at all: no bound, no
+    validator, no shape. That is what a value pasted into the wrong key
+    lands in, and the model with none has no such key to plant in."""
+    validated = {
+        field
+        for decorator in model.__pydantic_decorators__.field_validators.values()
+        for field in decorator.info.fields
+    }
+    for name, info in model.model_fields.items():
+        if info.annotation is str and not info.metadata and name not in validated:
+            return name
+    return None
+
+
+def provocation(refusal) -> tuple[dict, str]:
+    """One row's misconfiguration as a configuration document, with a
+    credential-shaped value in a key beside the ones it names, and where
+    that key is.
+
+    The path is read off the model graph rather than written per row, so
+    a section that moved is nested where it moved to. The plant goes in
+    the refused model's own free-text field where it has one, and in the
+    enclosing `server` section where it does not: the conversations
+    section is booleans and bounded integers, and a string in one of
+    those is a parse failure rather than the refusal under test.
+    """
+    (path,) = [where for where, model in walked() if model is refusal.model]
+    section: dict = dict(refusal.provoked_by)
+    field = free_text(refusal.model)
+    if field is not None:
+        section[field] = SECRET
+    for segment in reversed(path.split(".")[1:]):
+        section = {segment: section}
+    if field is None:
+        beside = free_text(ServerConfig)
+        assert beside is not None, "no key of the server half holds free text"
+        section[beside] = SECRET
+        field = beside
+    return {"server": section}, field
+
+
+def test_a_refusal_says_nothing_of_the_keys_beside_the_ones_it_names() -> None:
+    """Every row provoked through the whole boot composition, with the
+    plant in a neighbouring key, and checked on the two surfaces a value
+    can leave by: the sentence an operator reads and the exception chain
+    behind it, which no assertion about a stream can reach."""
+    from tests.support.configs import load_config_from_data
+
+    for refusal in BOOT_REFUSALS:
+        data, field = provocation(refusal)
+        with pytest.raises(cli.ConfigError) as caught:
+            load_config_from_data(data)
+
+        message = str(caught.value)
+        assert refusal.sentence in message, refusal.validator
+        assert SECRET not in message, f"{refusal.validator}: leaked through {field}"
+        assert SECRET not in chain(caught.value), (
+            f"{refusal.validator}: on the chain, planted in {field}"
+        )
 
 
 def test_every_cross_field_validator_is_claimed_by_the_registry() -> None:
