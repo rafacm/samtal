@@ -1,0 +1,41 @@
+# The volume every engine caches into, mounted at /data.
+#
+# What is on it: the whisper models and Piper voices a first
+# conversation downloads, and, where recording is provisioned, whatever
+# the capture budget allows. What is not on it: the database, which is
+# bring-your-own and lives outside this cluster's business, and any
+# configuration, which is in that database.
+#
+# An emptyDir would work and is the wrong trade: the weights download
+# again on every reschedule, which turns a routine eviction into
+# minutes of cold start, and the startup budget in deployment.yaml
+# would have to cover it every time rather than once.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vinga-data
+  labels:
+    app.kubernetes.io/name: vinga
+spec:
+  accessModes:
+    # One writer, which is the topology rather than a limitation: one
+    # replica is the supported shape
+    # (`docs/adr/2026-09-04-one-replica-is-the-supported-topology.md`),
+    # and ReadWriteOnce is what says so to a scheduler. It is also what
+    # makes the Recreate strategy in deployment.yaml necessary rather
+    # than merely correct: a rolling update would ask two pods to hold
+    # this claim at once, and on most storage the new one would simply
+    # never schedule.
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Room for the default image's engines and their caches with
+      # headroom to spare: a whisper model is hundreds of megabytes and
+      # a voice is tens. Raise it if this deployment records
+      # conversations to disk; the guide prices that against the capture
+      # settings rather than repeating a number here.
+      storage: 10Gi
+  # storageClassName is deliberately unset, so the cluster's default
+  # class is used. Name one here when the default is not the class this
+  # data belongs on, which is the usual reason to touch this file at
+  # all.

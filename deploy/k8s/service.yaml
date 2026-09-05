@@ -1,0 +1,27 @@
+# The cluster-internal address of the one vinga pod.
+#
+# ClusterIP, deliberately: what reaches this server from outside is the
+# Ingress beside it, which routes exactly two paths. A LoadBalancer or a
+# NodePort here would put the whole port on the network, and the whole
+# port carries the configuration API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vinga
+  labels:
+    app.kubernetes.io/name: vinga
+spec:
+  type: ClusterIP
+  selector:
+    # The Deployment's pod labels. The agreement test asserts these are
+    # the same map, because a selector that stops matching is a Service
+    # with no endpoints and a manifest that still validates.
+    app.kubernetes.io/name: vinga
+  ports:
+    - name: http
+      port: 8003
+      # By name rather than by number, so the port is written once, in
+      # the container that listens on it. A renamed container port fails
+      # to resolve loudly; a mistyped number would route nowhere quietly.
+      targetPort: http
+      protocol: TCP
