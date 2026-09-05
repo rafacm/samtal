@@ -837,6 +837,13 @@ docs/plans/2026-09-04-reply-failure-fallback.md:445  historical  vinga events
 docs/plans/2026-09-04-simulator-tokenless-admission-implementation.md:181  historical  vinga-server config cli-reference
 docs/plans/2026-09-04-simulator-tokenless-admission-implementation.md:187  historical  vinga simulator
 docs/plans/2026-09-04-simulator-tokenless-admission.md:240  historical  vinga simulator run
+docs/plans/2026-09-05-server-config-reference.md:88  historical  vinga reference server
+docs/plans/2026-09-05-server-config-reference.md:102  historical  vinga-server config reference server
+docs/plans/2026-09-05-server-config-reference.md:239  historical  vinga reference server
+docs/plans/2026-09-05-server-config-reference.md:243  historical  vinga-server config reference server
+docs/plans/2026-09-05-server-config-reference.md:453  historical  vinga-server config reference server
+docs/plans/2026-09-05-server-config-reference.md:562  historical  vinga-server config reference
+docs/plans/2026-09-05-server-config-reference.md:570  historical  vinga reference
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:6527  generated  vinga ota-url
 docs/reference/api-openapi.json:7488  generated  vinga provider secret set
@@ -1247,12 +1254,12 @@ vinga-server/src/vinga_server/config/cli.py:3531  respell  config list
 vinga-server/src/vinga_server/config/cli.py:8145  respell  vinga provider
 vinga-server/src/vinga_server/config/cli.py:8145  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:199  respell  config schema
-vinga-server/src/vinga_server/config/docgen.py:589  respell  config schema
+vinga-server/src/vinga_server/config/docgen.py:596  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:174  respell  vinga apply
 vinga-server/src/vinga_server/config/loader.py:80  respell  vinga simulator run
-vinga-server/src/vinga_server/config/models.py:1879  respell  vinga memory
-vinga-server/src/vinga_server/config/models.py:1909  respell  vinga mcp-server status
-vinga-server/src/vinga_server/config/models.py:2532  respell  config schema
+vinga-server/src/vinga_server/config/models.py:2216  respell  vinga memory
+vinga-server/src/vinga_server/config/models.py:2246  respell  vinga mcp-server status
+vinga-server/src/vinga_server/config/models.py:2869  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:949  respell  vinga ota-url

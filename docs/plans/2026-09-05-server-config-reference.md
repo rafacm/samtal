@@ -391,8 +391,9 @@ module's.
 
 ## Milestones
 
-- [ ] **M1: the server-half models carry their own
-  documentation.** Descriptions on every field reachable from
+- [x] **[M1: the server-half models carry their own
+  documentation](2026-09-05-server-config-reference-implementation.md#m1-the-server-half-models-carry-their-own-documentation)**
+  (PR TBD). Descriptions on every field reachable from
   `ServerConfig`, docstrings on every reachable model
   (`ServerConfig` gains one), validator-enforced shapes stated in
   the descriptions of the fields they bound, the coverage test
