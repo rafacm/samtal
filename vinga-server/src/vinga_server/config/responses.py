@@ -666,8 +666,8 @@ class Applies(StrEnum):
     than one it read from a store runs nothing that reads what was just
     written, so what is true of the write is that it is stored and that
     a server booting from that store will serve it. Nothing is pending
-    against the process that answered, which is why no diff reports it
-    and why `DiffApplies` below leaves it out.
+    against the process that answered, which is why the comparison read
+    never reports this one and its own fields carry the other three.
     """
 
     RESTART = "restart"
