@@ -335,7 +335,10 @@ convention permits.
   manifests), `deploy/docker-compose.production.yml`, the
   kubeconform step with pinned binary and checksum, the
   `docker compose config` step with dummy env, the agreement test,
-  and M1's CHANGELOG entry naming the stance change. Design
+  M1's CHANGELOG entry naming the stance change, and the census
+  manifest regenerated after the artifact files are tracked (their
+  headers quote `kubectl`, `psql` and `docker compose` lines, and
+  M1's own unit lane runs the census). Design
   footprint: no new Python module beyond the test; the manifests
   derive their facts from the Dockerfile and the models, and the
   agreement test is the seam that keeps it so. Documentation
@@ -508,3 +511,7 @@ answer every finding, and a delta re-review confirms them.
     stale.** The new artifact headers quote commands and M1 runs the
     full unit suite. Regenerate and commit the manifest in M1 after
     the artifact files are tracked, and again in M2.
+
+    *Resolution*: accepted in full. M1's milestone now names the
+    census regeneration after the artifact files are tracked; M2's
+    already did.
