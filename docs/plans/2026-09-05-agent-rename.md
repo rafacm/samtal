@@ -544,8 +544,18 @@ rather than swallowing one:
 
 - `memory.store.rename_owner(connection, scope, old, new) -> int`,
   beside `erase_facts`, whose signature it follows.
-- `conversations.threads.rename_agent(connection, old, new) -> int`,
-  beside the other connection-taking functions in that module.
+- `conversations.store.rename_agent(connection, old, new) -> int`,
+  beside `purge`'s own caller and beside the chain it has to lock.
+  Beside the chain and not beside the SQL, which is the one placement
+  question here and is settled by an import: `CONVERSATIONS_CHAIN` is
+  declared in `conversations/store.py`, which already imports `threads`,
+  so a locking function in `threads.py` would have to import the chain
+  back and close a cycle. Putting it in the store also makes the record
+  half the mirror of the memory half, whose `purge` and `erase_facts`
+  live in `memory/store.py` for the same reason: a chain is a fact of
+  the store that owns it (`db/__init__.py:24-27`). The statement it
+  issues addresses `threads`' own table through the shared metadata,
+  which is not an import of anything new.
 
 `purge`'s docstring already states why the function takes the lock
 rather than the caller: it is what makes the ascending order a property
@@ -576,10 +586,10 @@ answers "no table" would let a rename report success while leaving
 memory behind, which is the exact defect this issue exists to end.
 
 **Imports rather than injection.** `config/store.py` gains two imports,
-`memory.store` and `conversations.threads`. Neither closes a cycle
-(`memory.store` imports `config.loader` and `config.models`;
-`conversations.threads` imports `config.models`; neither imports
-`config.store`), and neither reaches the CLI, whose import inventory
+`memory.store` and `conversations.store`. Neither closes a cycle
+(`memory.store` imports `config.loader`, `config.models` and
+`conversations.store`; `conversations.store` imports `config.models`;
+neither imports `config.store`), and neither reaches the CLI, whose import inventory
 does not contain `config.store` at all
 (`tests/unit/test_cli_import_weight.py:95-124`). The alternative,
 handing the two functions in as parameters the way `app.py` hands
@@ -628,8 +638,14 @@ beside the decision it belongs to.
   happened; nothing recovers either fact by re-reading the store.
 - **`memory/store.py` gains `rename_owner`**, one statement under the
   chain's lock, beside `erase_facts` which it mirrors.
-- **`conversations/threads.py` gains `rename_agent`**, the same shape,
-  beside the reads that filter on the column it moves.
+- **`conversations/store.py` gains `rename_agent`**, the same shape,
+  beside the chain whose lock it takes. Not `threads.py`, which owns the
+  reads that filter on the column: the chain is declared in the store
+  and the store already imports `threads`, so the lock cannot be taken
+  from there without a cycle. A chain module of its own was considered
+  and refused by the deletion test: one authoritative definition already
+  exists, in the module the guide says should hold it, and a third file
+  holding one constant would hide nothing.
 - **`conversations/store.py` gains the publication and the order's
   second holder**, beside `erased()` and `erasure_order()`: one function
   announcing a rename to the register of writers this process holds, and
@@ -898,7 +914,7 @@ where it is enforced rather than asserting it.
 ## Milestones
 
 - [ ] **M1: one transaction, three schemas.**
-  `memory.store.rename_owner` and `conversations.threads.rename_agent`,
+  `memory.store.rename_owner` and `conversations.store.rename_agent`,
   each taking the caller's connection, its own chain's lock as its first
   statement, and raising a classified failure; `ConfigStore.rename_agent`
   running the four phases and returning `Renamed`; the seven refusals as
@@ -911,7 +927,7 @@ where it is enforced rather than asserting it.
   cross-schema transaction, sits alone in its own review. Design
   footprint: deepens `config/store.py` (one verb whose caller learns
   nothing about three schemas), `memory/store.py` and
-  `conversations/threads.py` (one function each, beside the ones they
+  `conversations/store.py` (one function each, beside the ones they
   mirror); one new frozen result type beside the two that exist; no new
   module and no new seam beyond the two signatures. Documentation
   footprint: `CHANGELOG.md`, a dated execution record; the census
@@ -1044,6 +1060,21 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    `conversations/store.py`, or move the chain declaration to a
    dependency-neutral owner; a small chain module passes the deletion
    test if more than one caller needs one authoritative definition.
+
+   *Resolution*: accepted, with the first of the two options, and the
+   third refuted. The cycle is real (`conversations/store.py:101`
+   imports `threads`), so the locking seam moves into
+   `conversations/store.py`, beside the chain it takes and beside the
+   caller of `purge`, which also makes the record half the mirror of the
+   memory half: `purge` and `erase_facts` live in `memory/store.py` for
+   the same reason, that a chain is a fact of the store that owns it
+   (`db/__init__.py:24-27`). A chain module of its own is refused by the
+   deletion test rather than adopted: there is one authoritative
+   definition already, in the module that owns it, and the second caller
+   is a function this plan is putting in that same module. The statement
+   it issues reaches `threads`' table through the shared metadata, which
+   imports nothing new. The module layout, the seam description, the
+   import note and M1's deliverables all say `conversations.store` now.
 
 4. **P2: `rename_owner`'s advertised signature cannot enforce the memory
    collision.** Nothing in the schema prevents the merge, and an `int`
