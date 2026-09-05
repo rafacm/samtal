@@ -308,6 +308,18 @@ def erasures_announced_to(
 # register above gives: a deletion runs where no store object need
 # exist at all.
 #
+# A deletion is no longer its only holder. An agent rename is the same
+# shape of change: one transaction that moves rows a live writer is
+# still addressing, and a publication afterwards telling this process
+# what moved. Between its commit and its publication there is the same
+# instant, and a writer slipping into it would land a turn under a name
+# nothing answers to. So the rename holds this across its transaction
+# and `renamed()` exactly as a deletion holds it across its own and
+# `erased()`, and the property this lock is really about is the one both
+# of them need: every store change a live writer must observe atomically
+# is published under it. The name stayed the erasure's, because renaming
+# a merged name is a change neither holder needs.
+#
 # There are two chains under it now, because a deletion also takes the
 # memory of the threads it takes, and the order there is `db`'s:
 # ascending by key, the record chain's before the memory chain's, so two
@@ -319,12 +331,14 @@ _erasure_order = threading.Lock()
 
 @contextmanager
 def erasure_order() -> "Iterator[None]":
-    """Hold a deletion's place in the order above, for its transaction
-    and the publication that follows it.
+    """Hold a store change's place in the order above, for its
+    transaction and the publication that follows it.
 
-    Entered before the transaction is opened and left after `erased()`
-    has been called, which is what makes publishing after the commit
-    safe: a writer cannot slip its own transaction between the two.
+    Entered before the transaction is opened and left after the
+    publication has been made, which is what makes publishing after the
+    commit safe: a writer cannot slip its own transaction between the
+    two. Two changes hold it, and the pairing is the same both times: a
+    deletion with `erased()`, and an agent rename with `renamed()`.
     """
     with _erasure_order:
         yield
@@ -360,6 +374,48 @@ def erased(threads_gone: "Iterable[str]") -> None:
         writer.forget(named)
     for listener in listening:
         listener(named)
+
+
+def renamed(old: str, new: str) -> None:
+    """Tell whichever writer is recording in this process that the agent
+    it knows as `old` is now called `new`.
+
+    `erased()`'s sibling, reaching the same register of writers with a
+    different fact. A deletion says an id is gone and the writer decides
+    what that means for a turn already on its way; a rename says a name
+    has moved and the writer decides the same thing, which here is that
+    a session that opened under the old name goes on speaking as it and
+    the rows it writes from now on carry the new one.
+
+    Called after the renaming transaction has committed and inside
+    `erasure_order()`, which is the pair that makes both directions
+    right, for `erased()`'s own two reasons. After the commit, because a
+    rename that rolled back and had already published would have every
+    writer filing rows under a name no row answers to. Inside the order,
+    because after the commit is also after the chain locks were
+    released, and a writer must not be able to begin a marker in
+    between: it would read the moved thread row and be refused for
+    misattribution, and its whole batch would go.
+
+    The listeners are deliberately not told, and the asymmetry is the
+    decision rather than an omission. What a listener does with an
+    erasure is refuse writes to a thread that is gone; what it would do
+    with a rename is translate an agent name, and the memory store's
+    interface is that name in eight session-facing methods, while the
+    consequence of not translating is a row its own audit listing shows
+    and its own operator door can move. This function is the hook a
+    change of that decision would attach to.
+
+    A no-op rename is not published: nothing downstream would do
+    anything with it, and an entry mapping a name to itself would be a
+    translation that says nothing.
+    """
+    if old == new:
+        return
+    with _writers_lock:
+        live = list(_writers)
+    for writer in live:
+        writer.translate(old, new)
 
 
 # What a rename that would merge two histories is refused with, and the
@@ -684,6 +740,28 @@ class ConversationStore:
         self._opened_at: dict[str, float] = {}
         self._dropped: dict[str, int] = {}
         self._warned: set[str] = set()
+        # What each recording session's agents are called now, for the
+        # sessions that may still hand this store a name a rename has
+        # moved. Written by a rename's publication on a request thread
+        # and read by the writer inside its durable transaction, so it is
+        # guarded like the producer state above rather than owned by
+        # either side.
+        #
+        # Per session and not per process, which is a correctness rule
+        # rather than a size one. A publication marks the sessions live
+        # at that instant and no others: a rename frees the old name, an
+        # operator may create a new agent under it, and a process-wide
+        # entry would file that new agent's turns under the renamed one.
+        # A session opened after the publication read its name out of the
+        # store after the rename and has nothing to translate, which is
+        # what the empty map every session starts with says.
+        #
+        # An entry is retired where `_devices` is retired, after a close
+        # has been committed rather than when it arrives, so a batch
+        # queued behind the close still finds its translation on the way
+        # out. That is the bound: no timer, no lifecycle of its own, and
+        # nothing that outlives the session that needed it.
+        self._renames: dict[str, dict[str, str]] = {}
         # Writer state, touched by the writer thread only.
         self._batches: dict[str, _Batch] = {}
         # Each recording session's device, kept because a thread's row
@@ -802,6 +880,11 @@ class ConversationStore:
                 return
             self._opened_at[session_id] = opened_at
             self._dropped.setdefault(session_id, 0)
+            # Nothing to translate, and saying so is what makes this
+            # session translatable at all: a rename published from here
+            # on marks it, and one published before this read its name
+            # out of a store the rename had already changed.
+            self._renames[session_id] = {}
             self._queue.put_nowait(Open(session_id, opened_at, dict(manifest)))
 
     def record_event(
@@ -909,6 +992,35 @@ class ConversationStore:
         with self._lock:
             self._published.update(threads_gone)
 
+    def translate(self, old: str, new: str) -> None:
+        """This agent is called something else now; every session being
+        recorded may still hand over the name it opened with.
+
+        `forget`'s sibling, and called the same way: on a request thread,
+        once the rename has committed, inside `erasure_order()`. It does
+        the least it can too, which here is recording the fact against
+        every session live at this instant. What it means for a row is
+        decided at the durable-write boundary, where the name is
+        resolved once per turn.
+
+        Every session live now and no session opened later, which is the
+        whole of the lifecycle decision: a name this rename frees may be
+        given to a new agent, and a session opened under that new agent
+        read its name after the rename and must be left alone.
+
+        Composed on insert rather than walked on read, so a chain of
+        renames stays flat: every entry already pointing at the old name
+        is moved on to the new one first, and then the old name itself is
+        entered. A session that opened as `a` through `a -> b` and
+        `b -> c` therefore resolves `a` to `c` in one lookup.
+        """
+        with self._lock:
+            for moved in self._renames.values():
+                for opened_as, current in list(moved.items()):
+                    if current == old:
+                        moved[opened_as] = new
+                moved[old] = new
+
     def _stores_events(self) -> bool:
         """Whether an events row would land. One rule, consulted twice:
         the writer applies it, because storage policy belongs with
@@ -978,6 +1090,7 @@ class ConversationStore:
             self._commit(item.session, closing=item)
             self._batches.pop(item.session, None)
             self._devices.pop(item.session, None)
+            self._retire(item.session)
             self._lost.pop(item.session, None)
             self._prune()
 
@@ -1083,6 +1196,7 @@ class ConversationStore:
             # are answered as the dropped records they are.
             self._batches.pop(session_id, None)
             self._devices.pop(session_id, None)
+            self._retire(session_id)
             self._settle(batch, landed=False)
             self._release(len(batch.events))
             return
@@ -1352,14 +1466,58 @@ class ConversationStore:
         ).first()
         return found is not None
 
+    def _naming(self, session_id: str) -> dict[str, str]:
+        """What the agents this session may name are called now, read
+        once for the whole marker.
+
+        Once, and inside the durable transaction, for the reason the
+        published ids are read there: this runs under `_erasure_order`,
+        which a rename holds across its commit AND its publication, so
+        the answer cannot change while this transaction is open. Either
+        the rename went first and its translation is here, or it has not
+        begun and its rows are not there to disagree with.
+
+        A copy rather than the store's own dictionary, so the resolution
+        below reads no shared state and holds no lock while it writes.
+        Empty is the ordinary answer, which is a deployment where nothing
+        has been renamed while a session was talking.
+        """
+        with self._lock:
+            return dict(self._renames.get(session_id) or {})
+
+    def _retire(self, session_id: str) -> None:
+        """This session's translations, dropped with the rest of its
+        state.
+
+        Called where `_devices` is dropped, which is after the close has
+        been committed rather than when it arrived: a batch queued behind
+        the close is written by that same commit, and it still finds its
+        translation. A tombstoned session drops these with everything
+        else, because there is nothing left of it to write.
+        """
+        with self._lock:
+            self._renames.pop(session_id, None)
+
     def _write(self, connection: Any, session_id: str, batch: _Batch) -> None:
         # One stamp for the marker, so a turn and the activity it moves
         # on its thread land on one instant rather than on two readings
         # of the clock a microsecond apart.
         at = self._stamp()
+        # And one reading of what this session's agents are called now,
+        # for the same reason: every row this marker writes says the same
+        # thing about a name.
+        moved = self._naming(session_id)
         for item in batch.turns:
+            # Resolved once per turn, here, at the boundary where a name
+            # enters the record, and handed to both rows below. A
+            # translation applied at the landing alone would file a turn
+            # under the old name onto a thread under the new one, which
+            # is a row disagreeing with the row above it; one value and
+            # two uses is what makes that impossible rather than
+            # unlikely.
+            agent = moved.get(item.record.agent, item.record.agent)
             turn = connection.execute(
-                turns.insert().values(self._turn_row(session_id, item))
+                turns.insert().values(self._turn_row(session_id, item, agent, moved))
             )
             turn_id = turn.inserted_primary_key[0]
             rows = [
@@ -1380,7 +1538,7 @@ class ConversationStore:
                 connection,
                 threads.Landing(
                     conversation=item.record.conversation,
-                    agent=item.record.agent,
+                    agent=agent,
                     device=self._devices.get(session_id),
                     heard=item.record.heard if self.text else None,
                     at=at,
@@ -1467,13 +1625,27 @@ class ConversationStore:
             "dropped": lost if self.metrics else 0,
         }
 
-    def _turn_row(self, session_id: str, item: Turn) -> dict[str, Any]:
+    def _turn_row(
+        self, session_id: str, item: Turn, agent: str, moved: dict[str, str]
+    ) -> dict[str, Any]:
+        """One turn's row. The agent arrives as an argument rather than
+        being read off the record, because the thread this same
+        transaction lands the turn on is written from the same value: a
+        row may not disagree with the row above it.
+
+        What that value is, when a rename has happened while this session
+        was talking, is the name the agent has now. This row is not a
+        dated row being edited, it is a new write, and a new write says
+        who is speaking. `sessions.agent` beside it is the other case and
+        stays verbatim, because its subject is the moment the session
+        opened.
+        """
         record = item.record
         return {
             "session": session_id,
             "conversation": record.conversation,
             "t_ms": item.t_ms,
-            "agent": record.agent,
+            "agent": agent,
             "heard": record.heard if self.text else None,
             "heard_duration_s": record.heard_duration_s if self.metrics else None,
             "language": record.language,
@@ -1481,7 +1653,9 @@ class ConversationStore:
                 record.language_confidence if self.metrics else None
             ),
             "reply": record.reply if self.text else None,
-            "legs": [self._leg(leg) for leg in record.legs] if record.legs else None,
+            "legs": (
+                [self._leg(leg, moved) for leg in record.legs] if record.legs else None
+            ),
             "asr_ms": record.asr_ms if self.metrics else None,
             "first_token_ms": record.first_token_ms if self.metrics else None,
             "llm_ms": record.llm_ms if self.metrics else None,
@@ -1494,11 +1668,18 @@ class ConversationStore:
             "tool_calls": len(record.tools),
         }
 
-    def _leg(self, leg: TurnLeg) -> dict[str, Any]:
+    def _leg(self, leg: TurnLeg, moved: dict[str, str]) -> dict[str, Any]:
         """One handover leg. Its halves follow different switches, which
-        is why the entry is built here rather than serialized whole."""
+        is why the entry is built here rather than serialized whole.
+
+        Its agent is resolved through the same translations the turn's
+        own was, and a leg naming a second renamed agent is resolved on
+        its own account: the leg says who spoke this part of the reply,
+        it is written by the insert above at the same instant, and one
+        row may not name one agent two ways.
+        """
         return {
-            "agent": leg.agent,
+            "agent": moved.get(leg.agent, leg.agent),
             "text": leg.text if self.text else None,
             "input_tokens": leg.input_tokens if self.metrics else None,
             "output_tokens": leg.output_tokens if self.metrics else None,
@@ -1689,4 +1870,5 @@ __all__ = [
     "erasures_announced_to",
     "open_conversations",
     "rename_agent",
+    "renamed",
 ]
