@@ -398,7 +398,7 @@ def _options_sections() -> list[str]:
             "",
             f"`providers.{stage}.<name>`",
             "",
-            *_paragraph(_lead(model)),
+            *paragraph(_lead(model)),
             "",
             *_options_tables(model),
         ]
@@ -461,7 +461,7 @@ def _entity_section(candidate: DocumentedShape) -> list[str]:
         "",
         f"`{candidate.location}`",
         "",
-        *_paragraph(candidate.purpose),
+        *paragraph(candidate.purpose),
         "",
     ]
     if candidate.command:
@@ -469,7 +469,7 @@ def _entity_section(candidate: DocumentedShape) -> list[str]:
     lines += _table(candidate.model)
     lines.append("")
     for note in candidate.notes:
-        lines += [*_paragraph(note), ""]
+        lines += [*paragraph(note), ""]
     if candidate.examples:
         lines.append("Examples:")
         lines.append("")
@@ -484,7 +484,7 @@ def _setting_section(setting: Setting) -> list[str]:
         "",
         f"`{setting.name}`",
         "",
-        *_paragraph(DOMAIN_DESCRIPTIONS[setting.name]),
+        *paragraph(DOMAIN_DESCRIPTIONS[setting.name]),
         "",
         "```bash",
         setting.command,
@@ -492,18 +492,24 @@ def _setting_section(setting: Setting) -> list[str]:
         "",
     ]
     for note in setting.notes:
-        lines += [*_paragraph(note), ""]
+        lines += [*paragraph(note), ""]
     return lines
 
 
-def _paragraph(text: str) -> list[str]:
+def paragraph(text: str) -> list[str]:
     """One paragraph, wrapped. The committed reference is read as a file
     as often as it is rendered, and an unwrapped paragraph makes every
     edit to it a one-line diff of the whole thing.
 
     Never inside a word or across a hyphen: the default would break
     `aa-bb-cc-dd-ee-ff` in half, and a code span split over two lines
-    renders with a space in the middle of the MAC address."""
+    renders with a space in the middle of the MAC address.
+
+    Public, for the reason `nested_model` is: how this repository's
+    generated pages wrap is not this document's private business, and
+    `server_reference.py` is its second caller. A second copy of these
+    three arguments beside it would be a page that could come to wrap
+    differently from the one next to it."""
     return textwrap.wrap(text, width=PROSE_WIDTH, break_long_words=False, break_on_hyphens=False)
 
 
@@ -514,8 +520,8 @@ def _table(model: type[BaseModel]) -> list[str]:
         "| --- | --- | --- | --- |",
     ]
     rows += [
-        f"| `{name}` | `{_cell(type_name(info.annotation))}` | `{default(info)}` | "
-        f"{_cell(info.description)} |"
+        f"| `{name}` | `{cell(type_name(info.annotation))}` | `{default(info)}` | "
+        f"{cell(info.description)} |"
         for name, info in model.model_fields.items()
     ]
     if model.model_config.get("extra") == "allow":
@@ -523,11 +529,16 @@ def _table(model: type[BaseModel]) -> list[str]:
     return rows
 
 
-def _cell(text: str | None) -> str:
+def cell(text: str | None) -> str:
     """Text inside a table cell. A pipe ends a cell even inside a code
     span, so a union type has to be escaped; and a missing description
     is a defect this makes visible rather than an empty cell to skim
-    past."""
+    past.
+
+    Public beside `paragraph`, and for the same reason: the server-half
+    reference renders tables of the same models and has to escape them
+    the same way, and a second copy of this would be the place the two
+    pages come to disagree about what a pipe does."""
     if not text:
         return "**(undescribed)**"
     return text.replace("|", "\\|")
@@ -990,7 +1001,7 @@ def recipe_lines() -> list[str]:
         lines += [f"### {recipe.title}", ""]
         if recipe.location:
             lines += [f"`{recipe.location}`", ""]
-        lines += [*_paragraph(recipe.purpose), "", "```bash", *recipe.commands, "```", ""]
+        lines += [*paragraph(recipe.purpose), "", "```bash", *recipe.commands, "```", ""]
     return lines
 
 
