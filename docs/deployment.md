@@ -380,10 +380,14 @@ kubectl create configmap postgres-init \
 # 2. The Job's own credentials, which are not the server's. Creating
 #    roles and schemas is an administrative right the serving pod
 #    never has, and deployment.yaml references no key of this Secret.
+#    Through the same dry-run pipe as the ConfigMap, for the same
+#    reason: a plain `create` fails once the name exists, and this
+#    step is on the path a retry takes.
 kubectl create secret generic vinga-init \
   --from-literal=ADMIN_URL="$ADMIN_URL" \
   --from-literal=VINGA_DB_USER=vinga \
-  --from-literal=VINGA_DB_RO_PASSWORD="$(openssl rand -hex 32)"
+  --from-literal=VINGA_DB_RO_PASSWORD="$VINGA_DB_RO_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
 
 # 3. Delete the previous run and make a new one. Applying a completed
 #    Job does not rerun it.
@@ -394,12 +398,24 @@ kubectl apply -f deploy/k8s/job-postgres-init.yaml
 kubectl wait --for=condition=complete --timeout=5m job/vinga-postgres-init
 ```
 
+Every step above is written to be run again, and that is the whole
+property: both `create` commands go through the dry-run pipe, the Job
+is deleted before it is recreated, and a rerun that finds everything
+already in place changes nothing.
+
 `VINGA_DB_RO_PASSWORD` is required rather than defaulted: the SQL falls
 back to the public string `vinga_ro` for the loopback compose case, so
 omitting it installs a well-known password on a role that can read
-every conversation this server ever recorded. `ADMIN_URL` is a
-superuser or the database's owner with `CREATEROLE`, and it names the
-database to provision, so a typo there provisions the wrong one.
+every conversation this server ever recorded. Generate it once with
+`openssl rand -hex 32`, keep it wherever this deployment keeps its
+secrets, and pass that kept value on every rerun. Generating a fresh
+one each time would work and would be wrong: the SQL rotates the role's
+password rather than failing on it, so every upgrade would silently
+invalidate whatever credential the last analyst session was using.
+
+`ADMIN_URL` is a superuser or the database's owner with `CREATEROLE`,
+and it names the database to provision, so a typo there provisions the
+wrong one.
 
 **A failed Job stops the upgrade with the Deployment untouched.** That
 is the property the order buys, and it is why the wait is a step rather
@@ -410,9 +426,11 @@ failure with `kubectl logs job/vinga-postgres-init`; `ON_ERROR_STOP=1`
 means the last statement in that log is the one that failed, rather
 than one error scrolling past in the middle of a file that exited 0.
 
-The init Secret exists for the length of the transaction. Delete it
-when the Job has completed, and make it again for the next upgrade's
-rerun.
+The init Secret is an administrative credential with no reader between
+transactions, so delete it once the Job has completed. Step 2 makes it
+again for the next rerun, and makes it whether or not it is still
+there: a failed run leaves it behind, and applying it over itself is
+the same operation as creating it.
 
 ### Upgrading
 
