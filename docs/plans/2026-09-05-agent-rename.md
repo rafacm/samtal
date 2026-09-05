@@ -237,19 +237,21 @@ undone by running another command with information the operator still
 has" (`cli-guide.md:947-951`), which is why a delete confirms and a
 `set` does not. A rename is undone by `vinga agent rename <new> <old>`,
 with information the operator has in the shell history of the command
-they just typed, and it moves the memory back with it. So
+they just typed, and it moves the memory and the threads back with it.
+So
 `destroys=False`, no confirmation, no `--force` row, and the verb does
 not join the destructive rows in `cli.py`
 (`grep -n "destroys=True" src/vinga_server/config/cli.py` finds nine,
 one of them generated per entity kind).
 
 That is only true while the rename cannot merge two things into one,
-which is what makes the collision rule below load-bearing rather than
-tidy: renaming onto a name that already holds memory would be a merge,
-and no second rename could separate what merged. **The refusals are what
-keep the verb reversible, and the reversibility is what keeps it out of
-the confirmation table.** If a later change ever licenses a merge, the
-verb becomes destructive on that day and the row says so.
+which is what makes the destination rule below load-bearing rather than
+tidy. Renaming onto a name that already holds memory rows, or threads,
+merges two pasts, and afterwards nothing can tell them apart: a rename
+back would carry the strangers with it. **The refusals are what keep the
+verb reversible, and the reversibility is what keeps it out of the
+confirmation table.** If a later change ever licenses a merge, the verb
+becomes destructive on that day and the row says so.
 
 Rejected alternative: confirming anyway, because a rename "feels"
 alarming. The guide's counterexample to that is its own rule that the
@@ -260,20 +262,28 @@ stops being read.
 
 ### Which refusals exist, as a closed set
 
-Six, and the set is closed because each is a state the transaction can
+Seven, and the set is closed because each is a state the transaction can
 be in before it writes anything. Each is one fixed sentence in
 `config/store.py` beside the sentences the other writes use.
+
+**The rule they come from is one sentence: the destination name is free
+everywhere this rename would write.** Free in the domain half, free in
+memory, and free in the record's one live column. It is a single rule
+rather than three checks because it is what reversibility means: a
+rename may never merge two pasts into one, since no second rename can
+tell them apart afterwards.
 
 | State | Answer | Status |
 | --- | --- | --- |
 | no agent under the old name | `NO_SUCH_AGENT`, the sentence every agent read already uses | 404 |
 | an agent already exists under the new name | fixed sentence, naming neither | 409 |
 | memory rows already exist under the new name | fixed sentence, naming neither | 409 |
+| conversation threads are recorded under the new name | fixed sentence, naming neither | 409 |
 | the new name is not addressable (slash, control character, empty once stripped) | `_identifier`/`_check_addressable`, unchanged and reused | 422 |
 | the new name is the old name once stripped | fixed sentence | 422 |
 | the database is contended, or a lock times out | `DatabaseBusyError`, unchanged | 409 |
 
-Notes on three of them.
+Notes on four of them.
 
 - **The memory collision is a real state and not a theoretical one.**
   Memory rows outlive the agent they belong to by design: the listings
@@ -286,8 +296,22 @@ Notes on three of them.
   the server's own spelling exactly as the five refusals catalogued by
   [the state-vocabulary plan](2026-09-05-server-state-vocabulary.md) do.
   That class is [#410](https://github.com/rafacm/vinga/issues/410)'s to
-  fix wholesale, and this refusal joins it rather than inventing a
-  seventh shape.
+  fix wholesale, and this refusal joins it rather than inventing an
+  eighth shape.
+- **The thread collision is the same state in the record, and it is why
+  the memory rule alone is not enough.** A thread outlives the agent
+  that wrote it exactly as a fact does: `record.conversations` carries no
+  foreign key, an unbound agent can be deleted while its threads stay,
+  and retention prunes them by idleness rather than by ownership. If
+  threads already sit under the destination name, moving the source's
+  threads onto it merges two histories that nothing can separate again:
+  a rename back would carry the strangers with it, and the thread guard
+  would then hand one agent another's past. So it is refused under the
+  record chain's lock inside the same transaction that would do the
+  update, which is what makes the check and the write one decision
+  rather than two. The remedy is the listing and the deletion the
+  conversation noun already has, named in the server's own spelling like
+  the one above and joining the same #410 class.
 - **Renaming the default agent, and renaming a bound agent, are
   ordinary.** They are the cases the six-write workaround cannot do at
   all, and they are the reason the rewrite is one transaction:
@@ -635,7 +659,12 @@ Reusing the assets that exist wherever the assertion already has a home.
   file aside and `touch` it on the way back, never `git checkout`, per
   `AGENTS.md`).
 - **The refusals, one case each**, asserting the fixed sentence and, for
-  the two collisions, that neither name appears in it. The no-leak case
+  the three collisions, that neither name appears in it. Each collision
+  case builds the destination in one store and leaves it empty in the
+  other two, so a check that stopped running is a failure rather than a
+  case that passes for the wrong reason: an agent under the new name, a
+  memory fact under it with no agent, and orphaned threads under it with
+  neither. The no-leak case
   plants a name carrying a URL credential as the *old* name and asserts
   the acknowledgement's line carries the stripped form, which is #381's
   door and #382's policy in this surface's terms.
@@ -650,7 +679,10 @@ Reusing the assets that exist wherever the assertion already has a home.
 - **The reversibility claim is a test rather than a sentence**, because
   it is what the confirmation decision rests on: rename and rename back,
   and the store, the memory rows (held ones included) and the threads are
-  byte-identical to what they were.
+  byte-identical to what they were. It runs a second time with a
+  stranger present: memory rows and threads under a third name that was
+  never involved are untouched by both renames, which is the assertion a
+  merge would fail even though the round trip on its own would pass.
 - **Existing suites that translate rather than grow**:
   `test_config_api_writes.py` gains the route's cases beside the other
   writes; `test_memory_store.py` and `test_memory_api.py` gain the owner
@@ -746,9 +778,11 @@ where it is enforced rather than asserting it.
   `memory.store.rename_owner` and `conversations.threads.rename_agent`,
   each taking the caller's connection, its own chain's lock as its first
   statement, and raising a classified failure; `ConfigStore.rename_agent`
-  running the four phases and returning `Renamed`; the six refusals as
-  fixed sentences; the sentinel sweep, the inventory pin, the atomicity
-  pin, the reversibility pin, and the third path added to the
+  running the four phases and returning `Renamed`; the seven refusals as
+  fixed sentences, each destination check run under its own store's lock
+  in the transaction that would write; the sentinel sweep, the inventory
+  pin, the three collision cases, the atomicity
+  pin, the reversibility pin with a stranger present, and the third path added to the
   lock-order walk. No route and no CLI, so nothing an operator can reach
   changes and main stays releasable; the risky half, which is the
   cross-schema transaction, sits alone in its own review. Design
@@ -804,6 +838,23 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    409 without naming caller text; document the remedy; test a
    destination holding orphaned threads and test that a rename back
    leaves them where they were.
+
+   *Resolution*: accepted in full, and the premise checked before
+   accepting: `record.conversations` carries no foreign key, an unbound
+   agent can be deleted while its threads stay, and retention prunes by
+   idleness rather than by ownership, so a destination holding orphaned
+   threads is an ordinary state rather than a constructed one. The plan
+   now states the rule the three checks come from as one sentence, that
+   the destination name is free everywhere this rename would write, and
+   says why it is one rule: a rename may never merge two pasts, because
+   no second rename can tell them apart afterwards. The refusal set is
+   seven, the thread collision carries its own note with the remedy and
+   the #410 class it joins, the confirmation section's reasoning now
+   rests on the destination rule rather than on the memory half of it,
+   each collision case builds the destination in one store and leaves it
+   empty in the other two so a check that stopped running fails, and the
+   reversibility pin runs a second time with a stranger present, which
+   is the assertion a merge fails while a plain round trip passes.
 
 2. **P1: renaming a thread's agent breaks the sessions in flight on it.**
    `threads.landed()` raises `MisattributedTurn(ANOTHER_AGENT)` when an
