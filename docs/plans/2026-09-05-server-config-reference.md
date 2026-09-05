@@ -97,9 +97,18 @@ precedent for "one renderer, a selector for which document" is
 `schema [ENTITY]`, whose bare invocation renders the whole domain.
 So `reference` gains one optional positional, `HALF`, choices
 `domain` and `server`, default `domain`: the bare invocation stays
-byte-identical (the committed-copy pin proves it), every existing CI
-line and documentation sentence stays true, and the new page is
-`vinga-server config reference server`. A selector that names
+byte-identical, every existing CI line and documentation sentence
+stays true, and the new page is
+`vinga-server config reference server`. The byte-identical claim is
+proven by sequencing, not asserted: the selector lands in a commit
+that touches neither `docgen.reference()` nor
+`docs/reference/domain-config.md`, so the existing committed-copy
+pin (which compares the renderer's output against the committed
+page) proves bare `reference` unchanged exactly because the
+committed page did not move in that commit; the domain preamble's
+pointer to the new page is a separate, later commit that changes
+the content deliberately and regenerates `domain-config.md` with
+it, reviewed as the intentional edit it is. A selector that names
 neither half is refused with a fixed sentence naming the two that
 exist, in the shape `docgen.entity()` refuses an unknown entity:
 what exists is the useful half, and what was typed is never quoted
@@ -270,9 +279,12 @@ module's.
   `test_the_committed_reference_matches_the_models`, with the
   regenerate command in the failure message.
 - **The selector**: `reference` bare and `reference domain` are
-  byte-equal to the domain page (the existing committed-copy pin
-  already holds bare `reference` to `domain-config.md`, which is
-  the behavior pin for the reshape); an unknown half is one fixed
+  byte-equal to the domain page, and the reshape commit is ordered
+  so the pin means something: the selector commit leaves
+  `docgen.reference()` and the committed `domain-config.md`
+  untouched, so the committed-copy pin passing there is the proof
+  that bare output did not move, and the preamble edit follows as
+  its own commit with its own regeneration; an unknown half is one fixed
   sentence, exit 1, naming `domain` and `server` and quoting
   nothing back, with a planted credential-shaped selector asserted
   absent from stderr, stdout and the exception chain.
@@ -357,6 +369,14 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    current bytes, add the selector proving bare output unchanged,
    then make the preamble update a separate intentional content
    change.
+
+   *Resolution*: accepted in full. M2's commits are now ordered in
+   the plan: the selector commit touches neither `docgen.reference()`
+   nor the committed `domain-config.md`, so the existing
+   committed-copy pin passing on that commit is the proof that bare
+   `reference` did not move; the preamble pointer and its
+   regeneration follow as their own commit, reviewed as an
+   intentional content change.
 
 2. **P2: the proposed child-process isolation test is impossible as
    written.** Applying the models-only pin to
