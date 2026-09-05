@@ -165,6 +165,12 @@ ALLOWED_IMPORTS = frozenset(
         # `config.models`, and none of the consumers this pin exists to
         # keep out is reachable through it.
         "vinga_server.config.provider_options",
+        # And the one name added by #386, for a reason of the same
+        # shape: a kind's notice carries the boundaries it announces as
+        # the tokens the API publishes, which are declared in
+        # `responses`, and that module imports pydantic and nothing of
+        # this server.
+        "vinga_server.config.responses",
         "vinga_server.runtime",
         "vinga_server.runtime.prompt",
         "vinga_server.tools",
@@ -185,7 +191,9 @@ def _facts(entries: Sequence[Any]) -> dict[str, dict[str, object]]:
     A model and a predicate are compared as their qualified names. Both
     are identities rather than values here: which model owns the shape
     and which rule decides that a key carries a credential, and a name
-    that moved module is a change worth failing on.
+    that moved module is a change worth failing on. A notice is compared
+    field by field, because both of its halves are declared facts: the
+    sentence a write is answered with, and the boundaries it announces.
     """
 
     def readable(value: object) -> object:
@@ -193,6 +201,11 @@ def _facts(entries: Sequence[Any]) -> dict[str, dict[str, object]]:
             return f"{value.__module__}.{value.__qualname__}"
         if callable(value):
             return f"{value.__module__}.{value.__qualname__}"
+        if dataclasses.is_dataclass(value):
+            return {
+                field.name: readable(getattr(value, field.name))
+                for field in dataclasses.fields(value)
+            }
         if isinstance(value, tuple):
             return [readable(item) for item in value]
         return value

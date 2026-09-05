@@ -208,7 +208,7 @@ def test_a_claim_says_the_device_needs_no_restart(
 ) -> None:
     response = _claim(client, _waiting(pending))
 
-    assert boundaries(response.json()["notice"]) == {CHECK_IN}
+    assert boundaries(response.json()) == {CHECK_IN}
 
 
 def test_a_claim_naming_an_agent_this_server_is_not_serving_says_reload(
@@ -222,7 +222,7 @@ def test_a_claim_naming_an_agent_this_server_is_not_serving_says_reload(
     response = _claim(client, _waiting(pending), "written-since-boot")
 
     assert response.status_code == 200, response.text
-    assert boundaries(response.json()["notice"]) == {CHECK_IN, RELOAD}
+    assert boundaries(response.json()) == {CHECK_IN, RELOAD}
 
 
 def test_a_claim_retires_the_code(client: TestClient, pending: PendingDevices) -> None:
@@ -635,7 +635,7 @@ def test_the_acknowledgement_is_about_the_row_and_not_the_request(
 
     assert answer.status_code == 200, answer.text
     assert answer.json()["wrote"] == f"device {MAC} bound to assistant"
-    assert boundaries(answer.json()["notice"]) == {CHECK_IN}
+    assert boundaries(answer.json()) == {CHECK_IN}
     # And the row really does hold the stripped name, which is what
     # makes the notice the true one.
     assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}

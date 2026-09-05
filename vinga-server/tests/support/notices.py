@@ -8,12 +8,17 @@ sentence that carries it is not: prose gets edited, and a suite that
 compared the whole string turned an edit that changed no boundary into
 a wall of red.
 
-So this is the one place that reads a notice. It knows the phrase each
-boundary is announced by and answers in tokens, and every suite
-downstream asserts tokens. An edit to a notice that keeps its boundary
-keeps every one of them green; an edit that loses the boundary fails
-here, loudly, because a notice naming no boundary at all is a notice
-that stopped doing its job.
+So this is the one place that reads a notice, and it answers in the
+tokens the API publishes, which every suite downstream asserts. An edit
+to a notice that keeps its boundary keeps every one of them green.
+
+What it no longer does is guess. A body carries `applies` beside the
+sentence, so the boundary is read off the field where there is a body;
+what a command printed is matched against the sentences this server
+composes, each of which carries its own boundaries
+(`entities.Notice`). Neither is a table of phrases kept by hand beside
+the real one, which is what this module used to be and what a prose
+edit could silently move.
 
 The four, and why they are four rather than two:
 
@@ -32,33 +37,54 @@ A binding to an agent this server is not serving names two of them at
 once, which is why the answer is a set rather than a token.
 """
 
-from vinga_server.config.entities import PROGRAM
+from collections.abc import Mapping
 
-CHECK_IN = "check-in"
-RELOAD = "reload"
-RESTART = "restart"
-STORE_BOOT = "store-boot"
+from vinga_server.config import entities
+from vinga_server.config.responses import Applies
 
-# The phrase each boundary is announced by. Fragments rather than
-# sentences, and each one the part an operator acts on: what to wait for,
-# or what to run.
-_ANNOUNCED_BY = {
-    CHECK_IN: "OTA check",
-    RELOAD: f"{PROGRAM} apply",
-    RESTART: "next server start",
-    STORE_BOOT: "starts from this store",
-}
+CHECK_IN = Applies.CHECK_IN
+RELOAD = Applies.RELOAD
+RESTART = Applies.RESTART
+STORE_BOOT = Applies.STORE_BOOT
+
+# Every sentence this server composes, with the boundaries each one
+# announces, read off the pairing rather than restated. The five are
+# module constants because the two that depend on what the server is
+# serving are chosen per request from these same five.
+_COMPOSED: tuple[entities.Notice, ...] = (
+    entities.RESTART_NOTICE,
+    entities.BINDING_NOTICE,
+    entities.APPLY_NOTICE,
+    entities.BINDING_UNSERVED_NOTICE,
+    entities.SNAPSHOT_NOTICE,
+)
 
 
-def boundaries(notice: str) -> frozenset[str]:
-    """Which boundaries one acknowledgement's notice names.
+def boundaries(answer: Mapping[str, object] | str) -> frozenset[Applies]:
+    """Which boundaries one write is waiting at.
 
-    A notice that names none is the failure this raises on: it would
-    leave an operator with a write and no idea when it lands, and it is
-    also how a suite would silently stop asserting anything.
+    Given a body (an acknowledgement, or one entry of an applied
+    document), the field is the answer and nothing is inferred. Given
+    what a command printed, the answer is the boundaries of every
+    sentence this server composes that the output carries, which is how
+    a rendering is held to the same fact its body states: the CLI prints
+    the sentence whole, so a printed notice is one of the five or the
+    output is not a notice at all.
+
+    An output naming no boundary at all is the failure this raises on:
+    it would leave an operator with a write and no idea when it lands,
+    and it is also how a suite would silently stop asserting anything.
     """
-    found = frozenset(
-        boundary for boundary, phrase in _ANNOUNCED_BY.items() if phrase in notice
-    )
-    assert found, f"the notice names no boundary at all: {notice!r}"
+    if isinstance(answer, Mapping):
+        applies = answer["applies"]
+        assert isinstance(applies, tuple | list), f"not a sequence of tokens: {applies!r}"
+        found = frozenset(Applies(token) for token in applies)
+    else:
+        found = frozenset(
+            boundary
+            for notice in _COMPOSED
+            if notice.sentence in answer
+            for boundary in notice.applies
+        )
+    assert found, f"the answer names no boundary at all: {answer!r}"
     return found

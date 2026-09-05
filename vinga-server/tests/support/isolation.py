@@ -46,6 +46,14 @@ ALLOWED_IMPORTS = frozenset(
         # re-exports the engine layer; that is why the declaration lives
         # on this side of the boundary at all.
         "vinga_server.config.provider_options",
+        # The name this set gained for #386, and the reason it is safe:
+        # `responses` declares the shapes this API answers with, imports
+        # pydantic and nothing of this server, and is on the rendering
+        # path because a descriptor's notice carries the boundaries it
+        # announces as the tokens declared there. The `heavy` assertion
+        # in each caller is what holds that claim rather than this
+        # comment, and it is still empty.
+        "vinga_server.config.responses",
         "vinga_server.runtime",
         "vinga_server.runtime.prompt",
         "vinga_server.tools",
