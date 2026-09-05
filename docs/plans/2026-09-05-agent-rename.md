@@ -481,22 +481,47 @@ position, and publishes a different fact:
    sibling that reaches the same register of writers.
 4. Leave the order.
 
-**What a writer does with it.** The conversation writer keeps a small
-map from a name it may still be handed to the name that name is now,
-and applies it to a landing's agent before `landed()` sees it. Both
-defects close at once: the materialized case matches the stored row and
-is stored rather than dropped, and the un-materialized case INSERTs
-under the new name. Chained renames stay flat rather than needing a
-walk, by composing on insert: adding `old -> new` first rewrites every
-entry whose value is `old`. The map is bounded by the number of renames
-in one process's lifetime, which is bounded by an operator typing them.
+**What a writer does with it, and where.** The conversation writer keeps
+a map from a name it may still be handed to the name that name is now,
+and resolves it **once per turn at the durable-write boundary**, before
+either row is built. The placement is the whole of this rule and it is
+not free to move: `_write` inserts the turn row and then builds the
+`Landing`, and `_turn_row` takes the agent straight off the record
+(`conversations/store.py:1234-1264`, `:1342-1365`), so a translation
+applied at the landing alone would file a turn under the old name onto a
+thread under the new one, which is a row disagreeing with the row above
+it. One resolution, one value, both uses: the turn's `agent`, each of
+its `legs`, and the landing. Both defects close with it: the
+materialized case matches the stored row and is stored rather than
+dropped, and the un-materialized case INSERTs under the new name.
+Chained renames stay flat rather than needing a walk, by composing on
+insert: adding `old -> new` first rewrites every entry whose value is
+`old`.
 
-**What that makes `turns.agent` say**, because it is the one thing the
-translation decides rather than preserves: a turn spoken before the
-rename keeps the old name and a turn spoken after it carries the new
-one. That is what a dated column is supposed to say, since at the moment
-of that turn the agent's name was the new one, and it is the reading
-this plan's own line already implies.
+**What that decides about the record, stated as one line.** A row
+**already written** is dated record and is never touched: the rename
+rewrites no turn, no session and no event that exists. A row **written
+after** the rename by a writer that still holds the old name is not a
+dated row being edited, it is a new write, and a new write carries the
+name the agent has now. The two halves of that line are what the plan's
+earlier "the record stays as written" means precisely, and the third
+case is the one that would otherwise be argued each time it came up:
+
+| Written | Carries |
+| --- | --- |
+| `turns.agent`, after the rename | the new name: this turn was spoken now |
+| `turns.legs[].agent`, after the rename | the new name, and for the same reason; a row may not disagree with itself |
+| `conversations.agent` (materialize or move) | the new name, which is what keeps the thread reachable |
+| `sessions.agent`, `sessions.agents`, even when the insert lands after the rename | the old name, verbatim: the column's subject is the moment the session opened, and that moment is before the rename |
+| anything committed before the rename | unchanged, whatever it holds |
+| emitted events and capture manifests | unchanged; they are what was said at the time and nothing rewrites them |
+
+The `sessions` row is the interesting one, and it is deliberate rather
+than an oversight: it says what the session opened with
+(`conversations/schema.py:145-156`), so translating it would make it
+answer a question it was not asked. A reader who sees a session opened
+as one name whose turns were spoken under another is reading the rename,
+which is what happened.
 
 **And the process boundary, stated.** The register and the lock are
 process-local, exactly as the erasure's are, and that is sound for the
@@ -695,11 +720,15 @@ beside the decision it belongs to.
   announcing a rename to the register of writers this process holds, and
   the comment above `_erasure_order` gains the rename as a second holder
   of the same rule.
-- **`ConversationStore` gains the translation**, one map and one lookup
-  applied where a landing's agent enters, beside `_discard_dead` which
-  is the same idea for the same reason. Not a module: it is four lines
-  in the object that already subscribes to what a store change publishes,
-  and a module beside it would be a name that hides nothing.
+- **`ConversationStore` gains the translation**, one map and one
+  resolution at the durable-write boundary, beside `_discard_dead` which
+  is the same idea for the same reason. `_write` resolves the name once
+  per turn and hands it to both `_turn_row` and the `Landing`, so
+  `_turn_row` takes the resolved name as an argument rather than reading
+  it off the record: one value, two rows, no chance of the pair
+  disagreeing. Not a module: it is a few lines in the object that
+  already subscribes to what a store change publishes, and a module
+  beside it would be a name that hides nothing.
 - **`config/entities.py` gains one `Notice`**, the sixth, in the file
   that already owns the pairing of a sentence with the boundaries it
   announces.
@@ -851,12 +880,16 @@ Reusing the assets that exist wherever the assertion already has a home.
   lock's own claim: a durable batch cannot commit between the rename's
   commit and its publication, driven by a gate in that instant the way
   the erasure suite drives its own.
-- **The translation's own pins**: a landing for an agent nothing renamed
-  is untouched; a chained rename resolves in one step, so a landing
-  under the first name lands under the third; and a turn spoken before
-  the rename keeps the old name in `turns.agent` while one spoken after
-  it carries the new, which is the dated column saying what was true
-  when.
+- **The translation's own pins, asserted on the rows rather than on the
+  thread.** A landing for an agent nothing renamed is untouched; a
+  chained rename resolves in one step, so a landing under the first name
+  lands under the third; and the post-rename turn is read back whole,
+  asserting `turns.agent` and every `legs[].agent` carry the new name
+  while the turn committed before the rename still carries the old one
+  and the session row carries the name it opened with. Read back rather
+  than inferred from the thread's owner, because a landing-only
+  translation passes a thread-owner assertion and writes exactly the
+  disagreeing row this pin exists to catch.
 - **The competing write, between the check and the update.** A second
   writer adds a fact under the destination name while a rename is
   between its memory check and its memory update, driven by the
@@ -1066,8 +1099,10 @@ where it is enforced rather than asserting it.
   after it commits, still inside the order, through a sibling of
   `erased()` that reaches the same register of writers; the comment
   above `_erasure_order` gains the rename as its second holder; the
-  conversation writer keeps the composed map and translates a landing's
-  agent before `landed()` reads it; the forced-interleaving cases for a
+  conversation writer keeps the per-session map and resolves the name
+  once at the durable-write boundary, using that one value for the turn
+  row, its legs and the landing, and leaving the session row's own
+  columns verbatim; the forced-interleaving cases for a
   materialized and an un-materialized thread, the case that proves a
   durable batch cannot commit between the commit and the publication,
   and the translation's own three pins; the follow-up issue for the
@@ -1370,6 +1405,27 @@ amendments. 1 P1, 1 P2 and 1 P3.
    the plan should state the distinction crisply: rows written before
    the rename are dated record and stay, and rows written after it by a
    stale writer are new writes carrying the current name.
+
+   *Resolution*: accepted in full, and reproduced by reading before
+   amending: `_write` inserts the turn and then builds the `Landing`,
+   and `_turn_row` reads `record.agent`, so the plan as written would
+   have filed a turn under the old name onto a thread under the new one.
+   The resolution moves to the durable-write boundary: `_write` resolves
+   the name once per turn and hands that one value to `_turn_row` and to
+   the `Landing`, so `_turn_row` takes it as an argument rather than
+   reading the record. `legs[].agent` is translated with it, because a
+   row may not disagree with itself and a leg is written by the same
+   insert at the same instant. `sessions.agent` and `sessions.agents`
+   stay verbatim even when the opening insert lands after the rename,
+   deliberately: that column's subject is the moment the session opened,
+   which is before the rename. The plan now states the line as three
+   cases in a table, with the crisp version the finding asked for above
+   it: a row already written is dated record and is never touched, a row
+   written after the rename by a stale writer is a new write carrying
+   the current name, and a column whose subject is an earlier moment
+   keeps that moment's name. The pin reads the row back rather than the
+   thread's owner, which is what a landing-only translation would have
+   passed.
 
 2. **P2: the refusal set is counted two ways.** Seven in the closed-set
    section and in M1, "six-state" in the standing-lenses answer. Pick
