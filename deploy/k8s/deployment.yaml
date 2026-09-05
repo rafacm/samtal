@@ -3,10 +3,36 @@
 # Plain committed manifests rather than a chart: there is one topology
 # to describe and no variants to parameterize, so a template engine
 # would add a language between an operator and the five facts they have
-# to get right. What is here is applied with `kubectl apply -f
-# deploy/k8s/`, and the two `.example` templates beside it are outside
-# that glob deliberately, because they carry placeholder credentials
-# that would satisfy every presence check the server makes.
+# to get right.
+#
+# These are applied in an order, one resource at a time, and never as
+# one bulk apply of the directory. The provisioning Job has to run and
+# complete before this Deployment changes, because a release that moves
+# `postgres-init.sql` is one an image started ahead of the rerun
+# refuses; and a Job's pod template is immutable, so an apply over a
+# completed Job fails rather than rerunning it. A sweep of the
+# directory would do both wrong at once: update this Deployment and
+# then fail on the Job, leaving the new image booting against a
+# database nothing had reprovisioned. The order:
+#
+#   1. the two Secrets, created out of band from the `.example`
+#      templates beside this file, never by applying them;
+#   2. `pvc.yaml`;
+#   3. the init transaction, which is one thing in three steps: apply
+#      the ConfigMap idempotently
+#      (`kubectl create configmap postgres-init
+#      --from-file=deploy/postgres-init.sql --dry-run=client -o yaml |
+#      kubectl apply -f -`), delete the Job if it is there and create
+#      it again, then `kubectl wait --for=condition=complete` on it.
+#      A failure here stops the upgrade with this Deployment untouched;
+#      `job-postgres-init.yaml` carries the commands.
+#   4. this file, then `service.yaml`, then `ingress.yaml`.
+#
+# An upgrade is that transaction rerun before the image tag below
+# changes, which is the README's rerun-then-boot order, and `Recreate`
+# is what guarantees the old pod is gone before the new one migrates.
+# M2's deployment guide walks all of it; this is the order, not the
+# walkthrough.
 #
 # Every value below that is a placeholder is a placeholder an operator
 # replaces, and each one says so where it stands: the image tag, the
