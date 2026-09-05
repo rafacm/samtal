@@ -78,6 +78,7 @@ from vinga_server.config.docgen import API_OPTIONS_NOTE
 from vinga_server.config.entities import (
     BINDING_NOTICE,
     BINDING_UNSERVED_NOTICE,
+    RENAME_UNSERVED_NOTICE,
     RESTART_NOTICE,
     SNAPSHOT_NOTICE,
 )
@@ -100,6 +101,7 @@ from vinga_server.config.models import (
     DomainConfig,
     FieldProblem,
     normalize_mac,
+    without_url_credential,
 )
 from vinga_server.config.provider_options import component_name, declared_options
 from vinga_server.config.responses import (
@@ -107,6 +109,7 @@ from vinga_server.config.responses import (
     PROBLEM_MEDIA_TYPE,
     PROBLEM_TITLES,
     Acknowledgement,
+    AgentRename,
     AppliedDocument,
     AssembledPrompt,
     ConfigDiff,
@@ -134,7 +137,7 @@ from vinga_server.config.responses import (
     request_body,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
-from vinga_server.config.store import Applied, ConfigStore
+from vinga_server.config.store import Applied, ConfigStore, Renamed
 from vinga_server.conversations import api as conversations
 from vinga_server.db import open_database
 from vinga_server.events import ServerEvents
@@ -403,6 +406,7 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (
     DeviceBinding,
     DefaultAgentName,
+    AgentRename,
     SecretValue,
     MemoryCorrection,
     MemoryStateKey,
@@ -435,6 +439,12 @@ _DEVICE_BODY = (
 _DEFAULT_AGENT_BODY = (
     'the body has to be a JSON object with exactly one key, "name", holding the '
     "agent's name as a string. Nothing sent is quoted back"
+)
+
+_RENAME_BODY = (
+    'the body has to be a JSON object with exactly one key, "to", holding the name '
+    "the agent is to have, as a string. Nothing sent is quoted back, which on this "
+    "endpoint covers the new name in every refusal it can meet"
 )
 
 _SECRET_BODY = (
@@ -2156,6 +2166,11 @@ def _entity_writes(api: FastAPI) -> None:
     is one write path: the CLI is a client of these routes and prints
     what they answered.
 
+    One act here is not a write of a kind and says so by having a notice
+    of its own: renaming an agent moves rows in three schemas, so what
+    it is waiting at depends on which of them it moved rather than on
+    the kind it moved them for (`_rename_notice`).
+
     A fragment is handed to the repository unread (`RawBody`), which is
     the rule the module docstring gives: FastAPI's own validation echoes
     what it rejected, and a fragment can carry a pasted credential.
@@ -2342,6 +2357,49 @@ def _entity_writes(api: FastAPI) -> None:
         default agent still names it."""
         store.delete_agent(name)
         return _acknowledge(f"agent {name} deleted", _AGENT.notice)
+
+    @api.post(
+        "/agents/{name}/rename",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+        openapi_extra=request_body(AgentRename),
+    )
+    def rename_agent(
+        name: str,
+        body: RawBody,
+        store: StoreDep,
+        snapshot_only: SnapshotOnlyDep,
+    ) -> dict[str, Any]:
+        """Give one agent another name, moving every live reference to it
+        in the same transaction: its device bindings, the default agent
+        if it was one, what it remembered, and the conversation threads
+        it owns.
+
+        The act the delete-and-create workaround cannot make. A binding
+        and the default agent each refuse the delete half while they
+        name the agent, so the workaround is six writes with the memory
+        lost in the middle, and this is one transaction that leaves
+        nothing dangling or writes nothing at all.
+
+        What it does not rewrite is the record of what happened. A turn
+        spoken last month was spoken by an agent whose name at the time
+        was the old one, and the row saying so is evidence rather than a
+        reference, so the sessions, the turns and the events keep the
+        names they were written with.
+
+        A POST because it is not idempotent: run twice, the second run
+        finds no agent under the old name and answers 404. The new name
+        is a body rather than a second path segment because it is what
+        the request carries rather than part of what it addresses, and
+        it is handed to the repository unread.
+
+        Refused 409 when the destination is occupied, by an agent, by
+        remembered facts or by recorded threads, since a rename may
+        never merge two pasts into one; 422 when the new name is not a
+        name this deployment can address, or is the one the agent
+        already has. No refusal quotes either name."""
+        renamed = store.rename_agent(name, _to(body))
+        return _acknowledge(_renamed(renamed), _rename_notice(renamed, snapshot_only))
 
     @api.put(
         "/agent-defaults",
@@ -2753,6 +2811,66 @@ def _binding_notice(
     return BINDING_UNSERVED_NOTICE if unloaded else BINDING_NOTICE
 
 
+def _rename_notice(renamed: Renamed, snapshot_only: bool) -> entities.Notice:
+    """When a rename takes effect, which depends on what it rewrote.
+
+    Three arms, chosen from the transaction's own result. A rename that
+    moved the agents row alone is waiting where every other write of
+    that kind waits, so it answers with the kind's own notice rather
+    than with a second copy of it: the install that puts the stored
+    configuration on the running server. One that moved a device binding
+    or the default agent
+    with it is waiting at two boundaries at once, because those rows are
+    live: the sentence for that is `RENAME_UNSERVED_NOTICE`, which says
+    what a rename is rather than what one binding is. And a server that
+    reads no store answers before either of them, exactly as a device
+    write does.
+
+    Deliberately not asked of the loaded agents, which is the one place
+    this differs from `_binding_notice` above and the reason it is a
+    function of its own rather than a call to that one. That question is
+    whether this server already serves the named agent, and for a bind
+    it is sound; for a rename it is not, because a server may serve an
+    agent under the new name and it will not be this one. So the arm is
+    a fact of this write, read off the two fields `Renamed` carries for
+    exactly this: a rewrite target added later without a reader here is
+    visible in review rather than silently unannounced.
+    """
+    if snapshot_only:
+        return SNAPSHOT_NOTICE
+    if renamed.devices or renamed.default_agent:
+        return RENAME_UNSERVED_NOTICE
+    return _AGENT.notice
+
+
+def _renamed(renamed: Renamed) -> str:
+    """What a rename says it did: the two names the rows now hold.
+
+    Composed from the transaction's result rather than from the request,
+    the way `bind_device`'s line is, so that a name arriving with spaces
+    around it is reported as the row stores it rather than as it was
+    typed.
+
+    Both names are stored identities by the time they reach this, so
+    both may be spoken, and the old one goes through the strip every
+    display of a stored identity goes through (#381, #382): a row
+    written before the addressability rule can carry a URL credential in
+    its name, and this line travels out as a response body and into
+    whatever log a client keeps. Belt and braces rather than a reachable
+    path, and the unit test that pins it says so: such a name holds a
+    slash, so no path segment addresses it and no request can reach this
+    with one. The new name needs no such strip and gets one anyway,
+    because a composer that treated the two halves of one line
+    differently would ask every later reader to work out which half was
+    which; it passed `_check_addressable` a moment ago, which refuses
+    the slash such a URL holds.
+    """
+    return (
+        f"agent {without_url_credential(renamed.old)} renamed to "
+        f"{without_url_credential(renamed.new)}"
+    )
+
+
 def _unloaded(agents: Sequence[str], loaded: Collection[str]) -> list[str]:
     """The names a write mentioned that this server has not built an
     agent for, which is what stands between the write and the device."""
@@ -2790,6 +2908,23 @@ def _name(body: object) -> str:
     value = _sole_value(body, "name", _DEFAULT_AGENT_BODY)
     if not isinstance(value, str):
         raise ConfigError(_DEFAULT_AGENT_BODY)
+    return value
+
+
+def _to(body: object) -> str:
+    """The name a rename is to give the agent, read and not looked at.
+
+    Handed to the repository exactly as it arrived, which is the rule
+    the other three readers keep for the same reason: what a name is
+    allowed to be is the repository's decision and is made once there,
+    and a check repeated here would be a second statement of it that
+    could come to disagree. Emptiness is not this reader's business
+    either, unlike the secret's above: a blank name is a name the
+    addressability check refuses with its own sentence.
+    """
+    value = _sole_value(body, "to", _RENAME_BODY)
+    if not isinstance(value, str):
+        raise ConfigError(_RENAME_BODY)
     return value
 
 
@@ -3140,6 +3275,7 @@ __all__ = [
     # they are named here because this is the module that puts them on
     # routes, and it is the name every caller already knows them by.
     "Acknowledgement",
+    "AgentRename",
     "AssembledPrompt",
     "ConfigDiff",
     "ConfigDocument",

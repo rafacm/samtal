@@ -140,6 +140,25 @@ def test_every_live_write_names_the_same_boundary(client: TestClient) -> None:
         assert boundaries(answer.json()) == {STORE_BOOT}
 
 
+def test_a_rename_says_it_is_stored_and_waits_for_a_start(
+    client: TestClient,
+) -> None:
+    """The third arm of the rename's boundary choice, which is this
+    mode's rather than the rename's.
+
+    Its other two arms are about a running server: whether the install
+    is all a rename waits for, or whether a device binding moved with
+    the agent and is live now. Neither is true here. This server
+    re-reads nothing, so what the rename can promise is what every write
+    in this mode promises, that the rows are stored.
+    """
+    answer = client.post(f"{MOUNT_PATH}/agents/assistant/rename", json={"to": "poet"})
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["wrote"] == "agent assistant renamed to poet"
+    assert boundaries(answer.json()) == {STORE_BOOT}
+
+
 def test_a_server_reading_a_store_answers_all_three_as_usual(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

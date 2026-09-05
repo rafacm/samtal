@@ -148,6 +148,11 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/prompt-fragments/{name}": ["delete", "get", "put"],
         "/agents": ["get"],
         "/agents/{name}": ["delete", "get", "put"],
+        # The one act on an entity that is not a write of it: renaming
+        # moves rows in three schemas and is not idempotent, so it is a
+        # POST on the agent rather than a PUT of an attribute it has no
+        # reader for.
+        "/agents/{name}/rename": ["post"],
         "/agent-defaults": ["get", "put"],
         "/devices": ["get"],
         "/devices/pending": ["get"],
@@ -275,6 +280,7 @@ def test_a_write_declares_the_entity_schema_it_takes() -> None:
         # the device, and the agents are the same argument.
         ("/devices/pending/{code}", "post", "DeviceBinding"),
         ("/default-agent", "put", "DefaultAgentName"),
+        ("/agents/{name}/rename", "post", "AgentRename"),
         # The one body that is the whole configuration rather than one
         # entry of it: a partial `DomainConfig`, whose every field has a
         # default, so the schema of the document is the schema of a

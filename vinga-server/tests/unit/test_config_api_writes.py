@@ -25,8 +25,14 @@ from fastapi.testclient import TestClient
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
 from tests.support.stores import holding_the_write_lock, the_lock_held
+from vinga_server import logs
 from vinga_server.config import entities
-from vinga_server.config.api import APPLY_BODY_LIMIT, build_api
+
+# `_renamed` is the acknowledgement's line composer, reached by its own
+# name for the one assertion the route cannot carry: a stored name
+# holding a URL credential holds a slash, so no request can address one,
+# and the strip on it has to be pinned at the composer or nowhere.
+from vinga_server.config.api import APPLY_BODY_LIMIT, _renamed, build_api
 from vinga_server.config.entities import (
     APPLY_NOTICE,
     BINDING_UNSERVED_NOTICE,
@@ -40,7 +46,7 @@ from vinga_server.config.secrets import (
     generate_key,
     load_keys,
 )
-from vinga_server.config.store import ConfigStore
+from vinga_server.config.store import ConfigStore, Renamed
 from vinga_server.db import open_database
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -132,6 +138,7 @@ WRITES = [
     ("put", "/devices/aa:bb:cc:dd:ee:ff", {"agents": ["sam"]}),
     ("put", "/default-agent", {"name": "sam"}),
     ("delete", "/default-agent", None),
+    ("post", "/agents/sam/rename", {"to": "poet"}),
 ]
 
 
@@ -965,6 +972,16 @@ MALFORMED_DEFAULT_AGENT = [
     ["sam"],
 ]
 
+MALFORMED_RENAME = [
+    {},
+    {"name": "poet"},
+    {"to": "poet", "extra": 1},
+    {"to": None},
+    {"to": ["poet"]},
+    ["poet"],
+    "poet",
+]
+
 MALFORMED_SECRET = [
     {},
     {"value": SECRET},
@@ -994,6 +1011,18 @@ def test_a_default_agent_body_of_the_wrong_shape_is_refused(
 
     assert response.status_code == 422
     assert '"name"' in response.json()["detail"]
+
+
+@pytest.mark.parametrize("body", MALFORMED_RENAME)
+def test_a_rename_body_of_the_wrong_shape_is_refused(
+    client: TestClient, body: object
+) -> None:
+    _pipeline(client)
+
+    response = client.post("/agents/sam/rename", json=body)
+
+    assert response.status_code == 422
+    assert '"to"' in response.json()["detail"]
 
 
 @pytest.mark.parametrize("body", MALFORMED_SECRET)
@@ -1033,6 +1062,226 @@ def test_a_body_that_is_not_json_at_all_is_refused_without_echoing_it(
         assert SECRET not in response.text
         assert "Traceback" not in response.text
     assert SECRET not in caplog.text
+
+
+# Renaming an agent
+#
+# The one act here that is not a write of a kind: it moves rows in three
+# schemas in one transaction, so what it is waiting at depends on which
+# of them it moved. The transaction itself and its seven refusals are
+# pinned against the repository (`test_agent_rename.py`); what is
+# asserted here is what the route answers, which is the acknowledgement
+# it composes, the arm it chooses, the statuses the refusals travel out
+# under, and that neither name leaks on any of them.
+#
+# Two of the three arms are here. The third belongs to the mode that
+# decides it rather than to this route: a server that reads no store
+# answers every write with the same sentence, and the rename joins the
+# others there (`test_config_snapshot_mode.py`).
+#
+# The client half is the milestone after this one. `Act.read()` validates
+# an answer rather than rendering one, so an assertion about what a
+# command prints belongs where the command exists.
+
+
+# A name carrying a URL credential, which is the shape a paste has and
+# the reachable no-leak case here: the new name arrives in a body, which
+# is where a paste lands, and it is refused because such a URL holds a
+# slash. The old name cannot be reached this way at all, for the same
+# reason: no path segment addresses a name with a slash in it, which
+# `config/views.py` already measures for the reads.
+PASTED_NAME = f"https://user:{PASTED}@example.invalid/agent"
+
+
+def _renamed_agent(client: TestClient, old: str = "sam", new: str = "poet"):
+    return client.post(f"/agents/{quote(old, safe='')}/rename", json={"to": new})
+
+
+def test_a_rename_says_what_it_did_in_the_names_the_rows_now_hold(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """Composed from the transaction's result rather than from the
+    request, which is what `bind_device`'s line is composed from and for
+    the same reason: a name typed with spaces around it is stored
+    stripped, and a line built from the request would report a name no
+    row holds."""
+    _pipeline(client)
+
+    answer = _renamed_agent(client, new="  poet  ")
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["wrote"] == "agent sam renamed to poet"
+    domain = store.load().domain
+    assert "sam" not in domain.agents
+    assert "poet" in domain.agents
+
+
+def test_a_rename_that_moved_the_row_alone_waits_at_the_install(
+    client: TestClient,
+) -> None:
+    """Nothing live moved, so the rename waits exactly where every other
+    write of this kind waits."""
+    _pipeline(client)
+
+    answer = _renamed_agent(client)
+
+    assert boundaries(answer.json()) == {RELOAD}
+
+
+@pytest.mark.parametrize("live", ["binding", "default"])
+def test_a_rename_that_moved_a_live_reference_names_both_boundaries(
+    client: TestClient, live: str
+) -> None:
+    """The rows a running server re-reads as a device asks for them
+    moved with the agent, so both halves are true at once: the device
+    meets the moved reference at its next check-in, and the agent under
+    its new name arrives at the install."""
+    _pipeline(client)
+    if live == "binding":
+        client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
+    else:
+        client.put("/default-agent", json={"name": "sam"})
+
+    answer = _renamed_agent(client)
+
+    assert answer.status_code == 200, answer.text
+    assert boundaries(answer.json()) == {RELOAD, CHECK_IN}
+    assert answer.json()["notice"] == entities.RENAME_UNSERVED_NOTICE.sentence
+
+
+def test_the_arm_is_chosen_by_what_moved_and_not_by_what_is_served(
+    database: DatabaseConfig,
+) -> None:
+    """The one place this differs from a device write, driven on the
+    case that tells them apart.
+
+    This server is serving an agent called `poet`, and the store holds
+    one called `sam` and no `poet` at all. A rename that asked whether
+    the destination name is being served would answer that it is, and it
+    would be wrong: a rename is precisely the act that moves a name onto
+    a different body, so the agent this server is serving under that name
+    is not the one that just took it. The arm is a fact of the
+    transaction, which moved the row and nothing live.
+    """
+    api = build_api(TOKEN, database, lambda: frozenset({"sam", "poet"}))
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as serving:
+        _pipeline(serving)
+
+        answer = _renamed_agent(serving)
+
+    assert answer.status_code == 200, answer.text
+    assert boundaries(answer.json()) == {RELOAD}
+
+
+def test_renaming_an_agent_that_is_not_there_is_404(client: TestClient) -> None:
+    _pipeline(client)
+
+    answer = _renamed_agent(client, old="nobody")
+
+    assert answer.status_code == 404
+    assert "agents" in refused(answer.json(), 404)
+
+
+def test_an_occupied_destination_is_409_and_names_neither_name(
+    client: TestClient,
+) -> None:
+    """The status the typed conflict carries, asserted through the
+    transport rather than off the table that maps it: a plain
+    `ConfigError` would have read as a malformed request, which is what
+    an occupied destination is not.
+
+    Occupied by an agent here, which is the one of the three destination
+    states this route can arrange on its own; the memory and thread
+    collisions raise the same class through the same boundaries and are
+    driven against the repository, where the rows can be planted.
+    """
+    _pipeline(client)
+    client.put("/agents/poet", json={"prompt": "You are a poet."})
+
+    answer = _renamed_agent(client)
+
+    detail = refused(answer.json(), 409)
+    assert answer.status_code == 409
+    assert "sam" not in detail
+    assert "poet" not in detail
+
+
+def test_the_name_the_agent_already_has_is_422(client: TestClient) -> None:
+    """Compared with the surrounding whitespace taken off, which is what
+    every path here stores, so a name differing only in spacing is the
+    same name.
+
+    Driven on an agent whose name is not a substring of the refusal
+    itself: `sam` is, and a no-echo assertion that cannot tell a quoted
+    name from a word of English is not an assertion.
+    """
+    _pipeline(client)
+    client.put("/agents/gardener", json={"prompt": "You are a gardener."})
+
+    answer = _renamed_agent(client, old="gardener", new=" gardener ")
+
+    assert answer.status_code == 422
+    assert "gardener" not in refused(answer.json(), 422)
+
+
+def test_a_new_name_carrying_a_credential_is_refused_and_never_echoed(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The reachable no-leak case, on the door a paste actually lands
+    in. The new name arrives in this request, so it is caller text and
+    is echoed nowhere: not in the body, not in a header, and not in a
+    log record in either format this server writes one in."""
+    _pipeline(client)
+
+    with caplog.at_level(logging.DEBUG):
+        answer = _renamed_agent(client, new=PASTED_NAME)
+
+    assert answer.status_code == 422
+    for rendering in (answer.text, str(dict(answer.headers)), *_logged(caplog)):
+        assert PASTED not in rendering
+        assert PASTED_NAME not in rendering
+
+
+def test_the_line_strips_a_credential_out_of_a_stored_name() -> None:
+    """The other door, pinned where it lives because the route cannot
+    reach it.
+
+    A name carrying a URL credential holds a slash, and no path segment
+    addresses one, which `config/views.py` already measures for the
+    reads. So a stored row written before the addressability rule is
+    unreachable through this route and stays unreachable, and the strip
+    on the old name is belt and braces exactly as #382 records it is on
+    the write path. This is the composer over such a row, which is the
+    only way the assertion can be made at all.
+    """
+    line = _renamed(
+        Renamed(
+            old=PASTED_NAME,
+            new="poet",
+            devices=(),
+            default_agent=False,
+            facts=0,
+            threads=0,
+        )
+    )
+
+    assert PASTED not in line
+    # The host is kept exactly as it was written and everything before
+    # the last `@` goes, which is the strip's own rule rather than this
+    # composer's.
+    assert line == "agent https://example.invalid/agent renamed to poet"
+
+
+def _logged(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Every record written while a request ran, in both formats this
+    server writes one in: a value kept out of a response body and
+    written to a log line is not kept."""
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    return [
+        rendering
+        for record in caplog.records
+        for rendering in (logs.JsonFormatter().format(record), text.format(record))
+    ]
 
 
 # Shared prompt fragments

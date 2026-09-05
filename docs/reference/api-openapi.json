@@ -2237,6 +2237,96 @@
         }
       }
     },
+    "/agents/{name}/rename": {
+      "post": {
+        "summary": "Rename Agent",
+        "description": "Give one agent another name, moving every live reference to it\nin the same transaction: its device bindings, the default agent\nif it was one, what it remembered, and the conversation threads\nit owns.\n\nThe act the delete-and-create workaround cannot make. A binding\nand the default agent each refuse the delete half while they\nname the agent, so the workaround is six writes with the memory\nlost in the middle, and this is one transaction that leaves\nnothing dangling or writes nothing at all.\n\nWhat it does not rewrite is the record of what happened. A turn\nspoken last month was spoken by an agent whose name at the time\nwas the old one, and the row saying so is evidence rather than a\nreference, so the sessions, the turns and the events keep the\nnames they were written with.\n\nA POST because it is not idempotent: run twice, the second run\nfinds no agent under the old name and answers 404. The new name\nis a body rather than a second path segment because it is what\nthe request carries rather than part of what it addresses, and\nit is handed to the repository unread.\n\nRefused 409 when the destination is occupied, by an agent, by\nremembered facts or by recorded threads, since a rename may\nnever merge two pasts into one; 422 when the new name is not a\nname this deployment can address, or is the one the agent\nalready has. No refusal quotes either name.",
+        "operationId": "rename_agent_agents__name__rename_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRename"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/devices/pending/{code}": {
       "post": {
         "summary": "Add Device",
@@ -4764,7 +4854,7 @@
           "notice": {
             "type": "string",
             "title": "Notice",
-            "description": "When the change takes effect, as one of a handful of sentences, for a reader rather than for a program: `applies` beside it is the same fact in tokens, and it is the half to branch on. A device binding and the default agent are read by the running server as a device asks for them, so they apply at that device's next OTA check or connection with nothing asked of the server. Every other kind this API writes, which is the whole of the rest of the domain half (the provider entries, the MCP entries, the secret slots on either, the prompt fragments, the agents and `agent_defaults`), is stored and waits for the stored configuration to be installed on the running server, which no restart is needed for. A binding naming an agent this server is not serving yet carries a sentence of its own, because both halves are true at once: the row is live, and the agent arrives with the install that adds it. A server serving a configuration no store describes says that the write is stored and takes effect when a server boots from that store. Nothing this API writes waits for a server start."
+            "description": "When the change takes effect, as one of a handful of sentences, for a reader rather than for a program: `applies` beside it is the same fact in tokens, and it is the half to branch on. A device binding and the default agent are read by the running server as a device asks for them, so they apply at that device's next OTA check or connection with nothing asked of the server. Every other kind this API writes, which is the whole of the rest of the domain half (the provider entries, the MCP entries, the secret slots on either, the prompt fragments, the agents and `agent_defaults`), is stored and waits for the stored configuration to be installed on the running server, which no restart is needed for. A binding naming an agent this server is not serving yet carries a sentence of its own, because both halves are true at once: the row is live, and the agent arrives with the install that adds it. So does a rename that moved a device binding or the default agent with the agent it renamed, for the same pair of reasons and about the references rather than about one binding; a rename that moved the agents row alone waits at the install like any other write of that kind. A server serving a configuration no store describes says that the write is stored and takes effect when a server boots from that store. Nothing this API writes waits for a server start."
           },
           "applies": {
             "items": {
@@ -8138,6 +8228,22 @@
           "name"
         ],
         "title": "DefaultAgentName",
+        "type": "object"
+      },
+      "AgentRename": {
+        "additionalProperties": false,
+        "description": "What a rename carries: the name the agent is to have.\n\nA body rather than a second path segment, because the new name is\nnot part of the address. The agent is addressed by the name it has,\nwhich is the identity this act is performed on; what the request\ncarries is the name it is to be given.",
+        "properties": {
+          "to": {
+            "description": "The name the agent is to have. Held to what every agent name is held to: it is stripped of surrounding whitespace, may not be empty after that, and may hold no slash and no control character. It has to be free everywhere the rename would write, so the request is refused when an agent, remembered facts or recorded conversation threads already sit under it, because a rename may never merge two pasts into one. Nothing sent is quoted back in any refusal.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "title": "AgentRename",
         "type": "object"
       },
       "SecretValue": {
