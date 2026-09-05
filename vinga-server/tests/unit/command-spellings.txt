@@ -862,6 +862,7 @@ docs/plans/2026-09-05-server-state-vocabulary-implementation.md:255  historical 
 docs/plans/2026-09-05-server-state-vocabulary-implementation.md:298  historical  vinga apply
 docs/plans/2026-09-05-server-state-vocabulary-implementation.md:317  historical  vinga apply
 docs/plans/2026-09-05-server-state-vocabulary-implementation.md:356  historical  vinga-server config openapi
+docs/plans/2026-09-05-server-state-vocabulary-implementation.md:408  historical  vinga-server config openapi
 docs/plans/2026-09-05-server-state-vocabulary.md:13  historical  vinga import
 docs/plans/2026-09-05-server-state-vocabulary.md:14  historical  vinga reload
 docs/plans/2026-09-05-server-state-vocabulary.md:102  historical  vinga apply
@@ -1294,10 +1295,10 @@ vinga-server/src/vinga_server/config/api.py:563  respell  vinga-server config li
 vinga-server/src/vinga_server/config/cli.py:654  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:816  respell  vinga provider
 vinga-server/src/vinga_server/config/cli.py:3338  respell  vinga apply
-vinga-server/src/vinga_server/config/cli.py:3617  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:3645  respell  config list
-vinga-server/src/vinga_server/config/cli.py:8316  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:8316  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:3630  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:3658  respell  config list
+vinga-server/src/vinga_server/config/cli.py:8333  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:8333  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:206  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:616  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:204  respell  vinga apply
