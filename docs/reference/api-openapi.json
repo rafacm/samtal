@@ -3727,7 +3727,7 @@
     "/memory/agents": {
       "get": {
         "summary": "Read Agent Owners",
-        "description": "Which agents are remembering anything, and how much.\n\nEvery name that has a row, whether or not this deployment still\nhas an agent of that name: renaming an agent orphans its memory,\nwhich is documented rather than prevented, and this listing is\nwhere an operator sees that it happened.",
+        "description": "Which agents are remembering anything, and how much.\n\nEvery name that has a row, whether or not this deployment still\nhas an agent of that name. A rename moves an agent's rows with\nit, so what turns up here with no agent behind it is one of two\nthings: a deleted agent's memory, or what a conversation still\nspeaking an old name wrote between a rename and the install that\napplied it. This listing is where an operator sees either.",
         "operationId": "read_agent_owners_memory_agents_get",
         "parameters": [
           {
@@ -4082,7 +4082,7 @@
       },
       "delete": {
         "summary": "Erase Agent Memory",
-        "description": "Erase everything one agent remembers, in one transaction.\n\nAddressed at an owner rather than at a row, so an agent with\nnothing stored is erased of nothing and the count says so. This\nis the verb for an orphan the listings turned up: a renamed\nagent's rows have no other way out.",
+        "description": "Erase everything one agent remembers, in one transaction.\n\nAddressed at an owner rather than at a row, so an agent with\nnothing stored is erased of nothing and the count says so. This\nis the verb for an orphan the listings turned up: a deleted\nagent's rows, and the ones a conversation still speaking an old\nname wrote after a rename, have no other way out.",
         "operationId": "erase_agent_memory_memory_agents__name__facts_delete",
         "parameters": [
           {

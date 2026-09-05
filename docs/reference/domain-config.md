@@ -340,13 +340,25 @@ vinga agent set <name> -f fragment.yaml
 | `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments this agent's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts this agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch. Leaving it unset inherits the agent_defaults list, whose edits reach this agent at the same moment. |
 | `prompt` | `str` | `""` | The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
 
-An agent's name is also the key its remembered facts and its held removals are
-stored under, so renaming an agent orphans its own scope of memory whole: the
-rows stay in the database under the old name and the renamed agent starts
-empty. What the device it is bound to knows is keyed by the board and survives
-the rename. Rename an agent that has been accumulating facts for months only
-if you mean to lose them; `vinga memory list agent` is what shows the orphaned
-name.
+An agent's name is also the key its remembered facts, its held removals and
+its conversation threads are stored under, and renaming one moves all of them.
+A rename is a single transaction: the agents row, every device binding that
+names it, the default agent if it was one, the memory filed under it and the
+threads it owns, or nothing at all. What the device it is bound to knows is
+keyed by the board and is untouched either way.
+
+A rename is refused when the new name is already taken anywhere it would
+write: by an agent, by remembered facts, or by recorded conversation threads.
+That refusal is what keeps the act reversible, since a rename that merged two
+pasts into one could not be told apart afterwards by any second rename.
+
+What a rename deliberately does not rewrite is the record of what happened: a
+session, a turn and an event keep the name the agent had when they were
+written, so a thread whose owner was renamed is filed under the new name with
+turns inside it under the old one. And the running server goes on serving the
+old name until the stored configuration is installed on it, so what a
+conversation still in flight remembers in that window is filed under the old
+name; `vinga memory list agent` is what shows such a row.
 
 Whether an agent remembers at all is its `memory` section, which is on unless
 it says otherwise. Switched off, the agent is offered no memory tools and is
