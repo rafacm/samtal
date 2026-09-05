@@ -33,6 +33,28 @@ by running kubeconform against an empty directory, so the step derives
 how many manifests it expects to have validated from the glob and fails
 when the number it got is smaller.
 
+**And one thing the local run could not see, found by the first CI
+run.** The compose check passed locally and failed in CI 27 seconds
+into the unit job, reporting that the file resolved with
+`VINGA_DB_HOST` unset. Compose resolves an interpolation from the
+process environment first and from the env file only after it, and the
+unit job exports `VINGA_DB_HOST` and its four siblings at job level for
+the Postgres service the lanes connect to. So a variable left out of
+the temporary `deploy/.env` was still set in CI, its guard never fired,
+and the negative arm of the check correctly reported a file that
+refused nothing. The environment those five are absent from is a
+developer's shell, which is why nothing local reproduced it until they
+were exported by hand.
+
+The fix is to take every required name off the process environment for
+each compose invocation, the omission runs and the final full-set
+resolution alike, so the temporary file is the only place a value can
+come from. The `env -u` list is built from the same `required` list the
+loop iterates rather than written out a second time, so a variable
+added to the contract is scrubbed by the edit that starts guarding it.
+The trial compose check above it is unaffected: the two secrets it
+withholds are not among the job's exports.
+
 Everything else follows the plan and its amendments as written,
 including the delta re-review's three: the Job's complete
 `ON_ERROR_STOP` command with the ConfigMap mount and the file argument
@@ -100,7 +122,10 @@ from.
   omission-loop-then-full-set procedure the CI step encodes: each of
   the eight required variables omitted in turn makes `docker compose
   config` fail with that variable's own value-free message, and the
-  complete dummy set resolves.
+  complete dummy set resolves. Re-run afterwards with the unit job's
+  own five `VINGA_DB_*` exports in the environment, which is the shape
+  that broke it: the unfixed step body fails there exactly as CI did,
+  and the fixed one passes with all eight refusals still firing.
 - The agreement test proven to bite: six values were broken in a
   copied-aside `deployment.yaml` (replicas, `runAsUser`,
   `terminationGracePeriodSeconds`, the startup `failureThreshold`, the
