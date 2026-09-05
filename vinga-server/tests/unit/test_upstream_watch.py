@@ -28,6 +28,12 @@ MANIFEST = ROOT / "docs" / "upstream-watch.yaml"
 NOTES = ROOT / "docs" / "xiaozhi-notes.md"
 
 MARKER = "<!-- vinga-upstream-drift-report -->"
+
+# Credential-shaped, and never a value that exists anywhere real. The
+# link checker's suite plants the same kind of thing for the same
+# reason: a tool that answers a bad invocation by quoting it would
+# republish this into a public Actions log.
+SENTINEL = "sk-SENTINEL8f3a1b2c4d5e6f70"
 FIRMWARE = "78/xiaozhi-esp32"
 SERVER = "xinnan-tech/xiaozhi-esp32-server"
 
@@ -552,3 +558,90 @@ def test_a_bad_invocation_is_exit_two() -> None:
     done = run()
     assert done.returncode == 2
     assert "Traceback" not in done.stderr
+
+
+# ------------------------------------------------------------- refusals
+
+
+def test_an_unknown_argument_is_never_repeated_back() -> None:
+    """Argparse's own error path would print this straight into the log."""
+    for args in (
+        ("check", "--token", SENTINEL),
+        (SENTINEL,),
+        ("check", SENTINEL),
+    ):
+        done = run(*args)
+        assert done.returncode == 2
+        assert done.stdout == ""
+        for stream in (done.stdout, done.stderr):
+            assert SENTINEL not in stream
+            assert "Traceback" not in stream
+        assert "usage: upstream_watch.py" in done.stderr
+
+
+def test_an_undecodable_manifest_is_a_sentence(tmp_path: Path) -> None:
+    manifest, notes = copies(tmp_path)
+    manifest.write_bytes(b"repositories:\n  - repository: a/b \xff\n")
+    done = check(manifest, notes)
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr.strip() == "the manifest could not be decoded as UTF-8"
+
+
+def test_an_undecodable_notes_page_is_a_sentence(tmp_path: Path) -> None:
+    manifest, notes = copies(tmp_path)
+    notes.write_bytes(b"# notes \xff\n")
+    done = check(manifest, notes)
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr.strip() == "the notes could not be decoded as UTF-8"
+
+
+def test_undecodable_git_output_is_replaced_not_a_traceback(tmp_path: Path) -> None:
+    """Bytes the watch cannot decode are not a reason to refuse.
+
+    A clone whose `i18n.logOutputEncoding` is not UTF-8 hands git's
+    output over in that encoding, which is the reachable shape of this:
+    upstream owns those bytes and vinga does not get to insist on them.
+    They must arrive as replacement characters rather than as a
+    traceback, and the replacement cannot forge a fence, a heading or a
+    name-status separator, so the structure around them survives.
+    """
+    repo = upstream(tmp_path, "acme__thing")
+    pinned = head_of(repo)
+    commit(repo, {"watched/one.txt": "second\n"}, "fix: caf\u00e9 r\u00e9sum\u00e9 in the subject")
+    manifest, clones = stage(tmp_path, [("acme/thing", repo, pinned, ["watched/"])])
+    git(clones / "acme__thing", "config", "i18n.logOutputEncoding", "ISO-8859-1")
+    done, out = report(tmp_path, manifest, clones)
+    assert done.returncode == 0, done.stderr
+    assert "Traceback" not in done.stderr
+    body = out.read_text(encoding="utf-8")
+    assert "\ufffd" in body
+    assert body.startswith(MARKER)
+    assert "M\twatched/one.txt" in body
+    assert "in the subject" in body
+    assert "## Resolving this" in body
+
+
+def test_an_unwritable_output_path_is_a_sentence(tmp_path: Path) -> None:
+    repo = upstream(tmp_path, "acme__thing")
+    pinned = head_of(repo)
+    commit(repo, {"watched/one.txt": "second\n"}, "move the wire")
+    manifest, clones = stage(tmp_path, [("acme/thing", repo, pinned, ["watched/"])])
+    blocked = tmp_path / "not-a-file"
+    blocked.mkdir()
+    done = run(
+        "report",
+        "--manifest",
+        str(manifest),
+        "--clones",
+        str(clones),
+        "--output",
+        str(blocked),
+    )
+    assert done.returncode == 1
+    assert "Traceback" not in done.stderr
+    assert (
+        done.stderr.strip()
+        == "the report could not be written to the given output path"
+    )
