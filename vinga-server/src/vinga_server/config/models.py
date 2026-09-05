@@ -301,7 +301,7 @@ class AuthConfig(BaseModel):
 
 
 class OnboardingConfig(BaseModel):
-    """The short onboarding path, /x/<key>/, an alias of the OTA endpoint.
+    """The short onboarding path, `/x/<key>/`, an alias of the OTA endpoint.
 
     Onboarding a stock board means typing its backend URL into a captive
     portal on a phone, with no feedback on a typo, so the string has to
@@ -776,11 +776,16 @@ RESUMPTION_NEEDS_TEXT = (
 # this repository owns, and the page that publishes what a deployment is
 # refused for has to read the sentence the validator raises rather than
 # a second copy of it.
+#
+# The path is in a code span because this sentence has two readers. A
+# terminal prints the backticks and loses nothing; a browser reading the
+# generated reference would otherwise take `<key>` for a tag and drop it,
+# leaving the route the operator is sent to spelled `/x//`.
 NOTHING_DISCOVERABLE = (
     "server.ota_path is null and server.onboarding.enabled is false, so "
     "no device could fetch its configuration from this server at all. "
     "Keep one of the two: an ota_path for the boards already provisioned "
-    "with it, or onboarding enabled for the short /x/<key>/ route"
+    "with it, or onboarding enabled for the short `/x/<key>/` route"
 )
 
 
