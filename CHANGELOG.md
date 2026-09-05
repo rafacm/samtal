@@ -129,6 +129,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A boot refusal about the stored half answers the same location
+  policy as the API** (#382). The two halves of a boot were rendered by
+  two renderers: the file half by the shared policy, which walks every
+  location segment against the model and answers a key nobody declared
+  by naming the rule instead of repeating it, and the domain half by a
+  private renderer in the loader that printed every segment. Provenance
+  is what the two disagreed about, and it is what decides. A key in a
+  file is text an operator typed a moment ago and nothing has accepted,
+  so it is still not repeated. A key in the stored half is the identity
+  of a row a write already accepted, and the store's own refusals, the
+  API's answers and this deployment's documents all print those in
+  full, so a boot refusal now prints them too: an entry is named
+  `agents.<name>`, exactly as the write that stored it names it, rather
+  than truncated to `agents`. One renderer answers both halves and is
+  told which it is holding. What tightens with it is the other
+  direction: a key an operator wrote inside a stored body, an MCP
+  server's `env` entry or a provider's option, is no longer printed by
+  a boot either, and an unrecognized key under `agent_defaults` is
+  answered by the rule it broke in the words the write has always used.
+
 - **A write's acknowledgement states the boundary, and the CLI names
   the command.** The two sentences that named one no longer do: a write
   to the domain half now says it is stored and not yet serving, and a
@@ -200,6 +220,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   unnamed, which was always the part that mattered.
 
 ### Fixed
+
+- **A legacy URL credential no longer reaches a refusal either**
+  (#382). #381 put every DISPLAY of a stored identity through a strip,
+  because a name written before the addressability rule can hold a URL
+  carrying a credential. A refusal says an identity rather than showing
+  one, and it says it somewhere no display goes: a server's stderr as
+  it fails to start, which an operator, a container log and whatever
+  collects one all read. Four sentences composed over a stored name
+  carried one verbatim: the reference check that names the entry whose
+  provider does not resolve and lists the ones that do, the
+  completeness check that lists the agents a default could be set to,
+  the location every per-row storage refusal is built from
+  (`agents.<name>: the row cannot be read`), and the walk over a
+  validation error's locations. All four now leave through the door the
+  displays leave through, so what a refusal names is the address
+  without the credential. A write is unaffected: a name reaches those
+  sentences only after the addressability check has passed it, and a
+  name carrying a credential holds a slash.
 
 - **A legacy URL credential is no longer displayed** (#381). A URL
   carrying a credential, either before its host or in an `auth`-family
