@@ -406,8 +406,9 @@ module's.
   Documentation footprint: none staled; `config.example.yaml` is
   touched only where a comment restates a bound the description now
   owns, and the milestone says so in the implementation doc.
-- [ ] **M2: the generator, the command, the committed page and the
-  drift check.** `config/server_reference.py`; the promoted
+- [x] **[M2: the generator, the command, the committed page and the
+  drift check](2026-09-05-server-config-reference-implementation.md#m2-the-generator-the-command-the-committed-page-and-the-drift-check)**
+  (PR TBD). `config/server_reference.py`; the promoted
   rendering helpers; `BOOT_REFUSALS`; the `reference` selector with
   its fixed-sentence refusal; `docs/reference/server-config.md`
   committed; the CI step; the test suite above; the regenerated
