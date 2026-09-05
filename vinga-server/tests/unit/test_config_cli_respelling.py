@@ -26,10 +26,17 @@ trusted.
 `RESPELLINGS` is the licensed difference. Some of what these commands
 print quotes a command back at the operator: an export's header says how
 to reproduce a deployment, its foot lists a `set-secret` per stored slot,
-a read's secrets heading names the command that fills one, and the reload
-notice names the command that applies a write. Those move with the
-grammar, deliberately, and the table below is the complete list of the
-substitutions that licenses. It is applied to the TRANSCRIPT before the
+a read's secrets heading names the command that fills one, and a write's
+acknowledgement is answered with the command that installs what was
+stored. Those move with the grammar, deliberately, and the table below
+is the complete list of the substitutions that licenses.
+
+The last of them no longer moves with the grammar because the server
+said it: #386 took the command out of the two notices that named one,
+so what an operator reads under a write is the server's state sentence
+with the CLI's own advice beneath it. The command is still printed and
+still moves with the grammar; which side prints it is what changed, and
+the two entries below record the whole of it. It is applied to the TRANSCRIPT before the
 comparison, so a difference the table does not explain is a failure, and
 the table itself is short enough to read.
 
@@ -114,13 +121,21 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
 # are not in it yet. Applying is additive: a section this document does
 # not name is left alone, and nothing in it deletes.""",
     ),
-    # Not the rename's either: #371's, and the three of them come last
-    # because each quotes text an entry above it produced. The verbs
-    # swapped (`apply` became `import`, `reload` became `apply`), the
-    # per-write notice shrank to the one line an operator acts on, and
-    # the export header's three steps moved with the verbs. A transcript
-    # captured before that cannot say any of it, and the differential is
-    # about behavior rather than about a sentence.
+    # Not the rename's either: #371's and #386's, and the three of them
+    # come last because each quotes text an entry above it produced. The
+    # verbs swapped (`apply` became `import`, `reload` became `apply`),
+    # the per-write notice shrank to the one line an operator acts on,
+    # and the export header's three steps moved with the verbs. A
+    # transcript captured before that cannot say any of it, and the
+    # differential is about behavior rather than about a sentence.
+    #
+    # Then #386 split each of the two notices that named a command into
+    # two lines from two sides: the server states what is true of the
+    # write, and the CLI prints its own advice under it out of
+    # `cli.REMEDIES`. The command an operator reads is the same command,
+    # printed by the half that owns the grammar, which is why this is a
+    # substitution rather than a recapture: what the pre-rename
+    # transcript recorded is still what the pair prints.
     (
         "This applies when the running server is asked to reload: run `vinga reload`, "
         "which re-reads the stored configuration and applies it without a restart and "
@@ -128,9 +143,10 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
         "tools an agent may reach at its next utterance and its prompt text at its next "
         "activation, while the voice it speaks in and the filled pauses it masks with "
         "reach the next conversation.",
-        "This is stored and not yet serving: `vinga apply` installs the stored "
-        "configuration on the running server, and `vinga diff` lists everything "
-        "pending.",
+        "This is stored and not yet serving: the running server goes on serving what "
+        "it already has until the stored configuration is installed on it.\n"
+        "`vinga apply` installs the stored configuration on the running server, and "
+        "`vinga diff` lists everything pending.",
     ),
     (
         "The binding applies at the device's next OTA check or connection, but this "
@@ -138,8 +154,9 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
         "installs the stored agents without a restart, and the device reaches it at "
         "the check-in after that.",
         "The binding applies at the device's next OTA check or connection, but this "
-        "server is not serving the agent it names yet: `vinga apply` installs the "
-        "stored agents, and the device reaches it at the check-in after that.",
+        "server is not serving the agent it names yet: the agent arrives with the "
+        "install that adds it, and the device reaches it at the check-in after that.\n"
+        "`vinga apply` installs the stored agents.",
     ),
     (
         """`vinga apply` takes. Reproduce it in three steps, in this order:
