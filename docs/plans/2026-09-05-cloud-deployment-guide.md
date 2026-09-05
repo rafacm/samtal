@@ -98,11 +98,18 @@ operator nothing. Naming one open-source controller is what decision
 1 newly permits, and ingress-nginx is the one with the widest
 install base. The committed `ingress.yaml` carries the ingress-nginx
 annotations (the read and send timeouts that keep an idle WebSocket
-open past the 60-second default, and TLS termination); the
-manifest's header and the guide both say these annotations are
-ingress-nginx's spellings and what each one is for, so an operator
-of another controller translates facts rather than
-reverse-engineering intent.
+open past the 60-second default); the manifest's header and the
+guide both say these annotations are ingress-nginx's spellings and
+what each one is for, so an operator of another controller
+translates facts rather than reverse-engineering intent. TLS
+termination is not an annotation but the resource's own contract:
+`spec.rules[].host` and a matching `spec.tls` entry on the same
+placeholder host the URL values use (`voice.example`), naming a
+certificate Secret (`vinga-tls`) the operator provisions and that
+is never a committed file: the guide shows
+`kubectl create secret tls` from an existing certificate and names
+cert-manager as the open-source way to have one issued in-cluster,
+with no hosting provider named either way.
 
 The Ingress also draws the public security boundary explicitly
 rather than routing the port as one thing. Exactly two paths are
@@ -231,7 +238,10 @@ memory.
   Service's `targetPort` reaches the Deployment's container port,
   and every Ingress backend names that Service and its declared
   port, so a wrong `targetPort` or selector cannot hide behind
-  schema validity. And the topology pins kubeconform cannot judge:
+  schema validity; the Ingress rule host, the `spec.tls` host and
+  the host inside `deployment.yaml`'s `VINGA_SERVER__PUBLIC_URL`
+  and `VINGA_SERVER__WEBSOCKET_URL` placeholders are asserted
+  equal, so the placeholder set moves as one value. And the topology pins kubeconform cannot judge:
   one replica, `strategy: Recreate`, the PVC's RWO access mode,
   and the `/data` mount. This is the issue's "the CI check is that
   agreement" made concrete: kubeconform proves the manifests speak
@@ -549,6 +559,14 @@ new P1 amendments and one P2, all inside the amended territory.
    certificate is supplied without naming a hosting provider, and
    extend the agreement test to connect the Ingress host, the TLS
    host and the URL placeholders' host.
+
+   *Resolution*: accepted in full. The Ingress carries
+   `spec.rules[].host` and a matching `spec.tls` entry on the URL
+   placeholders' host, naming an operator-provisioned `vinga-tls`
+   Secret that is never committed; the guide shows
+   `kubectl create secret tls` and names cert-manager as the
+   in-cluster issuer option; the agreement test asserts the three
+   hosts equal.
 
 3. **P2: the GID assertion claims a Dockerfile fact it does not
    establish.** The Dockerfile sets only `--uid 1000`; either make
