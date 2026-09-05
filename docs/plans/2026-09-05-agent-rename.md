@@ -482,9 +482,9 @@ position, and publishes a different fact:
 4. Leave the order.
 
 **What a writer does with it, and where.** The conversation writer keeps
-a map from a name it may still be handed to the name that name is now,
-and resolves it **once per turn at the durable-write boundary**, before
-either row is built. The placement is the whole of this rule and it is
+a map, **per session and not per process**, from a name that session may
+still hand it to the name that name is now, and resolves it **once per
+turn at the durable-write boundary**, before either row is built. The placement is the whole of this rule and it is
 not free to move: `_write` inserts the turn row and then builds the
 `Landing`, and `_turn_row` takes the agent straight off the record
 (`conversations/store.py:1234-1264`, `:1342-1365`), so a translation
@@ -497,6 +497,27 @@ dropped, and the un-materialized case INSERTs under the new name.
 Chained renames stay flat rather than needing a walk, by composing on
 insert: adding `old -> new` first rewrites every entry whose value is
 `old`.
+
+**Per session, because a process-wide map is not merely unbounded, it is
+wrong.** A publication marks the sessions that are live at that instant
+and no others, and each session's entries go when its state goes. The
+counterexample that settles it: rename `sam` to `poet`, then create a
+new agent called `sam`, which is now a free name, bind a board and let a
+session open on it. A process-wide map still holding `sam -> poet` would
+file that new agent's turns under `poet` and land its threads there.
+Nothing about the size of the map protects against that, and nothing
+about a session that opened after the publication needs translating:
+its name came out of the store after the rename. So the entries belong
+to the sessions that predate the rename, which is also what bounds them.
+
+**And the retirement is one an existing lifecycle already runs.** The
+writer keeps per-session state today, `_devices` among it, and pops it
+after the close has been committed rather than when the close arrives
+(`conversations/store.py:845-853, 950-958`). The map is popped in the
+same places, so a queued batch still finds its translation on the way
+out and a tombstoned session drops its entries with everything else. No
+new lifecycle, no timer, and no entry that outlives the session that
+needed it.
 
 **What that decides about the record, stated as one line.** A row
 **already written** is dated record and is never touched: the rename
@@ -720,9 +741,11 @@ beside the decision it belongs to.
   announcing a rename to the register of writers this process holds, and
   the comment above `_erasure_order` gains the rename as a second holder
   of the same rule.
-- **`ConversationStore` gains the translation**, one map and one
-  resolution at the durable-write boundary, beside `_discard_dead` which
-  is the same idea for the same reason. `_write` resolves the name once
+- **`ConversationStore` gains the translation**, one per-session map and
+  one resolution at the durable-write boundary, beside `_discard_dead`
+  which is the same idea for the same reason, and popped where
+  `_devices` is popped so it lives exactly as long as the session that
+  needs it. `_write` resolves the name once
   per turn and hands it to both `_turn_row` and the `Landing`, so
   `_turn_row` takes the resolved name as an argument rather than reading
   it off the record: one value, two rows, no chance of the pair
@@ -890,6 +913,12 @@ Reusing the assets that exist wherever the assertion already has a home.
   than inferred from the thread's owner, because a landing-only
   translation passes a thread-owner assertion and writes exactly the
   disagreeing row this pin exists to catch.
+- **The reused name, which is the case a process-wide map would fail.**
+  Rename, then create an agent under the freed old name, then open a
+  session on it while the earlier session is still draining: the new
+  session's turns and thread carry the name it was opened with, and the
+  draining one's still translate. It is the pin the lifecycle decision
+  rests on, so it is written as a case rather than as a sentence.
 - **The competing write, between the check and the update.** A second
   writer adds a fact under the destination name while a rename is
   between its memory check and its memory update, driven by the
@@ -1016,10 +1045,12 @@ Reusing the assets that exist wherever the assertion already has a home.
   described rather than left to be discovered by whoever tries it.
 - **The translation is a second place a name is interpreted**, and it
   earns that by closing a data loss rather than a cosmetic mismatch. The
-  bound is written into the design: one map, in the object that already
-  subscribes to a store change, applied at the one boundary where a name
-  enters the record, and composed on insert so a chain of renames never
-  becomes a walk.
+  bound is written into the design: one map per live session, in the
+  object that already subscribes to a store change, resolved once at the
+  one boundary where a name enters the record, composed on insert so a
+  chain of renames never becomes a walk, and retired with the session's
+  own state so a name freed by a rename and reused later is never
+  translated for the agent that has it now.
 
 ## The standing lenses, answered
 
@@ -1452,3 +1483,18 @@ amendments. 1 P1, 1 P2 and 1 P3.
    down, or define a session-tied retirement that still preserves the
    translations a queued durable batch needs. Take the simpler
    defensible one and record why.
+
+   *Resolution*: session-tied retirement, and the process-lifetime
+   option is refused for correctness rather than for size, which is the
+   part the finding did not have to argue and the plan now does. A
+   process-wide map is wrong on a case the grammar allows: a rename
+   frees the old name, an operator may create a new agent under it, and
+   a stale entry would file that new agent's turns under the renamed
+   one. So a publication marks the sessions live at that instant and no
+   others, and the entries are popped where `_devices` is popped
+   (`conversations/store.py:845-853, 950-958`), which is after a close
+   has been committed rather than when it arrives, so a queued batch
+   still finds its translation and nothing outlives the session that
+   needed it. No new lifecycle and no timer: the retirement rides one
+   the writer already runs. The reused-name case joins the tests as the
+   pin this decision rests on.
