@@ -108,6 +108,19 @@ jobs:
         working-directory: vinga-server
         run: uv sync --frozen
 
+      # The other pair of documents that must agree: docs/upstream-watch.yaml
+      # pins the upstream commits the protocol notes were read against,
+      # and the notes' own currency table carries the same commits and
+      # dates as human context. Two structures that must agree are one
+      # structure with a bug pending, so this holds them to identical
+      # repository sets, equal full commits and equal read dates in both
+      # directions. Bumping either without the other turns this lane red
+      # instead of lying quietly. It runs through the vinga-server
+      # environment because PyYAML lives there, which is why it sits
+      # after the install rather than beside the link check above.
+      - name: Upstream watch manifest agrees with the notes
+        run: uv run --project vinga-server python scripts/upstream_watch.py check
+
       # The census: every command spelling in the tree, found once and
       # classified once, against the committed manifest. This is the
       # test a documentation move stales; regeneration is
