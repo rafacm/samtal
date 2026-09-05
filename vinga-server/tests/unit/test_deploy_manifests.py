@@ -300,7 +300,7 @@ def test_the_init_job_draws_its_credentials_from_the_init_secret(job: Any) -> No
     conversation."""
     container = job["spec"]["template"]["spec"]["containers"][0]
     env = _env(container)
-    for name in ("ADMIN_URL", "VINGA_DB_USER", "VINGA_DB_RO_PASSWORD"):
+    for name in INIT_SECRET_KEYS:
         assert name in env, f"the init Job does not reference {name}"
         reference = env[name]["valueFrom"]["secretKeyRef"]
         assert reference["key"] == name
@@ -329,25 +329,63 @@ def test_the_init_job_runs_the_committed_sql(job: Any) -> None:
     """One home for the SQL: this repository's copy, handed over as a
     ConfigMap the operator builds from it. A Job that named a different
     file, or that mounted nothing, would fail on the cluster rather than
-    here."""
+    here.
+
+    The whole command is asserted rather than sampled. Every piece of it
+    is load bearing and each fails differently: without the connection
+    psql falls back to a local socket and provisions the wrong instance
+    or nothing; without `ON_ERROR_STOP` a failing statement scrolls past
+    on the way to a green exit code and a half provisioned database is
+    indistinguishable from a provisioned one; and a `-f` naming the
+    wrong file runs nothing at all. The mount path is not restated: the
+    file argument is what the mount is looked up from, and the argument
+    itself is held to the committed file's own name.
+    """
     pod = job["spec"]["template"]["spec"]
     container = pod["containers"][0]
     argv = [*container.get("command", []), *container.get("args", [])]
 
     assert "-f" in argv, f"the init Job runs no file: {argv}"
     named = argv[argv.index("-f") + 1]
+    assert Path(named).name == INIT_SQL.name, f"{named} is not the committed provisioning file"
+
+    # `$(ADMIN_URL)` is Kubernetes' own substitution from the env entry
+    # asserted above, so what psql is given is the Secret's value and
+    # not a literal anybody could read here.
+    assert argv == ["psql", f"$({ADMIN_URL})", "-v", "ON_ERROR_STOP=1", "-f", named], (
+        f"the init Job's command is {argv}"
+    )
+
     mount = _mount(container, str(Path(named).parent))
     assert mount.get("readOnly") is True, (
         "what runs is what is committed, so the mount is read-only"
     )
-    assert Path(named).name == INIT_SQL.name, f"{named} is not the committed provisioning file"
 
     volume = _volume(pod, mount["name"])
-    assert "configMap" in volume, "the SQL arrives as a ConfigMap built from the committed file"
+    configmap = volume.get("configMap", {}).get("name")
+    assert configmap, "the SQL arrives as a ConfigMap built from the committed file"
+    # And it is the ConfigMap the header tells an operator to build, so
+    # the name is read off the volume and the documented creation
+    # command is held to it rather than the two being typed separately.
+    written = _file_of_kind("Job").read_text(encoding="utf-8")
+    assert f"kubectl create configmap {configmap}" in written, (
+        f"the header does not tell an operator how to build {configmap}"
+    )
+    assert f"--from-file={INIT_SQL.relative_to(REPO)}" in written, (
+        "the header builds the ConfigMap from some other file"
+    )
 
-    # And the flag that makes a failing statement fail the Job rather
-    # than scroll past on the way to a green exit code.
-    assert "ON_ERROR_STOP=1" in argv
+
+def test_the_init_job_runs_the_psql_this_repository_pins(job: Any) -> None:
+    """The SQL reads its two parameters with psql's `\\getenv`, which
+    needs psql 15 or later, and the trial compose file is where this
+    repository decides which Postgres it runs. Reading that pin here
+    keeps it one decision: a bump there moves this Job with it, and a
+    Job left on an older client would fail on a directive rather than on
+    anything a reader would connect to a version."""
+    pinned = _load(TRIAL_COMPOSE)["services"]["postgres"]["image"]
+    image = job["spec"]["template"]["spec"]["containers"][0]["image"]
+    assert image == pinned, f"the init Job runs {image}, not the pinned {pinned}"
 
 
 # The network path: the agreements a schema validator cannot see
