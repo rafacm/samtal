@@ -13,14 +13,13 @@ the one committed document here that is only half generated.
 import json
 import logging
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from tests.support.config_cli import SECRET, chain, registered
 from tests.support.events import both_formats
+from tests.support.isolation import ALLOWED_IMPORTS, imported_alone
 from vinga_server.config import cli, docgen
 from vinga_server.config.secrets import MASTER_KEY_ENV
 
@@ -50,57 +49,15 @@ def run(monkeypatch: pytest.MonkeyPatch):
 # The two documents this module renders from the models alone, rendered
 # in a child interpreter that has imported nothing else, which is what
 # says the claim in the module docstring is about the import graph and
-# not about intent. `-B` for the reason `test_config_entities.py` gives:
-# a child that writes bytecode back hands the next command the stale
-# cache `conftest.py` just cleared.
+# not about intent. The runner and the allow list are in
+# `tests/support/isolation.py`, since the server-half reference's suite
+# makes the same claim about the same import graph.
 _ALONE = "\n".join(
     (
-        "import json",
-        "import sys",
-        "",
         "import vinga_server.config.docgen as docgen",
         "",
         "rendered = len(docgen.reference()) + len(docgen.schema())",
-        "print(json.dumps({",
-        '    "loaded": sorted(n for n in sys.modules if n.startswith("vinga_server")),',
-        '    "heavy": sorted(',
-        '        n for n in ("sqlalchemy", "cryptography", "fastapi", "httpx")',
-        "        if n in sys.modules",
-        "    ),",
-        '    "rendered": rendered,',
-        "}))",
     )
-)
-
-# What rendering the reference and the schema is allowed to load. Named
-# one by one rather than matched on a prefix, for the reason the
-# registry's own allow list is: each absent module is a separate way for
-# these commands to stop being runnable where they are meant to run.
-ALLOWED_IMPORTS = frozenset(
-    {
-        "vinga_server",
-        "vinga_server.config",
-        "vinga_server.config.docgen",
-        "vinga_server.config.entities",
-        "vinga_server.config.loader",
-        "vinga_server.config.models",
-        # The one name this set gained for #88, and the reason it is
-        # safe: `provider_options` declares the pydantic models a
-        # provider type's options are, and imports pydantic and
-        # `config.models` and nothing else. The `heavy` assertion below
-        # is what holds that claim rather than this comment, and it is
-        # still empty. The reason it is needed is that the two documents
-        # rendered here now describe those options, so the module that
-        # declares them is on the rendering path. What must stay out is
-        # `vinga_server.providers`, whose package `__init__` re-exports
-        # the engine layer; that is why the declaration lives on this
-        # side of the boundary at all.
-        "vinga_server.config.provider_options",
-        "vinga_server.runtime",
-        "vinga_server.runtime.prompt",
-        "vinga_server.tools",
-        "vinga_server.tools.names",
-    }
 )
 
 
@@ -120,10 +77,7 @@ def test_the_reference_and_the_schema_render_from_the_models_alone() -> None:
     application, says so where it is defined, and is the exception this
     is the rule for.
     """
-    finished = subprocess.run(
-        [sys.executable, "-B", "-c", _ALONE], capture_output=True, text=True, check=True
-    )
-    alone = json.loads(finished.stdout)
+    alone = imported_alone(_ALONE)
 
     assert frozenset(alone["loaded"]) == ALLOWED_IMPORTS
     assert alone["heavy"] == []

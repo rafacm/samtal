@@ -154,7 +154,13 @@ _ONBOARDING_KEY_RE = re.compile(r"^[A-Z2-7]{8}$")
 # that set: `log_level`'s description names them from here, its refusal
 # lists them from here, and the reason NOTSET is not among them is on
 # the field where an operator meets it.
-_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+#
+# Public, for the reason `docgen.nested_model` is: the generated server
+# reference publishes this set as a rule an operator is held to, and the
+# test that holds the page to naming every one of them is a caller. A
+# test reaching an underscore for it would be pinning a detail; this is
+# the name it reaches instead.
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # Identifiers (provider names, agent names, references between them) must
 # survive stripping with at least one character.
@@ -978,7 +984,7 @@ class ServerConfig(BaseModel):
         default="INFO",
         description=(
             "How much the server logs, as one of: "
-            + ", ".join(_LOG_LEVELS)
+            + ", ".join(LOG_LEVELS)
             + ". Written in any case and normalized to upper; anything else refuses "
             "the boot. NOTSET is deliberately not accepted: on the root logger it "
             "means WARNING, which is not what writing it says."
@@ -1126,7 +1132,7 @@ class ServerConfig(BaseModel):
     @classmethod
     def _check_log_level(cls, value: str) -> str:
         level = value.strip().upper()
-        if level not in _LOG_LEVELS:
+        if level not in LOG_LEVELS:
             # Value-free, like the reserved-path refusals below and for
             # the same reason: what a validator is handed is whatever
             # was written under the key, and a refusal that echoes its
@@ -1135,7 +1141,7 @@ class ServerConfig(BaseModel):
             # are what a reader needs.
             raise ValueError(
                 "is not a logging level; expected one of: "
-                + ", ".join(_LOG_LEVELS)
+                + ", ".join(LOG_LEVELS)
                 + ". What was set is not quoted back"
             )
         return level
