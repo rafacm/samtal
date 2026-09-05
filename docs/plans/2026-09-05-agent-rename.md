@@ -815,12 +815,23 @@ Reusing the assets that exist wherever the assertion already has a home.
   holding one agent under a sentinel name, referenced from every live
   place at once: two device bindings, the default agent, memory facts
   including one held (forgotten) row, and two conversation threads with
-  turns. Rename it, then assert the sentinel appears in **no** live
-  reference, by reading every row of the three schemas and checking each
-  column the census names, rather than by asserting the five rewrites
-  one at a time. The record's dated columns are asserted to still carry
-  it, which is the same pin from the other side: the sweep proves both
-  halves of the line this plan drew.
+  turns. Rename it, then read every row of every table of the three
+  schemas, render each value as text, and assert that the set of
+  `(table, column)` pairs still carrying the sentinel is exactly the
+  recorded one, which is the dated record and nothing else. Written as
+  an equality against a recorded set rather than as five assertions
+  about five columns, so it fails in both directions: a live reference
+  left behind, and a dated column that stopped carrying the name it is
+  supposed to keep.
+  **What it does and does not promise, stated because the sweep is
+  where an inventory claim would be tempting.** It is a fact about
+  values, not about the schema: it catches any column this fixture
+  populates, including one added later, and it cannot see a column
+  nothing in the fixture writes to. So the guarantee is that the
+  references enumerated today are covered and that a new column reached
+  by this fixture is caught; a new column with no fixture behind it is
+  covered by the same review this plan's census was, not by a test that
+  cannot know which text field holds a name.
 - **The inventory pin**, so the sweep cannot silently stop covering the
   domain half: after the rename, `check_references` over the stored
   snapshot is empty, and the set of sections it walks is read from the
@@ -994,9 +1005,11 @@ where it is enforced rather than asserting it.
   `check_references`'s own walk rather than a list in this plan; the
   tables are read off the three metadata objects; the live-versus-record
   line is drawn by grepping for filters rather than by reading intent;
-  and the sweep asserts the absence of a sentinel across every column
-  the census names, so a reference added later without a rewrite fails a
-  test rather than aging into a bug.
+  and the sweep asserts, as an equality against a recorded set, which
+  `(table, column)` pairs still carry a sentinel after a rename. What
+  that is worth is bounded and the plan says so: it is a claim about
+  values a fixture wrote, not a claim that the schema can name its own
+  agent references.
 - **Pin before reshape.** M1 adds behavior behind no reachable surface
   and pins it whole, including atomicity and reversibility, before M2
   gives it a door. The documents that describe the old behavior are
@@ -1296,3 +1309,20 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    with the design guide in hand: two structures that must agree are one
    structure with a bug pending, so if a registry is the answer, the
    rename itself has to read it.
+
+   *Resolution*: the claim is narrowed, and the registry is refused with
+   the guide's own test rather than on effort. A registry would have to
+   be read by the rename to be one structure rather than two, and the
+   rename cannot read one: the domain half is rewritten through the
+   models and the staging path, where the references are a JSON array's
+   elements and a key in a settings table rather than columns, so a
+   column registry would drive the two easy stores and leave the hard
+   one restating itself. That is a registry with one real consumer, the
+   test, which is the second encoding the guide is warning about rather
+   than the fix for one. So the sweep keeps its shape and loses its
+   overclaim: it is an equality against a recorded set of
+   `(table, column)` pairs, it fails in both directions, and the plan
+   states what it is a claim about, which is values a fixture wrote
+   rather than a schema that can name its own agent references. A new
+   column with no fixture behind it is caught by review, which is what
+   caught this plan's own census.
