@@ -346,9 +346,9 @@ round, and building M2 reopened none of them.
 ### Verification
 
 - `uv run ruff check .`: all checks passed.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5717 passed,
-  19 skipped, in 87s.
-- `uv run pytest tests/integration -q`: 243 passed in 352s.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5718 passed,
+  19 skipped, in 86s.
+- `uv run pytest tests/integration -q`: 243 passed in 381s.
 - The generated-document drift checks:
   `tests/unit/test_config_docgen.py` and
   `tests/unit/test_command_spellings.py`, 80 passed, with
@@ -366,3 +366,49 @@ round, and building M2 reopened none of them.
   checked from a checkout at all is the pairing the issue is about: an
   image built before this commit still carries its own bytes, which is
   what the plan says the guarantee is forward from here.
+
+### PR #411 review round
+
+One external review of the milestone as first pushed. Two findings,
+both P2; verdict mergeable after the fixes. Both adopted, one commit
+each.
+
+1. **P2: the import dedupe keyed on tuple order rather than on the
+   boundary set.** `_imported_entries` turned `applies` into a tuple
+   and used it as the key, so two entries waiting at the same pair of
+   boundaries printed twice when one of them arrived with the pair the
+   other way round, and a token listed twice was a third key again.
+   That contradicts the set-based contract the plan states and the
+   comment above the loop claimed.
+
+   *Resolution*: adopted. `_boundaries` is now the one place that turns
+   what a body carries into the set it means, and both the dedupe and
+   the remedy lookup read it from there. The review also asked whether
+   the table's own lookup had the same defect one level up; it did not,
+   `REMEDIES` was keyed by `frozenset` from the start and
+   `_announced` was already building one, which is why one arrival
+   order was advised correctly and the other was advised twice rather
+   than falling back. The pin drives three entries through the import
+   act with one pair of boundaries spelled three ways, one of them with
+   a token repeated, and asserts one sentence with one line of advice
+   under it.
+
+2. **P2: the served API overview still sent a program to the
+   sentence.** `api_descriptions/api.md` ended its boundary paragraph
+   with "Every write says which of the two it is, in its `notice`",
+   published at the head of `api-openapi.json`. That is the contract
+   this milestone retired, and it is the same staleness class as the
+   two descriptions M1 and M2 rewrote: prose in a served contract that
+   no code change fails on.
+
+   *Resolution*: adopted. The paragraph names `applies` and the whole
+   vocabulary a write can be waiting at, says why the field is a set
+   rather than a token, and says which half is for a reader and why
+   that half names no command. The document regenerated through
+   `vinga-server config openapi`.
+
+The lesson worth keeping from both: this milestone's own claim, that
+one fact has one home and everything reads it from there, was true of
+the table and not yet of the two places that fed it. A rule that holds
+at the decision site and not at the call sites is a rule with a bug
+pending.
