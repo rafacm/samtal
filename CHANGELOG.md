@@ -59,6 +59,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   user id out of the code and the Dockerfile and holds the manifests to
   them.
 
+- **A deployment guide, `docs/deployment.md`** (#397). The worked path
+  from a published image to a running deployment, which the repository
+  had never carried: the contract every deployment implements as a table
+  of links into the server README section that owns each fact, the
+  one-replica topology and the three settings it shows up as, the Docker
+  lane walking `deploy/docker-compose.production.yml` and its refusals,
+  the Kubernetes lane walking the manifests in apply order with the
+  routing boundary spelled out (`/x/` and `/xiaozhi/v1/` routed, `/api/`
+  and the probes and the legacy OTA path deliberately not) and the
+  provisioning transaction an upgrade reruns before the tag changes,
+  what `/data` holds and what an `emptyDir` costs, which image tags are
+  immutable and which move, and a verification section that ends at a
+  board. It links rather than restates: the README section stays the
+  authority, and the page names the agreement test and the docs link
+  checker as what keeps it from becoming a second one. It is listed in
+  `docs/README.md` under "Maintained maps and explanations", and the
+  three READMEs point at it.
+
 ### Changed
 
 - **The README front page leads with the mix.** The identity record
@@ -90,6 +108,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   is untouched and remains exactly what it was: the two-container
   trial CI boots, with its convenience defaults and its deliberate
   absence of a restart policy.
+
+- **The deployment naming convention is narrowed, not dropped** (#397).
+  `AGENTS.md` used to say to describe deployment generically and to name
+  no hosting provider or platform, which read as one rule and was two:
+  the second half made a runnable Kubernetes or Docker Compose procedure
+  unwritable. Open-source orchestrators and tooling may now be named
+  where naming them is what makes a procedure runnable (Kubernetes,
+  Docker Compose, an ingress controller). Hosting providers stay
+  unnamed, which was always the part that mattered.
 
 ## 2026-09-04
 
