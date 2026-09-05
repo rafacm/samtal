@@ -32,35 +32,53 @@ on:
   # The pre-merge evidence, and the reason this trigger exists at all:
   # GitHub accepts workflow_dispatch only for a workflow already on the
   # default branch, so a new or changed watch cannot be dispatch-tested
-  # before it merges. A pull request touching the watch runs the whole
-  # thing in dry-run mode instead, which proves clone, resolve, diff and
-  # report construction against live upstream without writing anything.
+  # before it merges. A pull request touching the watch runs the read
+  # half instead, which proves clone, resolve, diff and report
+  # construction against live upstream. The write half is a separate job
+  # a pull request never starts.
   pull_request:
     paths:
       - ".github/workflows/upstream-drift.yml"
       - "docs/upstream-watch.yaml"
       - "scripts/upstream_watch.py"
 
-# Serialized rather than cancelled. The issue step searches, then
-# creates or edits, and two runs interleaving inside that window is how
-# one drift report becomes two. A manual dispatch landing beside the
-# schedule queues behind it.
+# Serialized rather than cancelled. The issue job searches, then creates
+# or edits, and two runs interleaving inside that window is how one
+# drift report becomes two. A manual dispatch landing beside the
+# schedule queues behind it. The group covers both jobs because it is
+# declared at workflow level.
 concurrency:
   group: upstream-drift
   cancel-in-progress: false
 
-# The report is read-only work; only the last step writes, and it writes
-# one issue. Nothing here needs more than that.
-permissions:
-  issues: write
-  contents: read
+# Nothing at workflow level, so neither job inherits more than it
+# declares for itself. The read job below cannot write an issue even by
+# accident, and the write job cannot run on a pull request.
+permissions: {}
 
 jobs:
+  # The read half: clone, diff, build the report. It runs on all three
+  # triggers and it cannot write anything to the tracker, because its
+  # token has no issues scope at all.
   drift:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+
+    outputs:
+      drift: ${{ steps.report.outputs.drift }}
+
     steps:
+      # persist-credentials: false, because the default leaves a
+      # credential in .git/config for every later step in the job. The
+      # token here is only contents:read, but a checkout that stashes a
+      # token where later steps (including script code a pull request
+      # can change) can pick it up is exactly the shape the split below
+      # exists to avoid, so both halves say no.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # The manifest parser runs through the vinga-server environment,
       # where PyYAML is already a dependency, so no runner-image Python
@@ -102,13 +120,12 @@ jobs:
       # nothing must not report "no drift".
       - name: Build the drift report
         run: |
-          set -euo pipefail
           uv run --project vinga-server python scripts/upstream_watch.py report \
             --clones "${RUNNER_TEMP}/upstream-clones" \
             --output "${RUNNER_TEMP}/drift-report.md"
 
-      # Nothing moved: the file is empty, the two steps below skip, and
-      # the run ends green having written nothing.
+      # Nothing moved: the file is empty, the steps and the job below
+      # skip, and the run ends green having written nothing.
       - name: Note the report's state
         id: report
         run: |
@@ -120,30 +137,71 @@ jobs:
             echo "No watched upstream path moved." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Dry run, the report into the step summary
-        if: >-
-          steps.report.outputs.drift == 'true'
-          && (github.event_name == 'pull_request'
-              || inputs.dry_run)
+      # The report is readable from the run itself whatever the trigger,
+      # which is what makes a pull request's run and a dry-run dispatch
+      # useful without any write capability anywhere in this job.
+      - name: The report, into the step summary
+        if: steps.report.outputs.drift == 'true'
         run: cat "${RUNNER_TEMP}/drift-report.md" >> "$GITHUB_STEP_SUMMARY"
 
-      # The only step that writes, and therefore the only step that sees
-      # a token: permissions authorize the token, they do not make gh
-      # consume it, and scoping GH_TOKEN here is what keeps every other
-      # step unable to act as the repository. Every gh call passes
-      # --repo, because gh otherwise infers the repository from the
-      # working directory. No set -x and no env dump anywhere in this
-      # file, so nothing traces a token into a log.
+      - name: Keep the report for the issue job
+        if: steps.report.outputs.drift == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: drift-report
+          path: ${{ runner.temp }}/drift-report.md
+          retention-days: 7
+          if-no-files-found: error
+
+  # The write half, and the only job in this repository that can touch
+  # the tracker on this workflow's behalf. It exists as a separate job
+  # so that the issues:write token is never present in the job that
+  # clones upstream code and runs a diff over it, and so a pull request
+  # (which can change the script this workflow runs) never starts a
+  # write-capable job at all.
+  issue:
+    needs: drift
+    if: >-
+      needs.drift.outputs.drift == 'true'
+      && (github.event_name == 'schedule'
+          || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "vinga-server/uv.lock"
+          save-cache: false
+
+      - name: Install
+        working-directory: vinga-server
+        run: uv sync --frozen
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: drift-report
+          path: ${{ runner.temp }}/report
+
+      # Permissions authorize a token; they do not make gh consume one.
+      # GH_TOKEN is set here and nowhere else, every gh call passes
+      # --repo because gh otherwise infers the repository from the
+      # working directory, and nothing in this file traces or prints an
+      # environment (no set -x, no env).
       #
       # decide, not shell, picks between create and edit: identity is
       # the exact title plus the marker in the body, and more than one
       # match is a refusal that fails the run rather than a guess about
       # which issue to overwrite.
       - name: Open or update the drift report issue
-        if: >-
-          steps.report.outputs.drift == 'true'
-          && github.event_name != 'pull_request'
-          && !inputs.dry_run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -156,18 +214,18 @@ jobs:
             --label upstream-drift --state open \
             --json number,title,body > "${RUNNER_TEMP}/open-issues.json"
           decision=$(uv run --project vinga-server python scripts/upstream_watch.py decide \
-            --report "${RUNNER_TEMP}/drift-report.md" \
+            --report "${RUNNER_TEMP}/report/drift-report.md" \
             --issues "${RUNNER_TEMP}/open-issues.json")
           case "$decision" in
             create)
               gh issue create --repo rafacm/vinga \
                 --title "Upstream drift report" \
                 --label upstream-drift \
-                --body-file "${RUNNER_TEMP}/drift-report.md"
+                --body-file "${RUNNER_TEMP}/report/drift-report.md"
               ;;
             "update "*)
               gh issue edit "${decision#update }" --repo rafacm/vinga \
-                --body-file "${RUNNER_TEMP}/drift-report.md"
+                --body-file "${RUNNER_TEMP}/report/drift-report.md"
               ;;
             *)
               echo "the decision was not recognized" >&2
