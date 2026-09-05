@@ -138,11 +138,12 @@ model metadata, docstrings and refusal constants become markdown.
 It is not a pass-through: it owns the page structure, the
 constraints column, the docstring rendering and the refusals
 section. The generic rendering vocabulary is shared rather than
-copied: `type_name` and `default` are imported as they are, and
-`_paragraph`, `_cell` and `_nested_model` are promoted to public
-names in `docgen` (`paragraph`, `cell`, `nested_model`) in the
-change that gains them a second caller, so no test or module
-reaches an underscore.
+copied: `type_name` and `default` are imported as they are;
+`_nested_model` is promoted to `nested_model` in M1, because the M1
+coverage test is its second caller and a test must reach public
+names only; `_paragraph` and `_cell` are promoted to `paragraph`
+and `cell` in M2, the change that gains each its second caller. No
+test or module reaches an underscore at any point.
 
 **Constraints get a column, rendered from the metadata pydantic
 already holds.** The issue asks for every constraint, and the
@@ -250,8 +251,9 @@ order, no timestamps, no set iteration).
   database environment-name constants move here from `loader.py`
   and `db/__init__.py` (M2), with both importing them back.
   Deepened at the fields' one home; no new module.
-- `config/docgen.py` (M2): `_paragraph`, `_cell`, `_nested_model`
-  promoted to `paragraph`, `cell`, `nested_model`; the domain
+- `config/docgen.py` (M1: `_nested_model` promoted to
+  `nested_model` for the coverage test; M2: `_paragraph` and
+  `_cell` promoted to `paragraph` and `cell`); the domain
   preamble sentence that says the server half "is documented
   there, in `config.example.yaml`" now points at the new page.
   Nothing else moves.
@@ -280,7 +282,9 @@ module's.
 
 - **M1 coverage test** (in `test_config.py` or beside the models'
   own tests): walk every model reachable from `ServerConfig`
-  (by reflection through `nested_model`, never a hand list) and
+  (by reflection through `docgen.nested_model`, promoted public in
+  this same milestone, never a hand list and never an underscore
+  reach-in) and
   assert every field carries a nonempty description and every model
   a nonempty docstring. This is the guard that keeps a future field
   from rendering `**(undescribed)**`.
@@ -386,7 +390,9 @@ module's.
   documentation.** Descriptions on every field reachable from
   `ServerConfig`, docstrings on every reachable model
   (`ServerConfig` gains one), validator-enforced shapes stated in
-  the descriptions of the fields they bound, the coverage test, and
+  the descriptions of the fields they bound, the coverage test
+  (with `_nested_model` promoted to `docgen.nested_model` as its
+  public walker), and
   `NOTHING_DISCOVERABLE` hoisted to a constant. Behavior-neutral:
   no validation change, and the generated-artifact freshness pins
   prove nothing committed moved. Design footprint: deepens
@@ -540,6 +546,11 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    underscore reach-in. Promote the reflection helper in M1, or
    reuse the existing public walker, or specify another public
    model-graph interface.
+
+   *Resolution*: accepted, first option. The `_nested_model`
+   promotion moves from M2 to M1, since the coverage test is its
+   second caller; `_paragraph` and `_cell` stay M2 promotions with
+   their second callers.
 
 9. **P3: the stated regenerate command uses the wrong constant.**
    The plan says the header renders `vinga-server config reference
