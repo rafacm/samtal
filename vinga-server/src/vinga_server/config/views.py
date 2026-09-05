@@ -53,7 +53,7 @@ The record path is the opposite decision, deliberately, and
 `provider_record` below says why.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -111,12 +111,43 @@ def device(read: Entity[list[str]]) -> dict[str, object]:
 
 
 def default_agent(name: str | None) -> dict[str, object]:
-    """Not an envelope: the default agent is a name, not an entity, and
-    it holds nothing that could be a secret."""
-    return {"name": name}
+    """Not an envelope: the default agent is a name, not an entity, so
+    it has no body to mask. What it can hold is the one thing a name can
+    (`_shown_identity` below), since it is one of the stored names this
+    read hands back."""
+    return {"name": None if name is None else _shown_identity(name)}
 
 
 # The whole configuration, and the identity-keyed listings
+#
+# An identity is a stored string this module puts into an answer, which
+# makes it the third place a credential reaches a caller, after a field
+# and a mapping key. The write path refuses a name that cannot be one
+# URL path segment, and refuses it AT WRITE TIME ONLY, which
+# `store._check_addressable` says in as many words: a row written before
+# that rule "still boots, still appears in a whole-configuration read,
+# and is still deletable". It did appear, with the credential in it, in
+# the document, in every listing, in the secret locations beside them
+# and in the two projections that are a name rather than an entity
+# (`default_agent` and a device's bindings).
+#
+# So every identity this module hands back goes through
+# `_shown_identity`, and the identity-keyed maps go through
+# `_shown_mapping`, which brings the collision rule with it.
+#
+# The addressability that costs, measured rather than assumed. A name
+# this rule changes has `://` in it, because that is what
+# `url_credential` looks for, so it holds slashes, and a name holding a
+# slash is exactly what `_check_addressable` exists to refuse: such a
+# row cannot be fetched, replaced or deleted over the API at all, raw or
+# percent-encoded, and answers 404 either way. It was unaddressable
+# before this and it is unaddressable after it, so what a sanitized
+# display takes away is a spelling that never worked as a handle. The
+# suffix rule below says the same thing from the other end: a shown key
+# is a display artifact, not a guaranteed address. Widening the delete
+# routes to accept a sanitized spelling would be a different feature and
+# is deliberately not here; the way to reach such a row is the database
+# it is stored in.
 
 
 def config(snapshot: Snapshot) -> dict[str, object]:
@@ -139,8 +170,20 @@ def config(snapshot: Snapshot) -> dict[str, object]:
             "prompt_fragments": _bodies(domain.prompt_fragments, "prompt-fragment"),
             "agent_defaults": _body("agent-defaults", domain.agent_defaults),
             "agents": _bodies(domain.agents, "agent"),
-            "devices": {mac: list(bound) for mac, bound in sorted(domain.devices.items())},
-            "default_agent": domain.default_agent,
+            # Keyed by MAC, which is the one identity here that cannot
+            # carry this: a device row whose key is not six
+            # colon-separated hex pairs is refused by the LOAD path, not
+            # only by the write, so a planted one never reaches a view
+            # at all. A strip here would be unreachable code. The names
+            # it is bound to are ordinary agent names and are not.
+            "devices": {
+                mac: _bound(bound) for mac, bound in sorted(domain.devices.items())
+            },
+            "default_agent": (
+                None
+                if domain.default_agent is None
+                else _shown_identity(domain.default_agent)
+            ),
         },
         "secrets": [_stored(secret) for secret in stored_secrets(snapshot)],
     }
@@ -153,13 +196,14 @@ def listing(kind: str, snapshot: Snapshot) -> dict[str, object]:
     empty mapping rather than with a different shape."""
     descriptor = entities.descriptor(kind)
     stored = _by_entity(snapshot)
-    return {
-        name: _envelope(
+    return _shown_mapping(
+        {},
+        sorted(getattr(snapshot.domain, descriptor.moved_key).items()),
+        lambda name, entry: _envelope(
             entity_body(descriptor, entry),
             stored.get((descriptor.secret_slots, name), ()),
-        )
-        for name, entry in sorted(getattr(snapshot.domain, descriptor.moved_key).items())
-    }
+        ),
+    )
 
 
 def providers(snapshot: Snapshot) -> dict[str, dict[str, object]]:
@@ -168,15 +212,32 @@ def providers(snapshot: Snapshot) -> dict[str, dict[str, object]]:
     descriptor = entities.descriptor("provider")
     stored = _by_entity(snapshot)
     return {
-        stage: {
-            name: _envelope(
-                entity_body(descriptor, entry),
-                stored.get((descriptor.secret_slots, provider_identity(stage, name)), ()),
-            )
-            for name, entry in sorted(getattr(snapshot.domain.providers, stage).items())
-        }
+        stage: _staged(descriptor, stored, stage, getattr(snapshot.domain.providers, stage))
         for stage in PROVIDER_STAGES
     }
+
+
+def _staged(
+    descriptor: entities.EntityDescriptor,
+    stored: Mapping[tuple[str, str], Sequence[StoredSecret]],
+    stage: str,
+    section: Mapping[str, object],
+) -> dict[str, object]:
+    """One stage's providers, by name, each in its envelope.
+
+    A function rather than a nested comprehension because the stage has
+    to be bound: what is stored beside an entry is addressed by the
+    stage and the name together, and a closure reading the stage off the
+    loop around it is the shape that reads the last one for all of them.
+    """
+    return _shown_mapping(
+        {},
+        sorted(section.items()),
+        lambda name, entry: _envelope(
+            entity_body(descriptor, entry),
+            stored.get((descriptor.secret_slots, provider_identity(stage, name)), ()),
+        ),
+    )
 
 
 def mcp_servers(snapshot: Snapshot) -> dict[str, object]:
@@ -255,7 +316,7 @@ def _declared(entry: object, secret_key: Callable[[str], bool]) -> dict[str, obj
             data[name] = _masked(name, value, secret_key)
     return _shown_mapping(
         data,
-        getattr(entry, "model_extra", None) or {},
+        (getattr(entry, "model_extra", None) or {}).items(),
         lambda name, value: _masked(name, value, secret_key),
     )
 
@@ -327,7 +388,7 @@ def _shown(value: object, secret_key: Callable[[str], bool]) -> object:
         return _declared(value, secret_key)
     if isinstance(value, Mapping):
         return _shown_mapping(
-            {}, value, lambda key, nested: _masked(key, nested, secret_key)
+            {}, value.items(), lambda key, nested: _masked(key, nested, secret_key)
         )
     if isinstance(value, (list, tuple)):
         return [_shown(item, secret_key) for item in value]
@@ -338,7 +399,7 @@ def _shown(value: object, secret_key: Callable[[str], bool]) -> object:
 
 def _shown_mapping(
     into: dict[str, object],
-    mapping: Mapping[object, object],
+    pairs: Iterable[tuple[object, object]],
     rendered: Callable[[object, object], object],
 ) -> dict[str, object]:
     """One mapping as it may leave this module: every key shown without
@@ -354,6 +415,11 @@ def _shown_mapping(
     keyed by names somebody else chose. So the same strip is applied to
     both halves of a pair, and it is applied here, once, for every
     mapping any display or record builds (#408).
+
+    Pairs rather than a mapping, because half the callers have an order
+    to impose before they get here: an identity-keyed view sorts by the
+    name as it is STORED, and sorting after the strip would let what a
+    key hides decide where it appears.
 
     Rendered from the key as it is STORED, never from the shown one.
     The two rules read the same name and only one of them may change it:
@@ -378,7 +444,7 @@ def _shown_mapping(
     accepts such a key any more, so a collision needs a stored row
     holding two of them.
     """
-    for key, value in mapping.items():
+    for key, value in pairs:
         display = without_url_credential(key) if isinstance(key, str) else key
         if display in into:
             display = _unclaimed(display, into)
@@ -457,7 +523,7 @@ def provider_record(entry: ProviderConfig) -> dict[str, object]:
         data["api_key_env"] = mask(entry.api_key_env)
     if entry.egress is not None:
         data["egress"] = entry.egress
-    return _shown_mapping(data, entry.options, _recorded_pair)
+    return _shown_mapping(data, entry.options.items(), _recorded_pair)
 
 
 def recorded_option(value: object) -> object:
@@ -472,7 +538,7 @@ def recorded_option(value: object) -> object:
     (#408).
     """
     if isinstance(value, Mapping):
-        return _shown_mapping({}, value, _recorded_pair)
+        return _shown_mapping({}, value.items(), _recorded_pair)
     if isinstance(value, list):
         return [recorded_option(item) for item in value]
     if isinstance(value, str):
@@ -490,7 +556,34 @@ def _recorded_pair(key: object, value: object) -> object:
 def device_body(agents: Sequence[str]) -> dict[str, object]:
     """A binding is a list of agent names, in the shape a write of one
     takes, so what a read shows is what a write accepts back."""
-    return {"agents": list(agents)}
+    return {"agents": _bound(agents)}
+
+
+def _bound(agents: Sequence[str]) -> list[str]:
+    """The agent names one device is bound to, as a read shows them.
+
+    Beside `device_body` rather than inside it, because the whole
+    configuration document lists a device's bindings in a shape of its
+    own (a bare list, not a body) and the two must not be able to
+    disagree about what a name may carry.
+
+    No collision rule, and none is possible: a list keeps two entries
+    that shorten alike, which a mapping cannot.
+    """
+    return [_shown_identity(name) for name in agents]
+
+
+def _shown_identity(name: str) -> str:
+    """One stored identity as a view hands it back.
+
+    The rule is the value rule and the key rule, asked of the third
+    thing this module puts into an answer. It is a function rather than
+    a call at each site because there are six of them (the four
+    identity-keyed maps, a device's bindings and the default agent's
+    name) and because a reader meeting one of them should be able to
+    find the reasoning above without reconstructing it.
+    """
+    return without_url_credential(name)
 
 
 def _body(kind: str, entry: object) -> dict[str, object]:
@@ -510,7 +603,9 @@ def _bodies(section: Mapping[str, object], kind: str) -> dict[str, object]:
     """Every entry of one kind as the document shows it, by name: the
     bare bodies, since the document says where the stored secrets are in
     a list of its own."""
-    return {name: _body(kind, entry) for name, entry in sorted(section.items())}
+    return _shown_mapping(
+        {}, sorted(section.items()), lambda name, entry: _body(kind, entry)
+    )
 
 
 def _envelope(
@@ -518,18 +613,36 @@ def _envelope(
 ) -> dict[str, object]:
     """The entity, plus what is stored beside it. Kinds that can hold no
     stored secret answer with an empty mapping rather than with a
-    different shape, so one reader renders every read."""
+    different shape, so one reader renders every read.
+
+    Keyed by the slot, which is an identity like any other: a slot is
+    held to the same one-path-segment rule a name is, at write time
+    only, so a slot stored before that rule reaches every entity read
+    there is. It goes through the same map builder and gets the same
+    collision rule with it.
+    """
     return {
         "entity": body,
-        "secrets": {secret.location.slot: {"shadows": secret.shadows} for secret in secrets},
+        "secrets": _shown_mapping(
+            {},
+            ((secret.location.slot, secret) for secret in secrets),
+            lambda _slot, secret: {"shadows": secret.shadows},
+        ),
     }
 
 
 def _stored(secret: StoredSecret) -> dict[str, object]:
+    """One stored secret's location, as the document lists it.
+
+    The identity and the slot are both stored strings this hands back,
+    so both are shown the way every other identity is. `kind` is this
+    repository's own word and `shadows` is a field name off a model, and
+    neither is anybody else's to write.
+    """
     return {
         "kind": secret.location.kind,
-        "identity": secret.location.identity,
-        "slot": secret.location.slot,
+        "identity": _shown_identity(secret.location.identity),
+        "slot": _shown_identity(secret.location.slot),
         "shadows": secret.shadows,
     }
 
