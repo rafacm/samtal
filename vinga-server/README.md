@@ -2860,6 +2860,12 @@ two commands; that file is the trial and development story rather than
 the deployment story, and this section is the one home for what a
 deployment has to decide.
 
+This section stays that home, and
+[`../docs/deployment.md`](../docs/deployment.md) is the worked path
+through it: the same contract in a Docker Compose lane and a Kubernetes
+lane, against the committed artifacts under
+[`../deploy/`](../deploy/).
+
 **Run one replica.** Everything a running server serves from is state
 in its process: the pending activation codes new devices show, the
 configuration generation an apply swaps in, and the `max_sessions`
