@@ -757,7 +757,7 @@ apply does not move). Both become false at M2 and are rewritten there.
 `docs/architecture/observability-surfaces.md:37` carries the same claim
 in half a sentence and moves with them.
 
-**A schema comment, which needs a migration.** `memory.facts.owner`'s
+**Two schema comments, which need two migrations.** `memory.facts.owner`'s
 column comment says "Renaming an agent orphans its rows, exactly as it
 orphaned its file" (`memory/schema.py:103-112`), and it is committed DDL:
 `2002_memory_scopes` set it, and
@@ -771,6 +771,20 @@ down-revision `2002_memory_scopes`, altering that one comment and
 nothing else. It is the smallest honest migration and the CI wheel step
 exercises it.
 
+`record.conversations.agent`'s comment is the second, and it is a
+contract rather than an aside: it says the thread has one agent "and the
+only one it will ever have" (`conversations/schema.py:283-293`), which
+is what this plan's premise correction falsifies. What stays true is the
+sentence's real subject, that a conversation is a dialogue with exactly
+one agent and a handover starts a second thread; what changes is that
+the name that agent is filed under can be rewritten by a rename, while
+the dated columns beside it keep the name of the moment. M3 carries
+`1003_rename_moves_thread_ownership` on the record chain, down-revision
+`1002_conversation_threads`, altering that one comment, and
+`docs/reference/conversations-schema.md` regenerates from it through
+`vinga-server conversations schema`, since that page is rendered from
+these comments (`conversations/docgen.py:1-10`).
+
 **Docstrings that are the contract at their own surface**, in M3:
 `memory/api.py:453-459` (the owners listing explains itself by the
 orphaning) and `:630-633` (erasing an agent's memory is "the verb for an
@@ -783,8 +797,7 @@ milestone, and this plan's companion implementation doc gains a section
 per milestone in the change that ticks it.
 
 **Not touched, and stated so a reviewer does not go looking:**
-`docs/reference/conversations-schema.md` (the columns it documents do
-not change, only rows move), `docs/reference/events.md`,
+`docs/reference/events.md`,
 `config.example.yaml` and the preset examples (none of them documents
 the caveat; the orphaning text the issue remembers as living in the
 example configuration moved into the agent descriptor's note when memory
@@ -1008,8 +1021,11 @@ where it is enforced rather than asserting it.
   `Acknowledgement` answer; the sixth `Notice` and the three-arm choice;
   the acknowledgement's line composed from `Renamed` with the old name
   stripped; the route's cases and the boundary arms through `Act.read()`;
-  `2003_rename_moves_memory` altering the `facts.owner` comment, with
-  `memory/schema.py` moved in the same commit; the agent descriptor's
+  `2003_rename_moves_memory` altering the `facts.owner` comment and
+  `1003_rename_moves_thread_ownership` altering
+  `conversations.agent`'s, each with its `schema.py` moved in the same
+  commit, and `docs/reference/conversations-schema.md` regenerated;
+  the agent descriptor's
   note rewritten, which moves `docs/reference/domain-config.md`;
   `docs/reference/api-openapi.json` regenerated; the two README
   paragraphs, the observability line and the two `memory/api.py`
@@ -1183,6 +1199,21 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    say the rename rewrites the current owner's name while the dated rows
    are unchanged, add the forward migration on the record chain, and
    regenerate `docs/reference/conversations-schema.md`.
+
+   *Resolution*: accepted in full, and it caught a claim the plan had
+   made in the other direction: the documentation footprint said
+   `conversations-schema.md` was untouched because only rows move, which
+   is false the moment the comment above those rows stops being true.
+   The comment's real subject survives, that a conversation is a
+   dialogue with exactly one agent and a handover starts a second
+   thread; what changes is that the name it is filed under can be
+   rewritten while the dated columns keep the name of the moment. M3
+   carries `1003_rename_moves_thread_ownership` on the record chain,
+   down-revision `1002_conversation_threads`, and the page regenerates
+   through `vinga-server conversations schema`, which renders it from
+   these comments. The two migrations are named together in the
+   footprint, and the same test that forces the memory one forces this
+   one.
 
 7. **P2: the milestone that adds the route cannot run the client tests
    it claims.** The rename's `Act` arrives with the CLI, a milestone
