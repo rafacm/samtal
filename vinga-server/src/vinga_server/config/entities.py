@@ -557,13 +557,26 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         command=f"{PROGRAM} agent set <name> -f fragment.yaml",
         examples=("agent.yaml",),
         notes=(
-            "An agent's name is also the key its remembered facts and its held "
-            "removals are stored under, so renaming an agent orphans its own scope "
-            "of memory whole: the rows stay in the database under the old name and "
-            "the renamed agent starts empty. What the device it is bound to knows "
-            "is keyed by the board and survives the rename. Rename an agent that "
-            "has been accumulating facts for months only if you mean to lose them; "
-            f"`{PROGRAM} memory list agent` is what shows the orphaned name.",
+            "An agent's name is also the key its remembered facts, its held "
+            "removals and its conversation threads are stored under, and renaming "
+            "one moves all of them. A rename is a single transaction: the agents "
+            "row, every device binding that names it, the default agent if it was "
+            "one, the memory filed under it and the threads it owns, or nothing at "
+            "all. What the device it is bound to knows is keyed by the board and is "
+            "untouched either way.",
+            "A rename is refused when the new name is already taken anywhere it "
+            "would write: by an agent, by remembered facts, or by recorded "
+            "conversation threads. That refusal is what keeps the act reversible, "
+            "since a rename that merged two pasts into one could not be told apart "
+            "afterwards by any second rename.",
+            "What a rename deliberately does not rewrite is the record of what "
+            "happened: a session, a turn and an event keep the name the agent had "
+            "when they were written, so a thread whose owner was renamed is filed "
+            "under the new name with turns inside it under the old one. And the "
+            "running server goes on serving the old name until the stored "
+            "configuration is installed on it, so what a conversation still in "
+            "flight remembers in that window is filed under the old name; "
+            f"`{PROGRAM} memory list agent` is what shows such a row.",
             "Whether an agent remembers at all is its `memory` section, which is on "
             "unless it says otherwise. Switched off, the agent is offered no memory "
             "tools and is read no scope, its board's included.",

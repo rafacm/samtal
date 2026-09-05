@@ -453,9 +453,11 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         """Which agents are remembering anything, and how much.
 
         Every name that has a row, whether or not this deployment still
-        has an agent of that name: renaming an agent orphans its memory,
-        which is documented rather than prevented, and this listing is
-        where an operator sees that it happened.
+        has an agent of that name. A rename moves an agent's rows with
+        it, so what turns up here with no agent behind it is one of two
+        things: a deleted agent's memory, or what a conversation still
+        speaking an old name wrote between a rename and the install that
+        applied it. This listing is where an operator sees either.
         """
         return _owners(reader, MemoryScope.AGENT, limit, cursor)
 
@@ -629,8 +631,9 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
 
         Addressed at an owner rather than at a row, so an agent with
         nothing stored is erased of nothing and the count says so. This
-        is the verb for an orphan the listings turned up: a renamed
-        agent's rows have no other way out.
+        is the verb for an orphan the listings turned up: a deleted
+        agent's rows, and the ones a conversation still speaking an old
+        name wrote after a rename, have no other way out.
         """
         return _cleared(writer, MemoryScope.AGENT, _addressable(name))
 
