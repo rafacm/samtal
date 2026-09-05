@@ -90,6 +90,23 @@ Re-reading against a recorded commit takes a full clone: the shallow
 clones above fetch today's HEAD and can check out nothing else, so
 `git fetch --unshallow` first.
 
+**You do not have to notice upstream moving on your own.**
+[`upstream-watch.yaml`](upstream-watch.yaml) carries the same two
+commits and dates in a shape a workflow can read, beside the exact
+upstream paths these sections were read from, and the docs lane holds
+the manifest and the table above to full agreement in both directions
+(`scripts/upstream_watch.py check`), so bumping one without the other
+turns the lane red rather than lying quietly. Every Monday,
+[the drift workflow](../.github/workflows/upstream-drift.yml) diffs
+those paths from each pinned commit to upstream's HEAD and to
+upstream's latest release, and opens or updates one issue naming what
+moved. The loop when one arrives: read the changed source in a clone,
+update the sections here that are now wrong, bump the commit and the
+date in both homes together, and adjust implementation and tests only
+where the wire actually moved. A report can undercount, because only
+the deletion side of a rename is visible to it, so it is a prompt to
+re-read rather than a claim about everything that changed.
+
 ## The firmware, and the one URL that points it at a server
 
 **Maintained protocol facts**, with the dated field observations that
