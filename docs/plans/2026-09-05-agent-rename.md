@@ -1347,3 +1347,40 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    rather than a schema that can name its own agent references. A new
    column with no fixture behind it is caught by review, which is what
    caught this plan's own census.
+
+## Plan review round, the delta
+
+Backend codex, model `gpt-5.6-terra`, 2026-09-06, against the amended
+tip `2758a9a8`; the reviewer ran 2m04s. Verdict: ready after the P1/P2
+amendments. 1 P1, 1 P2 and 1 P3.
+
+1. **P1: translating the landing alone cannot produce the turn record
+   the plan promises.** `ConversationStore._write` inserts the turn row
+   before it builds the `threads.Landing`, and `_turn_row` takes the
+   agent straight off the record (`conversations/store.py:1234-1264`,
+   `:1342-1365`), so a translation applied at the landing leaves
+   `turns.agent` carrying the old name while the thread carries the new
+   one, which is not what the plan's own pin asserts. Translate the
+   writer's agent once at the durable-write boundary and use that one
+   value for both the turn row and the landing; say which other dated
+   fields stay verbatim, `legs[].agent` included; and make the
+   post-rename pin assert the row that was written rather than only the
+   thread's owner. Note that this qualifies the "dated record stays as
+   written" line for the post-rename turns of an in-flight session, and
+   the plan should state the distinction crisply: rows written before
+   the rename are dated record and stay, and rows written after it by a
+   stale writer are new writes carrying the current name.
+
+2. **P2: the refusal set is counted two ways.** Seven in the closed-set
+   section and in M1, "six-state" in the standing-lenses answer. Pick
+   one classification and use it everywhere, the test inventory
+   included.
+
+3. **P3: the writer's rename map has no lifecycle bound.** "Bounded by
+   the number of renames in one process's lifetime" is not a bound for a
+   long-running process. Resolve it deliberately: either state that the
+   map persists for the process's lifetime as a small
+   operator-controlled accumulation, with the size argument written
+   down, or define a session-tied retirement that still preserves the
+   translations a queued durable batch needs. Take the simpler
+   defensible one and record why.
