@@ -44,8 +44,9 @@ from tests.support.stores import body, planted
 from vinga_server import logs
 from vinga_server.config import entities, views
 from vinga_server.config.api import build_api
-from vinga_server.config.loader import ConfigError
+from vinga_server.config.loader import ConfigError, StorageError
 from vinga_server.config.models import (
+    AgentConfig,
     DatabaseConfig,
     McpServerConfig,
     ProviderConfig,
@@ -267,8 +268,35 @@ def _rendered(value: object) -> str:
 def _shows_the_address_without_the_credential(rendered: str, addresses: tuple[str, ...]) -> None:
     for address in addresses:
         assert address in rendered
-    for sentinel in SENTINELS:
-        assert sentinel not in rendered
+    _carries_no_sentinel(rendered)
+
+
+def _carries_no_sentinel(*renderings: str) -> None:
+    """No sentinel of the set, in any rendering a caller can reach.
+
+    The tuple is looped over rather than named one line at a time, which
+    is what keeps the every-surface claim honest as rows are added: a
+    case that named one sentinel went on passing when the table grew a
+    row carrying the other, which is exactly how the key rows arrived
+    with the stderr and header assertions still covering only the value
+    sentinel.
+    """
+    for rendering in renderings:
+        for sentinel in SENTINELS:
+            assert sentinel not in rendering
+
+
+def _logged(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Every record written while a command ran, in both formats this
+    server writes one in, which is the whole of what a no-leak claim
+    about a log can mean: a value kept out of stdout and written to a
+    log line is not kept."""
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    return [
+        rendering
+        for record in caplog.records
+        for rendering in (logs.JsonFormatter().format(record), text.format(record))
+    ]
 
 
 # The planted rows themselves, before any display
@@ -369,7 +397,7 @@ def test_the_api_read_of_one_entity_carries_no_credential(
 
     assert response.status_code == 200
     _shows_the_address_without_the_credential(response.text, row.shown)
-    assert SENTINEL not in str(dict(response.headers))
+    _carries_no_sentinel(str(dict(response.headers)))
 
 
 def test_the_api_document_read_carries_no_credential(
@@ -402,11 +430,7 @@ def test_the_cli_shows_the_deployment_without_any_credential(
 
     printed = capsys.readouterr()
     _shows_the_address_without_the_credential(printed.out, EVERY_ADDRESS)
-    assert SENTINEL not in printed.err
-    text = logging.Formatter(logs.TEXT_FORMAT)
-    for record in caplog.records:
-        assert SENTINEL not in logs.JsonFormatter().format(record)
-        assert SENTINEL not in text.format(record)
+    _carries_no_sentinel(printed.err, *_logged(caplog))
 
 
 @pytest.mark.parametrize("row", LEGACY, ids=IDS)
@@ -423,7 +447,7 @@ def test_the_cli_shows_one_entity_without_its_credential(
 
     printed = capsys.readouterr()
     _shows_the_address_without_the_credential(printed.out, row.shown)
-    assert SENTINEL not in printed.err
+    _carries_no_sentinel(printed.err)
     # And what was printed is a document rather than a line that
     # happened to hold the address, which is what a `show` is for.
     assert document(printed.out)
@@ -457,8 +481,7 @@ def test_an_export_of_a_legacy_store_imports_onto_a_store_of_its_own(
     assert first("export") == 0
     exported = capsys.readouterr().out
 
-    for sentinel in SENTINELS:
-        assert sentinel not in exported
+    _carries_no_sentinel(exported)
     for address in EVERY_ADDRESS:
         assert address in exported
 
@@ -491,8 +514,7 @@ def test_the_document_the_export_used_to_produce_is_still_refused(
 
     printed = capsys.readouterr()
     assert "user and password" in printed.err
-    assert SENTINEL not in printed.out
-    assert SENTINEL not in printed.err
+    _carries_no_sentinel(printed.out, printed.err)
 
 
 # The control: display fidelity, for everything that is not this
@@ -581,8 +603,162 @@ def test_two_keys_that_sanitize_alike_are_both_kept_and_told_apart(
     }
     # Nothing dropped, which is the half a deterministic rule exists for.
     assert len(entity["connection"]) == 2
-    for sentinel in SENTINELS:
-        assert sentinel not in response.text
+    _carries_no_sentinel(response.text, str(dict(response.headers)))
+
+
+# The identity itself, which is the third thing a view hands back
+#
+# A name is held to one URL path segment at WRITE time only, which
+# `store._check_addressable` records in as many words: a row written
+# before that rule still boots and still appears in a
+# whole-configuration read. It appeared with the credential in it, as a
+# map key in the document and in every listing, in the secret locations
+# beside them, and in the two projections that are a name rather than an
+# entity. The identifier below is planted into all of them at once.
+
+HISTORIC = f"https://user:{KEY_SENTINEL}@{HOST}/named"
+HISTORIC_SHOWN = f"https://{HOST}/named"
+
+
+@pytest.fixture
+def historic(store: ConfigStore) -> ConfigStore:
+    """A deployment whose provider, agent, device binding, default agent
+    and stored secret slot are all named the way no write would allow."""
+    _plant(store, "provider", ("llm", HISTORIC), ProviderConfig(type="mock"))
+    _plant(store, "agent", (HISTORIC,), AgentConfig(prompt="hi", llm=HISTORIC))
+    planted(
+        store,
+        insert(schema.devices).values(mac="aa:bb:cc:dd:ee:ff", agents=[HISTORIC]),
+        insert(schema.domain_settings).values(key=schema.DEFAULT_AGENT_KEY, value=HISTORIC),
+        # A slot is addressed by the same rule a name is, so it has the
+        # same history. The envelope is never opened by a read: what a
+        # view shows is the slot and what it shadows.
+        schema.providers.update()
+        .where(schema.providers.c.name == HISTORIC)
+        .values(secrets={HISTORIC: {"v": 1, "ct": "x", "key": "k"}}),
+    )
+    return store
+
+
+def test_the_historic_identifier_really_is_one_no_write_would_accept() -> None:
+    """The guard, and the measured half of the trade-off in one.
+
+    Such a name carries a credential, which is why it may not be shown.
+    It also holds a slash, because `://` does, and a name holding a
+    slash is what the addressability rule refuses: a row named this way
+    cannot be fetched or deleted over the API, so what a sanitized
+    display costs is a spelling that was never a working handle.
+    """
+    assert url_credential(HISTORIC) is not None
+    assert without_url_credential(HISTORIC) == HISTORIC_SHOWN
+    assert "/" in HISTORIC
+
+
+def test_the_whole_configuration_document_names_nothing_verbatim(
+    historic: ConfigStore,
+) -> None:
+    """Every identity-keyed map and both name-shaped projections, in one
+    answer: the providers by stage, the agents, the device's bindings,
+    the default agent and the secret locations."""
+    document = views.config(historic.load())
+    rendered = _rendered(document)
+
+    config = document["config"]
+    assert list(config["providers"]["llm"]) == [HISTORIC_SHOWN]
+    assert list(config["agents"]) == [HISTORIC_SHOWN]
+    assert config["devices"] == {"aa:bb:cc:dd:ee:ff": [HISTORIC_SHOWN]}
+    assert config["default_agent"] == HISTORIC_SHOWN
+    assert [stored["slot"] for stored in document["secrets"]] == [HISTORIC_SHOWN]
+    assert [stored["identity"] for stored in document["secrets"]] == [f"llm.{HISTORIC_SHOWN}"]
+    _carries_no_sentinel(rendered)
+
+
+def test_the_listings_and_the_name_projections_name_nothing_verbatim(
+    historic: ConfigStore,
+) -> None:
+    """The same identities through the reads that answer one kind at a
+    time, which is where a listing's key and an envelope's secret slot
+    are built."""
+    snapshot = historic.load()
+
+    assert list(views.providers(snapshot)["llm"]) == [HISTORIC_SHOWN]
+    assert list(views.agents(snapshot)) == [HISTORIC_SHOWN]
+    assert views.devices(snapshot)["aa:bb:cc:dd:ee:ff"]["entity"] == {
+        "agents": [HISTORIC_SHOWN]
+    }
+    assert views.default_agent(snapshot.domain.default_agent) == {"name": HISTORIC_SHOWN}
+    assert list(views.providers(snapshot)["llm"][HISTORIC_SHOWN]["secrets"]) == [
+        HISTORIC_SHOWN
+    ]
+    for view in (views.providers, views.agents, views.devices, views.listing):
+        rendered = _rendered(
+            view("agent", snapshot) if view is views.listing else view(snapshot)
+        )
+        _carries_no_sentinel(rendered)
+
+
+def test_the_api_and_the_cli_name_nothing_verbatim(
+    historic: ConfigStore,
+    client: TestClient,
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The two renderings an operator actually meets, on both process
+    streams and in both log formats."""
+    for path in ("/config", "/providers", "/agents", "/devices", "/default-agent"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert HISTORIC_SHOWN in response.text, path
+        _carries_no_sentinel(response.text, str(dict(response.headers)))
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("show") == 0
+
+    printed = capsys.readouterr()
+    assert HISTORIC_SHOWN in printed.out
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
+
+
+def test_two_historic_names_that_sanitize_alike_are_both_kept(
+    store: ConfigStore,
+) -> None:
+    """The collision rule reaches the identity maps too, which is the
+    other half of routing them through the same builder. Two rows are
+    two rows in the answer, whatever their names shorten to."""
+    for user in ("one", "two"):
+        _plant(
+            store,
+            "provider",
+            ("llm", f"https://{user}:{KEY_SENTINEL}@{HOST}/named"),
+            ProviderConfig(type="mock"),
+        )
+
+    listed = views.providers(store.load())["llm"]
+
+    assert list(listed) == [HISTORIC_SHOWN, f"{HISTORIC_SHOWN}#2"]
+    _carries_no_sentinel(_rendered(listed))
+
+
+def test_a_device_mac_cannot_carry_one_because_the_load_path_refuses_it(
+    store: ConfigStore,
+) -> None:
+    """Why the devices map's KEY is the one identity with no strip on
+    it, asserted rather than assumed.
+
+    Every other identity here is checked at write time only, so a
+    planted one reaches a view. A MAC is checked on the way OUT as well:
+    the row is refused by the load, so it never reaches a view at all
+    and a strip on that key would be code nothing can run. The refusal
+    names the rule and not the value.
+    """
+    planted(store, insert(schema.devices).values(mac=HISTORIC, agents=["sam"]))
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    assert "a MAC address is six colon-separated hex pairs" in str(caught.value)
+    _carries_no_sentinel(chain(caught.value))
 
 
 # The record path, which asks the same question and keeps its answer
@@ -610,7 +786,7 @@ def test_a_record_of_such_a_provider_carries_no_credential_in_a_key() -> None:
 
     assert record[f"https://{HOST}/top"] == "ordinary"
     assert record["connection"] == {f"https://{HOST}/deep": "ordinary"}
-    assert KEY_SENTINEL not in _rendered(record)
+    _carries_no_sentinel(_rendered(record))
 
 
 # The write, which no longer lets one in
@@ -691,12 +867,7 @@ def test_a_url_credential_in_a_key_is_refused_and_never_quoted_back(
     detail = refusal_body(response.json(), 422)
     assert detail.startswith(where)
     assert "a key is a name and not an address" in detail
-    assert KEY_SENTINEL not in response.text
-    assert KEY_SENTINEL not in str(dict(response.headers))
-    text = logging.Formatter(logs.TEXT_FORMAT)
-    for record in caplog.records:
-        assert KEY_SENTINEL not in logs.JsonFormatter().format(record)
-        assert KEY_SENTINEL not in text.format(record)
+    _carries_no_sentinel(response.text, str(dict(response.headers)), *_logged(caplog))
     # And nothing of the refused write landed.
     assert client.get(path).status_code == 404
 
@@ -717,8 +888,7 @@ def test_the_refusal_carries_the_key_on_nothing_it_raises(store: ConfigStore) ->
             },
         )
 
-    assert KEY_SENTINEL not in chain(caught.value)
-    assert KEY_SENTINEL not in str(caught.value.problems)
+    _carries_no_sentinel(chain(caught.value), str(caught.value.problems))
 
 
 def test_the_cli_refuses_such_a_key_on_both_streams(
@@ -740,9 +910,4 @@ def test_the_cli_refuses_such_a_key_on_both_streams(
 
     printed = capsys.readouterr()
     assert 'a key in "mcp_servers.fresh.env"' in printed.err
-    assert KEY_SENTINEL not in printed.out
-    assert KEY_SENTINEL not in printed.err
-    text = logging.Formatter(logs.TEXT_FORMAT)
-    for record in caplog.records:
-        assert KEY_SENTINEL not in logs.JsonFormatter().format(record)
-        assert KEY_SENTINEL not in text.format(record)
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
