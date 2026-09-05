@@ -411,6 +411,45 @@ def test_two_candidate_issues_refuse_and_name_both(tmp_path: Path) -> None:
     assert "Traceback" not in done.stderr
 
 
+def filler(count: int) -> list:
+    """Issues that are not candidates, to push the real ones down."""
+    return [
+        {"number": n, "title": f"Something else {n}", "body": "no marker"}
+        for n in range(1, count + 1)
+    ]
+
+
+def test_a_match_past_the_first_page_is_still_found(tmp_path: Path) -> None:
+    """gh issue list returns thirty by default; decide reads them all.
+
+    The workflow asks for a much higher limit for exactly this reason,
+    and this pins the script's half of it: nothing here stops at a
+    page boundary.
+    """
+    issues = issues_file(
+        tmp_path,
+        filler(40)
+        + [{"number": 909, "title": "Upstream drift report", "body": MARKER}],
+    )
+    done = decide(report_file(tmp_path), issues)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "update 909"
+
+
+def test_an_ambiguity_past_the_first_page_still_refuses(tmp_path: Path) -> None:
+    issues = issues_file(
+        tmp_path,
+        [{"number": 909, "title": "Upstream drift report", "body": MARKER}]
+        + filler(40)
+        + [{"number": 910, "title": "Upstream drift report", "body": MARKER}],
+    )
+    done = decide(report_file(tmp_path), issues)
+    assert done.returncode == 1
+    assert done.stdout.strip() == ""
+    assert "#909" in done.stderr
+    assert "#910" in done.stderr
+
+
 def test_an_empty_report_is_never_written_anywhere(tmp_path: Path) -> None:
     empty = tmp_path / "empty.md"
     empty.write_text("", encoding="utf-8")
