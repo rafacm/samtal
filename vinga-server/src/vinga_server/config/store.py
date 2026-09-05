@@ -534,6 +534,19 @@ class ConfigStore:
         rename back and there is no half-renamed state to compensate
         for.
 
+        And the sessions in flight are ordered against, rather than left
+        to meet the moved rows on their own. A live session goes on
+        talking as the name it opened with, so a turn it writes after
+        this would be refused by the thread it is on, or would
+        materialize that thread under a name nothing answers to. Both
+        are closed by holding the conversation record's ordering lock
+        across this transaction and the publication that follows it, and
+        by publishing the pair of names to whichever writer is recording
+        in this process: the writer holds the same lock from before it
+        opens a durable transaction until that transaction has read what
+        was published, so a rename and a marker are totally ordered and
+        the second one sees all of the first.
+
         What is rewritten is every reference something reads to decide
         what happens next, and nothing else. The agents row's key, the
         device bindings that name it, the default agent, the facts filed
@@ -563,24 +576,38 @@ class ConfigStore:
         destination = _identifier(_location(_AGENT), new)
         if source == destination:
             raise ConfigError(SAME_NAME)
-        with self._transaction() as connection:
-            domain = _read_domain(connection)
-            if source not in domain.agents:
-                raise UnknownEntityError(_missing(_AGENT))
-            if destination in domain.agents:
-                raise AgentRenameConflictError(AGENT_EXISTS)
-            staged = _stage_rename(domain, source, destination)
-            _refuse_unresolved(domain)
-            _rename_agent_row(connection, source, destination)
-            _persist(connection, staged.rows)
-            # Key 2, then key 3. Each function takes its own chain's
-            # lock as its first statement, so the order is a property of
-            # the two functions rather than of this call site; what this
-            # site owes them is the sequence.
-            threads = conversation_record.rename_agent(connection, source, destination)
-            facts = agent_memory.rename_owner(
-                connection, MemoryScope.AGENT, source, destination
-            )
+        # Outside the transaction and outside every chain lock, which is
+        # the order both holders of this one keep. It covers the instant
+        # between the commit and the publication below, and it is
+        # released whichever way this leaves: a refusal publishes nothing
+        # because nothing moved.
+        with conversation_record.erasure_order():
+            with self._transaction() as connection:
+                domain = _read_domain(connection)
+                if source not in domain.agents:
+                    raise UnknownEntityError(_missing(_AGENT))
+                if destination in domain.agents:
+                    raise AgentRenameConflictError(AGENT_EXISTS)
+                staged = _stage_rename(domain, source, destination)
+                _refuse_unresolved(domain)
+                _rename_agent_row(connection, source, destination)
+                _persist(connection, staged.rows)
+                # Key 2, then key 3. Each function takes its own chain's
+                # lock as its first statement, so the order is a property
+                # of the two functions rather than of this call site;
+                # what this site owes them is the sequence.
+                threads = conversation_record.rename_agent(
+                    connection, source, destination
+                )
+                facts = agent_memory.rename_owner(
+                    connection, MemoryScope.AGENT, source, destination
+                )
+            # After the commit and still inside the order, which is what
+            # a live session's writer needs: it holds the same lock from
+            # before it opens a durable transaction until that
+            # transaction has read what was published, so it either
+            # wrote before any of this or writes knowing all of it.
+            conversation_record.renamed(source, destination)
         return Renamed(
             old=source,
             new=destination,
