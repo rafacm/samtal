@@ -408,25 +408,115 @@ rename is precisely the act that moves a name onto a different body. An
 it mattered, so the middle arm is chosen by what the transaction
 rewrote, which is a fact of this write.
 
-### The two windows
+### The sessions in flight, and the order that covers them
 
-Both are stated rather than closed, because closing either costs more
-than it buys and neither is new.
+A live session holds the agent's name for as long as it lasts
+(`runtime/pipeline.py:793-797`, and `_world_of` keeps it on the world it
+opened with), and the rename moves the store underneath it. Left alone,
+that is not a cosmetic mismatch, it is two defects:
 
-- **Between the write and the apply**, the running server serves the old
-  name. A conversation started in that window remembers under the old
-  name, and those rows are new orphans the rename did not move. The
-  window is the one every domain write has, it is exactly what the
-  `applies` token tells the operator to close, and the memory listing is
-  where an orphan from it shows up. Moving the memory at apply time
-  instead was considered and rejected: it would split one transaction
-  across two clocks and make the rewrite conditional on an apply that
-  may never come.
-- **A conversation in flight** keeps the world it opened with, per
-  `_world_of`, so it goes on talking as the old name until it ends, and
-  writes memory there. This is the merged behavior for an agent deleted
-  underneath a live session, and a rename is not entitled to a better
-  one.
+- **A materialized thread drops the rest of the conversation.**
+  `threads.landed()` refuses a landing whose agent does not match the
+  stored `conversations.agent` with `MisattributedTurn(ANOTHER_AGENT)`
+  (`threads.py:261-294`), and the durable writer answers any exception
+  that is not a busy one by failing the marker's whole batch
+  (`conversations/store.py:1038-1074`). So every turn spoken after the
+  rename is lost, silently, and so are the ones batched with it.
+- **A thread that has not materialized recreates the detachment.** The
+  other branch of `landed()` INSERTs a conversation row from the
+  landing, so a session that reaches its first turn after the rename
+  writes a fresh row under the old name: a new live reference to a name
+  no agent answers to, made by the very act that removes them.
+
+Both come from one property the guard's own docstring states as an
+invariant, that "a thread id is minted per agent and never shared". It
+stays true; what stops being true is that a thread's agent has one name
+for the thread's whole life. So the rename owes the writers an ordering
+and a handoff, and the repository already has the shape of both,
+because a thread erasure has exactly this problem and solved it.
+
+**The protocol, which is the erasure's with a different fact
+published.** `conversations/store.py:270-320` describes the hazard in
+its own words: a store change is two steps, the transaction and the
+publication to whoever holds rows in this process, and between the
+commit and the publication a writer can slip in. `_erasure_order` covers
+that instant, taken OUTSIDE every chain lock and never inside, held by
+the changing side across its transaction and its publication, and by the
+writer from before it opens a durable transaction until that transaction
+has the chain lock and has read what was published.
+
+The rename takes the same lock, for the same reason, in the same
+position, and publishes a different fact:
+
+1. Enter `erasure_order()` before the transaction is opened. The name is
+   the erasure's today and the comment above it says the property is
+   about writers rather than about deletions; it gains the rename as its
+   second holder and the comment says so. Renaming the lock was
+   considered and left to the milestone: the sentence it needs is
+   "every store change a live writer must observe atomically", and
+   changing a merged name is a rename this plan does not need.
+2. Run the one transaction, taking the chain locks in ascending order
+   under it, exactly as the erasure does.
+3. After the commit and still inside the order, publish the rename to
+   this process the way `erased()` publishes dead thread ids, through a
+   sibling that reaches the same register of writers.
+4. Leave the order.
+
+**What a writer does with it.** The conversation writer keeps a small
+map from a name it may still be handed to the name that name is now,
+and applies it to a landing's agent before `landed()` sees it. Both
+defects close at once: the materialized case matches the stored row and
+is stored rather than dropped, and the un-materialized case INSERTs
+under the new name. Chained renames stay flat rather than needing a
+walk, by composing on insert: adding `old -> new` first rewrites every
+entry whose value is `old`. The map is bounded by the number of renames
+in one process's lifetime, which is bounded by an operator typing them.
+
+**What that makes `turns.agent` say**, because it is the one thing the
+translation decides rather than preserves: a turn spoken before the
+rename keeps the old name and a turn spoken after it carries the new
+one. That is what a dated column is supposed to say, since at the moment
+of that turn the agent's name was the new one, and it is the reading
+this plan's own line already implies.
+
+**And the process boundary, stated.** The register and the lock are
+process-local, exactly as the erasure's are, and that is sound for the
+same reason: the writer, the route and the publication are the one
+server process, and the deployment is one replica by
+[a recorded decision](../adr/2026-09-04-one-replica-is-the-supported-topology.md).
+The break-glass local door is the exception and is safe by construction
+rather than by the lock: it is for a deployment whose server will not
+start, so there is no writer to order against. A rename typed through it
+against a *running* deployment's database is outside the order, and the
+CLI reference's door already says the local one is not for that.
+
+### The window that stays
+
+One, and it is stated rather than closed.
+
+**Between the write and the apply**, the running server goes on serving
+the old name: a session in flight keeps talking as it, per `_world_of`,
+and what it remembers is written under the old name, so those rows are
+new orphans the rename did not move. The window is the one every domain
+write has, it is what the `applies` token tells the operator to close,
+and the memory listing is where an orphan from it shows up. Moving the
+memory at apply time instead was considered and rejected: it would split
+one transaction across two clocks and make the rewrite conditional on an
+apply that may never come.
+
+**The memory store is deliberately not a second subscriber**, and the
+asymmetry with the conversation writer is the point rather than an
+oversight. The two consequences differ in kind: an untranslated landing
+loses turns and manufactures a live reference, while an untranslated
+`remember` writes a row the audit door already shows and the operator
+door can already move. And the cost differs too: the conversation writer
+has one boundary where a name enters (`landed`), while `MemoryStore`
+takes the agent's name in eight session-facing methods, so translating
+there would put the interpretation of a configured name in eight places
+in a store whose whole interface is that name. Recorded here rather than
+left to be rediscovered, with the publication named as the hook a
+follow-up would attach to; the follow-up is filed in the milestone that
+ships the protocol.
 
 ### The cross-schema transaction: three chains, ascending
 
@@ -540,6 +630,16 @@ beside the decision it belongs to.
   chain's lock, beside `erase_facts` which it mirrors.
 - **`conversations/threads.py` gains `rename_agent`**, the same shape,
   beside the reads that filter on the column it moves.
+- **`conversations/store.py` gains the publication and the order's
+  second holder**, beside `erased()` and `erasure_order()`: one function
+  announcing a rename to the register of writers this process holds, and
+  the comment above `_erasure_order` gains the rename as a second holder
+  of the same rule.
+- **`ConversationStore` gains the translation**, one map and one lookup
+  applied where a landing's agent enters, beside `_discard_dead` which
+  is the same idea for the same reason. Not a module: it is four lines
+  in the object that already subscribes to what a store change publishes,
+  and a module beside it would be a name that hides nothing.
 - **`config/entities.py` gains one `Notice`**, the sixth, in the file
   that already owns the pairing of a sentence with the boundaries it
   announces.
@@ -553,12 +653,17 @@ beside the decision it belongs to.
   exists only because `cli.py` is long as the counterexample, and #386's
   review round applied it to exactly this file three days ago.
 
-**The seam that is new** is the one crossing into two foreign schemas,
-and it is stated as two function signatures rather than as a shared
-object: each store owns its SQL, the caller owns the transaction, and
-the lock order is a property of the functions rather than of the call
-site. That is `purge`'s seam widened by one store, and it is why the
-plan adds no store-to-store dependency in either direction.
+**Two seams are new, and both are merged shapes reused.** The first
+crosses into two foreign schemas and is stated as two function
+signatures rather than as a shared object: each store owns its SQL, the
+caller owns the transaction, and the lock order is a property of the
+functions rather than of the call site. That is `purge`'s seam widened
+by one store. The second is the publication, which crosses from the
+write to whoever in this process is holding the old name, and it is
+`erased()`'s seam carrying a different fact: a change to the store, an
+order that covers the instant between the commit and the announcement,
+and a holder that decides for itself what the announcement means for a
+row already on its way.
 
 ## Documentation footprint
 
@@ -567,15 +672,15 @@ Named by role, per [`docs/README.md`](../README.md)'s taxonomy.
 **Generated references, which move through their generators, never by
 hand:**
 
-- `docs/reference/api-openapi.json`, in M2: the new route, its request
+- `docs/reference/api-openapi.json`, in M3: the new route, its request
   body model and its responses. Regenerated with
   `uv run vinga-server config openapi > ../docs/reference/api-openapi.json`.
-- `docs/reference/domain-config.md`, in M2: the agent descriptor's note
+- `docs/reference/domain-config.md`, in M3: the agent descriptor's note
   is where the orphaning caveat lives
   (`config/entities.py:526-532`), and it is rewritten to say what a
   rename now does. This is the caveat the issue set out to remove, and
   it is generated, so the change is to the descriptor.
-- `docs/reference/cli.md`, in M3: the generated half grows the new
+- `docs/reference/cli.md`, in M4: the generated half grows the new
   command's help page.
 - `vinga-server/tests/unit/command-spellings.txt`, in every milestone:
   the manifest records physical line positions across every tracked
@@ -584,7 +689,7 @@ hand:**
   `uv run python -m tests.unit.test_command_spellings` before the unit
   lane.
 
-**A maintained map**, `vinga-server/README.md`, in M2: two paragraphs
+**A maintained map**, `vinga-server/README.md`, in M3: two paragraphs
 state the orphaning as a standing fact, at `:855-857` (the listings
 answer owners nothing is configured under, "renaming an agent orphans
 what it remembered") and at `:3159-3161` (the memory is the one thing an
@@ -601,12 +706,12 @@ built schema with the declared metadata through Alembic's own
 autogeneration. Alembic 1.18.5 compares column comments by default
 (`alembic/autogenerate/compare/comments.py`), so editing `schema.py`
 alone fails that test, and a migrated database would keep saying
-something false either way. So M2 carries `2003_rename_moves_memory`,
+something false either way. So M3 carries `2003_rename_moves_memory`,
 down-revision `2002_memory_scopes`, altering that one comment and
 nothing else. It is the smallest honest migration and the CI wheel step
 exercises it.
 
-**Docstrings that are the contract at their own surface**, in M2:
+**Docstrings that are the contract at their own surface**, in M3:
 `memory/api.py:453-459` (the owners listing explains itself by the
 orphaning) and `:630-633` (erasing an agent's memory is "the verb for an
 orphan the listings turned up: a renamed agent's rows have no other way
@@ -644,6 +749,24 @@ Reusing the assets that exist wherever the assertion already has a home.
   domain half: after the rename, `check_references` over the stored
   snapshot is empty, and the set of sections it walks is read from the
   function rather than restated.
+- **The in-flight cases, with the interleaving forced rather than
+  hoped for.** The two-writer arrangement #314 built and #328 hardened is
+  what drives them: a session writing turns while a rename commits, run
+  twice, once with the thread already materialized and once with its
+  first turn arriving after the rename. The materialized case asserts
+  every turn is stored and none is dropped, and that the thread's agent
+  is the new name; the un-materialized case asserts the row it created
+  carries the new name, which is the assertion that fails today by
+  creating a fresh detached reference. A third case takes the ordering
+  lock's own claim: a durable batch cannot commit between the rename's
+  commit and its publication, driven by a gate in that instant the way
+  the erasure suite drives its own.
+- **The translation's own pins**: a landing for an agent nothing renamed
+  is untouched; a chained rename resolves in one step, so a landing
+  under the first name lands under the third; and a turn spoken before
+  the rename keeps the old name in `turns.agent` while one spoken after
+  it carries the new, which is the dated column saying what was true
+  when.
 - **The lock-order pin joins the one #83 already has.**
   `docs/plans/2026-08-30-memory-scopes.md` records a test walking the
   erasure and retention paths and asserting that every transaction
@@ -793,7 +916,25 @@ where it is enforced rather than asserting it.
   module and no new seam beyond the two signatures. Documentation
   footprint: `CHANGELOG.md`, a dated execution record; the census
   manifest; the implementation-doc section.
-- [ ] **M2: the route, the boundary it announces, and the caveat it
+- [ ] **M2: the order that covers the sessions in flight.** The rename
+  enters `erasure_order()` before it opens its transaction and publishes
+  after it commits, still inside the order, through a sibling of
+  `erased()` that reaches the same register of writers; the comment
+  above `_erasure_order` gains the rename as its second holder; the
+  conversation writer keeps the composed map and translates a landing's
+  agent before `landed()` reads it; the forced-interleaving cases for a
+  materialized and an un-materialized thread, the case that proves a
+  durable batch cannot commit between the commit and the publication,
+  and the translation's own three pins; the follow-up issue for the
+  memory store's untranslated window, naming the same publication as its
+  hook. Still no route and no CLI, so the protocol lands whole before
+  anything can call it, which is what keeps a half-built handoff from
+  ever running; producer and consumer are one milestone for the reason
+  #386 gave, that a tolerance arriving a milestone later is a refusal in
+  between. Design footprint: one publication and one order beside the
+  ones they copy, one map inside the writer that already subscribes to
+  a store change; no new module.
+- [ ] **M3: the route, the boundary it announces, and the caveat it
   retires.** `POST /agents/{name}/rename` with its request model and
   `Acknowledgement` answer; the sixth `Notice` and the three-arm choice;
   the acknowledgement's line composed from `Renamed` with the old name
@@ -809,7 +950,7 @@ where it is enforced rather than asserting it.
   corrected in the same change rather than in a later tidy-up, which is
   the rule #386 settled. Design footprint: one route making one
   repository call; `entities.py` deepens by one notice; no new module.
-- [ ] **M3: the verb.** `vinga agent rename <old> <new>` as one
+- [ ] **M4: the verb.** `vinga agent rename <old> <new>` as one
   `Command` row with one `Act`, `destroys=False` with the reasoning in a
   comment on the row; the payload field on `Invocation`; the `declare`
   for one address and one payload word; `docs/reference/cli.md`
@@ -869,6 +1010,32 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    rather than only the lock order inside the rename, prevent both the
    mismatch drop and the old-name insertion, and test both with forced
    interleaving.
+
+   *Resolution*: accepted in full, and both branches reproduced by
+   reading before amending: `landed()` refuses on a name mismatch and
+   the durable writer answers a non-busy exception by failing the whole
+   batch, while the other branch INSERTs from the landing and so writes
+   a fresh row under the old name. The protocol is not invented for this:
+   a thread erasure has the identical hazard, and
+   `conversations/store.py:270-320` already states it, orders it with
+   `_erasure_order` outside every chain lock, and publishes to a
+   register of writers after the commit and inside the order. The rename
+   takes the same lock in the same position, publishes a rename through
+   a sibling of `erased()`, and the conversation writer translates a
+   landing's agent before `landed()` reads it, with the map composed on
+   insert so a chain of renames stays flat. Both defects close together:
+   the materialized case matches and is stored, the un-materialized case
+   inserts under the new name. What the translation decides rather than
+   preserves is written down, that a turn spoken after the rename
+   carries the new name in the dated column, which is the column saying
+   what was true when. The plan gains a section for the protocol, the
+   forced-interleaving cases with the two-writer arrangement #314 built,
+   the pin that no durable batch can commit between the commit and the
+   publication, the module-layout entries, and a milestone of its own:
+   the cut is now four, with the protocol landing whole before anything
+   can call it. The memory store is deliberately not a second
+   subscriber, with the asymmetry argued where the remaining window is
+   stated and a follow-up filed in the milestone that ships this.
 
 3. **P2: the record helper cannot take its chain's lock from
    `threads.py`.** `CONVERSATIONS_CHAIN` is declared in
