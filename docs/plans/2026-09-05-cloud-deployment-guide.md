@@ -352,7 +352,7 @@ convention permits.
 
 ## Milestones
 
-- [x] **[M1: the artifacts and their checks](2026-09-05-cloud-deployment-guide-implementation.md#m1-the-artifacts-and-their-checks)** (PR TBD). `deploy/k8s/` (five
+- [x] **[M1: the artifacts and their checks](2026-09-05-cloud-deployment-guide-implementation.md#m1-the-artifacts-and-their-checks)** (PR [#402](https://github.com/rafacm/vinga/pull/402)). `deploy/k8s/` (five
   applicable manifests and the two Secret templates the review round
   added), `deploy/docker-compose.production.yml`, the
   kubeconform step with pinned binary and checksum, the
