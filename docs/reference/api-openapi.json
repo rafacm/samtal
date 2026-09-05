@@ -4941,7 +4941,7 @@
               }
             ],
             "title": "Notice",
-            "description": "When this entry's change takes effect, in the same sentences a single write of it is acknowledged with, and null for an entry that was `unchanged`, which has nothing waiting to be applied."
+            "description": "What is true of this entry now, in the same sentences a single write of it is acknowledged with: a reader's half, saying what the write did and did not reach, and naming no command, because which command crosses a boundary is a fact of a client's grammar rather than of this server's. The boundary itself is `applies` beside it, which is the half to branch on. Null for an entry that was `unchanged`, which has nothing waiting to be applied."
           },
           "applies": {
             "items": {
