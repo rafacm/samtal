@@ -91,12 +91,31 @@ operator nothing. Naming one open-source controller is what decision
 1 newly permits, and ingress-nginx is the one with the widest
 install base. The committed `ingress.yaml` carries the ingress-nginx
 annotations (the read and send timeouts that keep an idle WebSocket
-open past the 60-second default, TLS termination, and the header
-comment pairing it with `FORWARDED_ALLOW_IPS` and
-`websocket_url`/`public_url`); the manifest's header and the guide
-both say these annotations are ingress-nginx's spellings and what
-each one is for, so an operator of another controller translates
-facts rather than reverse-engineering intent.
+open past the 60-second default, and TLS termination); the
+manifest's header and the guide both say these annotations are
+ingress-nginx's spellings and what each one is for, so an operator
+of another controller translates facts rather than
+reverse-engineering intent.
+
+The Ingress also draws the public security boundary explicitly
+rather than routing the port as one thing. Exactly two paths are
+routed: `/x/` (the short onboarding alias, which is the OTA
+endpoint a fresh deployment onboards through) and `/xiaozhi/v1/`
+(the WebSocket). `/api/` and the two probes are deliberately not
+routed, per the README's own first answer for the admin surface;
+the guide documents administration through
+`kubectl port-forward` (or exec into the pod), and points at the
+README's route-it-separately option for deployments that genuinely
+need more. The legacy OTA path is not routed either: a deployment
+whose boards were provisioned on it adds its own route behind a
+long random segment and sets `VINGA_SERVER__OTA_PATH` to the same
+value, and the guide states that agreement as the operator's to
+keep. The wiring is real values in `deployment.yaml` rather than
+prose: `VINGA_SERVER__WEBSOCKET_URL` (`wss://voice.example/xiaozhi/v1/`),
+`VINGA_SERVER__PUBLIC_URL` (`https://voice.example`) and
+`FORWARDED_ALLOW_IPS` (a narrowly scoped placeholder with the
+comment saying to set the ingress controller's own address, never
+`*`), each a placeholder the guide's walkthrough replaces.
 
 **The deferred kind boot smoke becomes its own issue when M2
 merges.** One sentence of scope exists (boot the freshly built image
@@ -379,6 +398,14 @@ answer every finding, and a delta re-review confirms them.
    URL, HTTPS public URL and narrow trusted-proxy value in
    `deployment.yaml`, and document API administration through
    port-forwarding or a separately restricted route.
+
+   *Resolution*: accepted in full. The Ingress routes exactly `/x/`
+   and `/xiaozhi/v1/`, excludes `/api/`, the probes and the legacy
+   OTA path (a legacy-provisioned deployment adds its own
+   random-segment route agreeing with `VINGA_SERVER__OTA_PATH`),
+   the three wiring values are placeholders in `deployment.yaml`
+   rather than prose, and the guide documents port-forward
+   administration first.
 
 6. **P1: the production compose refusal and its CI check do not
    work as described.** A required `env_file` only requires the file
