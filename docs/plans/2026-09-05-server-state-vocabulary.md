@@ -515,3 +515,63 @@ Reusing what exists wherever the assertion already has a home.
   and `docs/reference/cli.md` is asserted byte-identical;
   `vinga-server/tests/unit/command-spellings.txt` regenerates;
   `CHANGELOG.md` gains the entry.
+
+## Plan review round
+
+Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
+`44dcd490`; the reviewer ran 3m23s. Verdict: ready after the P1/P2
+amendments.
+
+1. **P1: unknown boundary tokens cannot reach the promised fallback.**
+   The plan requires `applies` to use the closed `responses.Applies`
+   vocabulary and also requires an unknown token to render the server
+   sentence alone. The CLI validates shared response models strictly:
+   `_declared()` leaves an unknown enum value as a string specifically
+   so validation refuses it, and `_understood()` then raises
+   `ConfigError` (`cli.py:2261-2292, 2307-2325`). Unlike the OTA
+   precedent, whose client field is deliberately `str | None`
+   (`simulator/board.py:366-385`), the proposed acknowledgement field
+   has no tolerant client-side representation, so a renderer-only
+   unknown-token test would pass while the real `Act.read()` path fails
+   before rendering. Define how producer-side closed validation and
+   consumer-side forward compatibility coexist, and exercise both
+   `Acknowledgement` and `AppliedDocument` through `Act.read()` with an
+   unknown token, asserting the token is never emitted.
+
+2. **P2: boundary-only import deduplication loses old-server notices.**
+   Every entry from an older server defaults to the same empty set, so
+   deduplicating solely by boundary set collapses two distinct legacy
+   notices (an ordinary stored entry and a device binding) into one.
+   Deduplicate known client remedies by boundary set but preserve
+   distinct fallback server sentences when `applies` is absent, empty or
+   unknown, and add a mixed-version import case with two different
+   notices and no `applies`.
+
+3. **P2: `config/remedies.py` fails the deletion test.** Its only caller
+   is `cli.py`, and inlining would still leave one table shared by
+   `DIFF_INTRO`, `_acknowledged` and `_imported_entries`, not two tables
+   that must agree. The design guide keeps a derived fact beside its
+   only caller and names a `config/cli_render.py` extraction as the
+   counterexample (`design-guide.md:99-124, 258-266`). Keep the remedy
+   table and its rendering helper in `cli.py` beside their consumers.
+
+4. **P2: M1's narrowed diff types leave an existing CI fixture
+   invalid.** `test_config_api_runtime.answer()` constructs the
+   provider, agent-defaults and agent sections with `Applies.RESTART`
+   though the real decision table emits `RELOAD`
+   (`test_config_api_runtime.py:877-907`, `diff.py:81-103`); those
+   constructions become invalid under the proposed `Literal`, so M1 as
+   named is not releasable. Amend the fixture to the actual boundaries,
+   and add a contract test proving each diff model rejects
+   `STORE_BOOT`: the enum-set equality pin proves membership
+   bookkeeping, not that the seven annotations enforce the narrowing.
+
+5. **P2: `AppliedEntry.notice` remains a stale served contract.** The
+   plan rewrites only `Acknowledgement.notice`'s description;
+   `AppliedEntry.notice`'s (`responses.py:1206-1211`,
+   `api-openapi.json:4919-4929`) still says the notice itself tells when
+   the change takes effect, and `_one_outcome`'s documentation and error
+   text call the notice "the boundary" (`responses.py:1214-1244`).
+   Rewrite `AppliedEntry.notice` in M2 to describe the state sentence
+   and direct boundary semantics to `applies`, update `_one_outcome`'s
+   prose and error text, then regenerate the OpenAPI document.
