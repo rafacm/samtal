@@ -50,6 +50,7 @@ from vinga_server.config.entities import APPLY_NOTICE
 from vinga_server.config.loader import ConfigError, ReloadInProgressError
 from vinga_server.config.responses import (
     AgentsReload,
+    Applies,
     ConfigReloadResult,
     FillersReload,
     McpReloadResult,
@@ -1225,3 +1226,94 @@ def test_no_imported_refusal_is_retained_on_its_chain() -> None:
         cli.IMPORT.read(body)
 
     assert SECRET not in _chain(caught.value)
+
+
+# A boundary this client does not recognize
+#
+# An acknowledgement carries `applies` beside the sentence, and this
+# client is one half of a pair that is not deployed together: the
+# walkthrough runs a new client against whatever image is already there,
+# which is how #386 was found. So the field has to be readable in three
+# states, and each of them has to go through the act that reads the
+# body rather than through a renderer handed a dictionary: strict
+# validation refuses a body before any renderer sees it, which is
+# exactly the failure a renderer-only case would not have seen.
+#
+# The middle state is #369's `sometime-in-the-future` bite in this
+# surface's terms: a token from a server newer than this client is read
+# as an older server's silence, never as a boundary to guess at.
+
+# A boundary no version of this server has ever emitted, spelled the way
+# a later one plausibly would.
+UNKNOWN_BOUNDARY = "sometime-in-the-future"
+
+ACKNOWLEDGED = {"wrote": "agent sam", "notice": APPLY_NOTICE.sentence}
+
+# Spelled as the wire spells them, which is what a body carries.
+TOLERATED = [
+    ("no applies at all, from a server older than the field", None, ()),
+    ("a token this client does not know", [Applies.RELOAD.value, UNKNOWN_BOUNDARY], ()),
+    ("an empty set", [], ()),
+    ("a set this client knows whole", [Applies.RELOAD.value], (Applies.RELOAD,)),
+]
+
+
+@pytest.mark.parametrize(
+    ("applies", "expected"),
+    [(applies, expected) for _, applies, expected in TOLERATED],
+    ids=[what for what, _, _ in TOLERATED],
+)
+def test_a_write_is_read_whatever_boundaries_it_announces(
+    applies: list[str] | None, expected: tuple[object, ...]
+) -> None:
+    """The single write's answer, through the act that reads it.
+
+    A body this client cannot read whole reads as the field's default,
+    which is what a server older than the vocabulary sends by saying
+    nothing: the write landed, and turning the sentence beside it into a
+    refusal would punish the client for the server's age after the fact.
+    """
+    body = ACKNOWLEDGED if applies is None else ACKNOWLEDGED | {"applies": applies}
+
+    answer = cli.BIND_DEVICE.read(body)
+
+    assert answer["notice"] == APPLY_NOTICE.sentence
+    assert answer["applies"] == expected
+    assert UNKNOWN_BOUNDARY not in repr(answer)
+
+
+@pytest.mark.parametrize(
+    ("applies", "expected"),
+    [(applies, expected) for _, applies, expected in TOLERATED],
+    ids=[what for what, _, _ in TOLERATED],
+)
+def test_an_imported_entry_is_read_whatever_boundaries_it_announces(
+    applies: list[str] | None, expected: tuple[object, ...]
+) -> None:
+    """And the same three states one level down, because the tolerance
+    lives in a walk over the shape and a nested entry is where a walk
+    goes wrong."""
+    entry = _entry() if applies is None else _entry(applies=applies)
+
+    answer = cli.IMPORT.read({"entries": [entry]})
+
+    read = answer["entries"][0]
+    assert read["notice"] == APPLY_NOTICE.sentence
+    assert read["applies"] == expected
+    assert UNKNOWN_BOUNDARY not in repr(answer)
+
+
+def test_an_unknown_boundary_is_never_printed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """What a body put in a closed field is not this client's to echo.
+
+    The rendering half of the rule above, on the one stream a far side's
+    words reach: an operator is told the sentence the server composed
+    and nothing this client could not read.
+    """
+    cli._imported(cli.IMPORT.read({"entries": [_entry(applies=[UNKNOWN_BOUNDARY])]}))
+
+    printed = capsys.readouterr()
+    assert APPLY_NOTICE.sentence in printed.err
+    assert UNKNOWN_BOUNDARY not in printed.out + printed.err

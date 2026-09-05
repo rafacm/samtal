@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
 from tests.support.stores import holding_the_write_lock, the_lock_held
+from vinga_server.config import entities
 from vinga_server.config.api import APPLY_BODY_LIMIT, build_api
 from vinga_server.config.entities import (
     APPLY_NOTICE,
@@ -32,6 +33,7 @@ from vinga_server.config.entities import (
     PROGRAM,
 )
 from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES, DatabaseConfig
+from vinga_server.config.responses import Applies
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -338,6 +340,34 @@ def test_the_three_clocks_are_not_in_a_per_write_sentence() -> None:
     """
     for clock in ("next activation", "next utterance", "next conversation"):
         assert clock not in APPLY_NOTICE.sentence, clock
+
+
+# And the boundaries beside the sentence
+#
+# A notice carries both halves now, so what a write answers with is the
+# pair rather than a sentence a reader has to recover a boundary from.
+# The half a test can go wrong about is the tokens: a client is taught
+# to tolerate one it does not recognize, and tolerance on the reading
+# side is never a licence to send one.
+
+
+def test_every_notice_this_server_composes_announces_a_known_boundary() -> None:
+    """The producer side stays closed, asserted from the other end.
+
+    No route can emit a token outside the vocabulary, and none can emit
+    a write that is waiting at nothing: a notice with an empty set would
+    be a sentence saying when a change lands beside a field saying it
+    has already landed, which is the disagreement `_one_outcome` refuses
+    on the other field of the same answer.
+    """
+    composed = [
+        value for value in vars(entities).values() if isinstance(value, entities.Notice)
+    ]
+
+    assert len(composed) == 5
+    for notice in composed:
+        assert notice.applies, notice.sentence
+        assert set(notice.applies) <= set(Applies), notice.sentence
 
 
 # The third sentence: what a reload applies

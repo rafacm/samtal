@@ -14,11 +14,15 @@ credential, the ciphertext holding it and the mark taken over it are
 each asserted absent from the whole answer.
 """
 
+from typing import get_args
+
+import pytest
 from cryptography.fernet import Fernet, MultiFernet
+from pydantic import BaseModel, ValidationError
 
 from tests.support.configs import config_with
 from tests.support.tools_mcp import entry_data
-from vinga_server.config import Config
+from vinga_server.config import Config, responses
 from vinga_server.config.boot import BootConfig
 from vinga_server.config.diff import (
     APPLIES,
@@ -30,7 +34,19 @@ from vinga_server.config.diff import (
     config_diff,
 )
 from vinga_server.config.models import DOMAIN_KEYS
-from vinga_server.config.responses import Applies, ConfigDiff, LiveKind
+from vinga_server.config.responses import (
+    AgentsDiff,
+    Applies,
+    ConfigDiff,
+    DiffApplies,
+    EntityDiff,
+    FallbackDiff,
+    FillerDiff,
+    GrantsDiff,
+    LiveKind,
+    PromptDiff,
+    SingletonDiff,
+)
 from vinga_server.config.secrets import SecretLocation, SecretStore, encrypt, generate_key
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -490,3 +506,83 @@ def test_every_domain_kind_carries_a_regime_and_a_row() -> None:
     # route sends: a kind the map placed and the response left out would
     # be a kind no client can read.
     assert tuple(ConfigDiff.model_fields) == DOMAIN_KEYS
+
+
+# The vocabulary, held from both ends
+#
+# `Applies` is what the server states a boundary in, and a comparison
+# can announce three of its four members: nothing pending against this
+# process is what a write to a server serving a handed configuration is
+# waiting on, so `store-boot` is a write's answer and never a diff's.
+# The narrowing is the alias `DiffApplies`, and it is only worth
+# anything if both halves hold: that the two sets together are the whole
+# enum, and that the seven fields really carry the alias.
+
+
+def test_the_diff_and_the_write_between_them_name_every_boundary() -> None:
+    """A fifth boundary cannot be added on one side alone.
+
+    Membership bookkeeping, deliberately: it says the alias and the one
+    member left out of it account for the enum, so a member added to
+    `Applies` and not placed here arrives with this failing.
+    """
+    assert set(get_args(DiffApplies)) | {Applies.STORE_BOOT} == set(Applies)
+
+
+# Every model of the comparison that carries a boundary, with the rest
+# of its fields at their emptiest, so that what a case varies is the
+# boundary alone. Written out rather than derived, and held to being all
+# of them by the completeness assertion below.
+NARROWED: dict[type[BaseModel], dict[str, object]] = {
+    EntityDiff: {"added": (), "removed": (), "changed": ()},
+    AgentsDiff: {
+        "added": (),
+        "removed": (),
+        "changed": (),
+        "grants": GrantsDiff(applies=Applies.RELOAD, changed=()),
+        "prompt": PromptDiff(applies=Applies.RELOAD, changed=()),
+        "filler": FillerDiff(applies=Applies.RELOAD, changed=()),
+        "fallback": FallbackDiff(applies=Applies.RELOAD, changed=()),
+    },
+    GrantsDiff: {"changed": ()},
+    PromptDiff: {"changed": ()},
+    FillerDiff: {"changed": ()},
+    FallbackDiff: {"changed": ()},
+    SingletonDiff: {"changed": False},
+    LiveKind: {},
+}
+
+
+def test_every_boundary_a_comparison_carries_is_one_of_the_narrowed_models() -> None:
+    """The completeness pin for the table above: a model of this read
+    that grew a boundary and was never pinned would leave the case below
+    passing while saying nothing about it."""
+    carrying = {
+        model
+        for model in vars(responses).values()
+        if isinstance(model, type)
+        and issubclass(model, BaseModel)
+        and "applies" in model.model_fields
+        and model.model_fields["applies"].annotation is DiffApplies
+    }
+
+    assert carrying == set(NARROWED)
+
+
+@pytest.mark.parametrize("model", list(NARROWED), ids=lambda model: model.__name__)
+def test_a_comparison_cannot_announce_the_boundary_it_never_reaches(
+    model: type[BaseModel],
+) -> None:
+    """Constructed rather than inspected, which is the half the
+    membership pin above cannot reach: seven fields could still be typed
+    `Applies` while the alias and the enum accounted for each other, and
+    the contract would declare a value this read never sends.
+
+    Both directions, so the narrowing is not merely a refusal: every
+    boundary a comparison does announce is still accepted.
+    """
+    with pytest.raises(ValidationError):
+        model(applies=Applies.STORE_BOOT, **NARROWED[model])
+
+    for boundary in get_args(DiffApplies):
+        assert model(applies=boundary, **NARROWED[model]).applies is boundary
