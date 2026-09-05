@@ -258,8 +258,14 @@ module's.
   from rendering `**(undescribed)**`.
 - **Renders from the models alone**: the child-interpreter pin from
   `test_config_docgen.py`, applied to
-  `vinga-server config reference server`: no database driver, no
-  key, no configuration file read.
+  `server_reference.reference()` imported directly (never through
+  `config.cli`, which reaches `store.py` and so SQLAlchemy and
+  cryptography by the recorded edge in `docgen.py`'s docstring),
+  with the harness's import allowlist and heavy-module denylist. A
+  separate CLI-level case proves the command's behavior rather than
+  its import list: `reference server` runs with no database
+  reachable, no configuration file and no key in the environment,
+  and succeeds.
 - **Deterministic**: two renders are byte-equal.
 - **Names every field**: every field path reachable from
   `ServerConfig` appears in the page (reflection sweep, the
@@ -388,6 +394,12 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    with an import allowlist and heavy-module denylist, and prove the
    CLI command opens no database, reads no configuration file and
    needs no key in a separate CLI-level test.
+
+   *Resolution*: accepted in full. The isolation pin now targets
+   `server_reference.reference()` imported directly under the
+   existing harness's allowlist and denylist, and a separate
+   CLI-level case proves `reference server` succeeds with no
+   database reachable, no configuration file and no key set.
 
 3. **P2: the halves selector is three hand-maintained closed
    sets.** The accepted names, the routing, the help and error
