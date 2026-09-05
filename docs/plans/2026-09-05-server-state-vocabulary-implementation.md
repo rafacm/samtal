@@ -289,14 +289,16 @@ transcript, so both of the #371 entries' right-hand sides gained the
 second line. The transcript itself is not recaptured, which is the
 whole point of it.
 
-**Three assertions outside the plan's list moved.**
-`test_config_cli.py`'s pin that a write prints one line and not a
-paragraph now names the two lines it prints, which is the pin doing its
-job: it is the one that would have caught an accidental paragraph.
-`test_config_diff_read.py` asserted the acknowledgement named
-`vinga apply` beside the comparison's `reload`; the pair it is really
-about is one vocabulary in two places, so it asserts the tokens now and
-the module stopped importing `PROGRAM`.
+**Three assertions outside the plan's list moved, one of them in the
+integration lane.** `test_config_cli.py`'s pin that a write prints one
+line and not a paragraph now names the two lines it prints, which is
+the pin doing its job: it is the one that would have caught an
+accidental paragraph. `test_config_diff_read.py` and the integration
+lane's `test_agent_guidance.py` each asserted the acknowledgement named
+`vinga apply` beside the comparison's `reload` label; the pair each is
+really about is one vocabulary read in two places, so both assert the
+tokens now, through the support module every other boundary assertion
+goes through, and neither imports `PROGRAM` any more.
 
 **`_one_outcome`'s refusal text is not in the served document.** The
 plan expects the OpenAPI document to regenerate for both it and the
@@ -344,9 +346,9 @@ round, and building M2 reopened none of them.
 ### Verification
 
 - `uv run ruff check .`: all checks passed.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5721 passed,
-  19 skipped, in 88s.
-- `uv run pytest tests/integration -q`: 243 passed in 396s.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5717 passed,
+  19 skipped, in 87s.
+- `uv run pytest tests/integration -q`: 243 passed in 352s.
 - The generated-document drift checks:
   `tests/unit/test_config_docgen.py` and
   `tests/unit/test_command_spellings.py`, 80 passed, with
@@ -355,7 +357,7 @@ round, and building M2 reopened none of them.
   `vinga-server/tests/unit/command-spellings.txt` through
   `uv run python -m tests.unit.test_command_spellings`, last, after this
   document was added. `tests/unit/test_api_openapi.py` and
-  `tests/unit/test_api_contract.py`, 148 passed, are what say the
+  `tests/unit/test_api_contract.py`, 197 passed, are what say the
   committed document moved deliberately and in one piece.
 - `uv run python scripts/check_doc_links.py .`: checked 203 files, 0
   failures.
