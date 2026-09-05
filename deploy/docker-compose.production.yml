@@ -88,6 +88,23 @@ services:
       VINGA_DB_USER: "${VINGA_DB_USER:?set VINGA_DB_USER in deploy/.env}"
       VINGA_DB_PASSWORD: "${VINGA_DB_PASSWORD:?set VINGA_DB_PASSWORD in deploy/.env; the shipped default is a loopback development convenience and never a deployment password}"
 
+      # And the variable that would beat all five. `VINGA_DB_URL`
+      # replaces the discrete facts whole when it is set
+      # (`db.connection_url`), so a value arriving through the required
+      # env file above would send this container at some other database
+      # and every guard beside it would be satisfied by values nothing
+      # then reads. Guarding it is not the answer: this lane's
+      # convention is deliberately the five discrete fields, and a
+      # deployment whose convention is one connection string writes its
+      # own file rather than half-using this one.
+      #
+      # Empty rather than absent, because absent is exactly what the
+      # env file could fill in. `connection_url` tests the value for
+      # truth, so an empty string reaches the same code path an unset
+      # one does; the trial file pins it the same way and for the same
+      # reason, and the claim is verified against the real resolver.
+      VINGA_DB_URL: ""
+
       # Where the server listens, pinned for the reason the trial file
       # pins them: the port mapping below, the image's own healthcheck
       # and the URL a device is told all assume 8003 on every interface
