@@ -1,0 +1,131 @@
+# One vinga server, hardened, against a Postgres you already run.
+#
+#     docker compose -f deploy/docker-compose.production.yml up -d --wait
+#
+# The `docker-compose.yml` at the repository root is a different file
+# for a different job and stays exactly as it is: it is the trial and
+# development story, two containers including a database, with loopback
+# convenience passwords, a moving image tag and deliberately no restart
+# policy so a trial reads the refusal rather than a restart loop. This
+# one is the deployment story. It is not a profile of that file, because
+# the topology is not a variant of it: there is no database service
+# here at all, and compose interpolates a whole file whatever profile is
+# selected, so the refusals below would break that file's profile-less
+# development invocation if they lived in it.
+#
+# What refuses, and what merely has to exist:
+#
+# - Every required value carries its own `${VAR:?...}` guard, so an
+#   omission stops `docker compose` before a container starts, naming
+#   the variable and never printing a value. That includes the five
+#   database facts: the server's own default password is a loopback
+#   development convenience, and a deployment reaching this file must
+#   not be able to inherit it by leaving a line out.
+# - `env_file` is required as well, and it is not the same promise. A
+#   required env file only requires the file to exist; it enforces
+#   nothing about what is in it. It is here for what the guards cannot
+#   enumerate: the provider credentials the domain configuration names
+#   by variable, which differ with every deployment.
+#
+# Both read the same file. Compose's project directory for this file is
+# `deploy/`, so the `.env` it interpolates from and the `.env` mounted
+# into the container's environment below are one file, `deploy/.env`,
+# and there is nothing to keep in step.
+#
+# The image's own HEALTHCHECK is left to do its job: it is /healthz,
+# which is liveness, and `--wait` gates on it. Nothing here reads
+# /readyz, which is for an orchestrator deciding where to send traffic
+# while the server runs.
+
+# Named, so the project is `vinga` rather than `deploy`, which is what
+# compose would otherwise derive from the directory this file sits in.
+# The name is what every `docker compose ls`, volume and network is
+# prefixed with, and a deployment whose volume is called
+# `deploy_vinga-data` is one nobody can find later.
+name: vinga
+
+services:
+  vinga:
+    # Required and unset, so this file cannot boot something nobody
+    # chose. Pin an immutable tag: `YYYY-MM-DD-HHmm` or
+    # `sha-<revision>`. `latest` and `slim` are moving pointers, and a
+    # moving pointer under a restart policy is a deployment that
+    # upgrades itself at the worst possible moment.
+    image: "${VINGA_IMAGE:?set VINGA_IMAGE in deploy/.env to a pinned image tag, an immutable YYYY-MM-DD-HHmm or sha-<revision> tag rather than latest}"
+
+    # What the trial file deliberately does without. The server refuses
+    # a database it cannot reach rather than waiting for one, and
+    # restarting is the orchestrator's job; here the orchestrator is
+    # this file. `unless-stopped` rather than `always`, so a deliberate
+    # `docker compose stop` stays stopped across a daemon restart.
+    restart: unless-stopped
+
+    env_file:
+      # The provider credentials the guards below cannot enumerate, and
+      # anything else this server should find in its environment. The
+      # same file compose interpolates from, per the header.
+      - path: ./.env
+        required: true
+
+    environment:
+      # The two server secrets, each with a guard of its own. Neither
+      # has a default anywhere: the configuration API is always mounted
+      # and always behind its token, and device authentication is on
+      # unless a deployment turns it off.
+      VINGA_AUTH_SECRET: "${VINGA_AUTH_SECRET:?set VINGA_AUTH_SECRET in deploy/.env, generated with openssl rand -hex 32}"
+      VINGA_API_SECRET: "${VINGA_API_SECRET:?set VINGA_API_SECRET in deploy/.env, generated with openssl rand -hex 32}"
+
+      # The five database facts, all required. The server has defaults
+      # for four of them and a default password for the fifth, and every
+      # one of those defaults describes an instance bound to loopback on
+      # a development machine. A deployment that reached them by
+      # omission would be pointed at the wrong database or, worse, at
+      # the right one with a password that is printed in this
+      # repository.
+      VINGA_DB_HOST: "${VINGA_DB_HOST:?set VINGA_DB_HOST in deploy/.env to the Postgres this deployment provides}"
+      VINGA_DB_PORT: "${VINGA_DB_PORT:?set VINGA_DB_PORT in deploy/.env}"
+      VINGA_DB_NAME: "${VINGA_DB_NAME:?set VINGA_DB_NAME in deploy/.env}"
+      VINGA_DB_USER: "${VINGA_DB_USER:?set VINGA_DB_USER in deploy/.env}"
+      VINGA_DB_PASSWORD: "${VINGA_DB_PASSWORD:?set VINGA_DB_PASSWORD in deploy/.env; the shipped default is a loopback development convenience and never a deployment password}"
+
+      # Where the server listens, pinned for the reason the trial file
+      # pins them: the port mapping below, the image's own healthcheck
+      # and the URL a device is told all assume 8003 on every interface
+      # inside the container, and a `VINGA_SERVER__HOST` or
+      # `VINGA_SERVER__PORT` arriving through the env file above would
+      # silently invalidate all three.
+      VINGA_SERVER__HOST: 0.0.0.0
+      VINGA_SERVER__PORT: "8003"
+
+    # Supported by the image: HOME points at /data and every engine
+    # caches there, so the only writable places this server needs are
+    # the volume below and a temporary directory.
+    read_only: true
+    tmpfs:
+      - /tmp
+
+    volumes:
+      # What every engine caches into: the whisper models and Piper
+      # voices a first conversation downloads. Named rather than a bind
+      # mount, so it survives a new image and a `docker compose down`.
+      - vinga-data:/data
+
+    # Above `server.drain_s`, which is 20 s by default. SIGTERM starts a
+    # drain that lets conversations in flight finish their sentence, and
+    # compose allows 10 s before SIGKILL, so the default would cut every
+    # redeploy off halfway through a spoken reply. A deployment that
+    # raises `drain_s` raises this with it.
+    stop_grace_period: 30s
+
+    ports:
+      # One port carries everything this server serves, the
+      # configuration API included, so what is in front of this port
+      # decides the security boundary. Behind a reverse proxy, publish
+      # to loopback (`127.0.0.1:8003:8003`) and let the proxy route the
+      # two device paths outward; the Ingress in `deploy/k8s/` draws
+      # that same boundary for the Kubernetes lane and says which paths
+      # they are.
+      - "8003:8003"
+
+volumes:
+  vinga-data:
