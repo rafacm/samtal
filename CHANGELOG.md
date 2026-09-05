@@ -9,6 +9,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The upstream wire contract is watched.** vinga speaks a protocol
+  it does not own, read from upstream sources at pinned commits, and
+  until now nothing noticed when upstream moved.
+  `docs/upstream-watch.yaml` names, per upstream repository, the clone
+  URL, the commit the protocol notes were read at, the read date and
+  the exact paths that carry the contract; the server repository's
+  paths were resolved from a clone at the pin rather than from memory.
+  `scripts/upstream_watch.py` is the one thing that parses it, and the
+  docs lane runs its `check` to hold the manifest and the currency
+  table in `docs/xiaozhi-notes.md` to identical repository sets, equal
+  commits and equal read dates in both directions.
+  `.github/workflows/upstream-drift.yml` runs every Monday: blobless
+  clones, a diff of the watched paths from each pin to upstream's HEAD
+  and to its latest release, ancestry validated so a target behind the
+  pin is reported rather than diffed backwards, and one labeled issue
+  opened or updated with the files and commit subjects that moved. A
+  week with no drift writes nothing.
+
 - **The server half has a generated reference.**
   `docs/reference/server-config.md` documents every key of the
   `server:` section: its type, its default, the bounds pydantic
