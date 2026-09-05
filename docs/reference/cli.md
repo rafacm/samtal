@@ -1443,6 +1443,10 @@ Commands:
   preview  the system prompt a new session as this agent would be sent, block by
            block with the size of each and the total; a conversation already
            running holds what it assembled when it started
+  rename   give one agent another name, moving its device bindings, the default
+           agent if it was one, what it remembered and the conversations it owns
+           in one transaction; refused whole if the new name is taken anywhere
+           it would write
 ```
 
 ### `vinga agent set`
@@ -1601,6 +1605,33 @@ Usage: vinga agent preview [OPTIONS] {NAME}
 
 Arguments:
   NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga agent rename`
+
+```
+Usage: vinga agent rename [OPTIONS] {NAME} {NEW}
+
+  give one agent another name, moving its device bindings, the default agent if
+  it was one, what it remembered and the conversations it owns in one
+  transaction; refused whole if the new name is taken anywhere it would write
+
+Arguments:
+  NAME  [required]
+  NEW   the name to give it, which no agent, no remembered facts and no recorded
+        conversations may already be under  [required]
 
 Options:
   --config PATH  path to the YAML config file naming server.port and

@@ -131,6 +131,7 @@ from vinga_server.config.responses import (
     PROBLEM_MEDIA_TYPE,
     PROBLEM_TITLES,
     Acknowledgement,
+    AgentRename,
     AppliedDocument,
     Applies,
     AssembledPrompt,
@@ -980,6 +981,14 @@ class Invocation:
     pairs: tuple[str, ...] = ()
     from_env: str | None = None
     entity: str | None = None
+
+    # And the payload that is a name rather than a document: the name a
+    # rename is to give the agent it addresses. It sits here rather than
+    # among the fields above it because it addresses nothing: the route
+    # is `/agents/{name}/rename`, so `name` above is the whole address
+    # and this is what the request carries. Spelled as the body's own
+    # key, the way `agents` is.
+    to: str = ""
 
     # And the provider type a schema is asked about, which goes with the
     # `stage` above: the two together name one type's options, since the
@@ -4835,6 +4844,39 @@ SHOW_ENTITY: dict[str, Act] = {
 }
 
 
+# The one act on a kind that is neither a read nor a write of an entry:
+# it gives one agent another name and moves everything still keyed by
+# the old one with it, in one transaction. Written out rather than built
+# per kind, because the API has this route under the agents and under
+# nothing else.
+#
+# Where it goes still comes off the descriptor, exactly as the four
+# above it do, so the noun this verb sits under and the path it
+# addresses cannot come to disagree.
+
+
+def _new_name(args: Invocation) -> object:
+    """The name a rename is to give the agent it addresses.
+
+    Sent as it was typed. What a name is allowed to be is the
+    repository's decision, made once there and answered in one
+    refusal, so nothing here strips it, measures it or looks at it: a
+    second reading would be a second vocabulary for one rule.
+    """
+    return {"to": args.to}
+
+
+RENAME_AGENT = Act(
+    method="POST",
+    path=_entity_path(entities.descriptor("agent"), "rename"),
+    body=_new_name,
+    sends=AgentRename,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+
 # A device binding and the default agent are domain-level fields written
 # with their own verbs (bind, claim, delete, set, clear) rather than from
 # a fragment, so their rows are written here rather than built from a
@@ -6434,6 +6476,14 @@ PROVIDER_SLOT_HELP = "the option it fills, such as api_key"
 
 MCP_SLOT_HELP = "env.<KEY> or headers.<KEY>"
 
+# The agent noun's one payload word. It is not an address and the line
+# says what it is instead: the name the agent is to have, and the rule
+# that decides whether it can have it.
+RENAME_TO_HELP = (
+    "the name to give it, which no agent, no remembered facts and no recorded "
+    "conversations may already be under"
+)
+
 SESSION_HELP = "the session's uuid hex, as a listing prints it"
 
 DEVICE_FILTER_HELP = "only the sessions of this board, by MAC (default: every board)"
@@ -6953,6 +7003,33 @@ def _named(row: Command) -> Callable[..., None]:
         no_input: NoInputOption = None,
     ) -> None:
         row.perform(_invocation(row, context, config, api_url, force, no_input, name=name))
+
+    return run
+
+
+def _renamed_to(row: Command) -> Callable[..., None]:
+    """A command addressing one entry by its name, with the name it is
+    to be given behind it.
+
+    The address first and the payload second, which is the route's own
+    order: `/agents/{name}/rename` addresses the agent by the name it
+    has, and the name it is to have travels in the body. One payload
+    word rather than a group, so the line reads left to right as the
+    act does.
+    """
+
+    def run(
+        context: typer.Context,
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        to: Annotated[str, typer.Argument(metavar="NEW", help=RENAME_TO_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(row, context, config, api_url, force, no_input, name=name, to=to)
+        )
 
     return run
 
@@ -7928,6 +8005,34 @@ COMMANDS: tuple[Command, ...] = (
             "the system prompt a new session as this agent would be sent, block by "
             "block with the size of each and the total; a conversation already running "
             "holds what it assembled when it started"
+        ),
+    ),
+    # The other verb of the agent noun that the registry does not build:
+    # one agent given another name, with every live reference to the old
+    # one moved in the same transaction. A verb rather than a `set` with
+    # a new key, because a rename is a thing that happens rather than a
+    # description of what should exist, and a document cannot say it.
+    #
+    # `destroys=False`, which is the guide's line rather than a feeling
+    # about the word: a verb destroys when its effect cannot be undone
+    # by running another command with information the operator still
+    # has, and this one is undone by vinga agent rename <new> <old>,
+    # which carries the memory and the threads back with it. What keeps
+    # that true is the refusals: a destination already holding an agent,
+    # remembered facts or recorded threads is refused, so a rename can
+    # never merge two pasts into one and leave a second rename unable to
+    # tell them apart. If a merge is ever licensed, this row grows the
+    # confirmation on the day it does.
+    Command(
+        words=("agent", "rename"),
+        kind="agent",
+        does=RENAME_AGENT,
+        declare=_renamed_to,
+        help=(
+            "give one agent another name, moving its device bindings, the default "
+            "agent if it was one, what it remembered and the conversations it owns "
+            "in one transaction; refused whole if the new name is taken anywhere it "
+            "would write"
         ),
     ),
     # The device is a noun the registry does not describe: a binding is
