@@ -63,8 +63,10 @@ through the configuration API.
 Read once at start and never re-read by a running process: the port, the
 paths, the limits, the barge-in tuning and the storage switches are what one
 server is serving until the next one starts. That is the line between the two
-halves, and it is why a change here is a restart while a change to the domain
-half is an apply or, for a device binding, nothing at all.
+halves. A change here is a restart; a change to the domain half is an apply,
+except for the two kinds a running server re-reads as a device asks for them,
+`devices` and `default_agent`, which reach a board at its next check-in with
+nothing asked of the server at all.
 
 Any key of it can be overridden from the environment as
 `VINGA_SERVER__<PATH>`, with `__` joining the nesting (`VINGA_SERVER__PORT`,
@@ -72,10 +74,20 @@ Any key of it can be overridden from the environment as
 The `database` section is the one recorded exception, with four short
 spellings of its own.
 
-No secret is ever written here. A key that carries one names the environment
-variable holding it instead, and the two values that are environment-only, the
-database password and the whole database URL, have no key on any of these
-models at all.
+No credential is ever written here. The API's bearer token, the device-auth
+secret and the database password are named rather than held: a key that
+carries one holds the name of the environment variable it is read from, and
+the two values that are environment-only, the database password and the whole
+database URL, have no key on any of these models at all.
+
+Two path fields are the exception to that, and they are worth naming because
+they do not look like secrets. A stock board can present no credential at its
+first OTA call, so the token issuer is protected by its own path: `ota_path`
+carries a long random segment on a publicly exposed deployment, and
+`onboarding.key` pins the short segment serving the same endpoint. Both are as
+sensitive as what they stand in front of, which is why neither is ever quoted
+back in a refusal, and both are better injected as `VINGA_SERVER__OTA_PATH`
+and `VINGA_SERVER__ONBOARDING__KEY` than committed into a file.
 
 | Key | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
@@ -109,9 +121,15 @@ The short onboarding path, /x/<key>/, an alias of the OTA endpoint.
 
 Onboarding a stock board means typing its backend URL into a captive portal on
 a phone, with no feedback on a typo, so the string has to be short and its
-alphabet unambiguous. The key is derived from the device-auth secret the
-deployment already has, never stored and never written here: it is stable
-across restarts and rotates only when the secret does.
+alphabet unambiguous. Left to itself, which is the normal case, the key is
+derived from the device-auth secret the deployment already has: nothing about
+it is stored, it is stable across restarts, and it moves only when that secret
+does.
+
+`key` below is the one exception, and the reason it exists: it pins a key into
+this file so that the one a rotation would have retired keeps working.
+Provisioned boards go on reaching the URL they were given while the new secret
+takes over everything else.
 
 On by default. The legacy path keeps working beside it, and a deployment that
 wants only the legacy one turns this off.
@@ -203,10 +221,11 @@ default is a loopback-only convenience.
 
 Recording sessions to disk for offline analysis.
 
-Off by default and off unless said otherwise, the same shape as
-`auth.enabled`. This writes room audio to disk, which is the opposite of what
-the rest of the project promises, so nothing here can turn it on by accident:
-the section has to exist and the flag has to say so.
+Off by default and off unless said otherwise. This writes room audio to disk,
+which is the opposite of what the rest of the project promises, so nothing
+here can turn it on by accident: the section has to exist and the flag has to
+say so. Writing the section is not consent, and neither is leaving it in
+place.
 
 The flag rather than the section's presence is what switches it, because the
 field workflow is to record, then stop, and the directory and the budgets are
@@ -230,10 +249,10 @@ echo leakage be measured rather than guessed (#28).
 
 Recording what was said into a database that can be queried.
 
-Off by default and off unless said otherwise, the same shape as
-`capture.enabled` and for the same kind of reason: this keeps conversation
-text on disk, so nothing here can turn it on by accident. The section has to
-exist and the flag has to say so.
+Off by default and off unless said otherwise, the shape `capture.enabled` has
+and for the same kind of reason: this keeps conversation text on disk, so
+nothing here can turn it on by accident. The section has to exist and the flag
+has to say so.
 
 No connection of its own. The record lives in the `record` schema of the
 database `database` above names, beside the domain half's `domain` schema: the
