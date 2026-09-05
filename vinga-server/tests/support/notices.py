@@ -48,15 +48,17 @@ RESTART = Applies.RESTART
 STORE_BOOT = Applies.STORE_BOOT
 
 # Every sentence this server composes, with the boundaries each one
-# announces, read off the pairing rather than restated. The five are
-# module constants because the two that depend on what the server is
-# serving are chosen per request from these same five.
+# announces, read off the pairing rather than restated. The six are
+# module constants because the ones that depend on what the server is
+# serving, or on what a transaction moved, are chosen per request from
+# these same six.
 _COMPOSED: tuple[entities.Notice, ...] = (
     entities.RESTART_NOTICE,
     entities.BINDING_NOTICE,
     entities.APPLY_NOTICE,
     entities.BINDING_UNSERVED_NOTICE,
     entities.SNAPSHOT_NOTICE,
+    entities.RENAME_UNSERVED_NOTICE,
 )
 
 
