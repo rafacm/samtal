@@ -140,6 +140,11 @@ it cannot come to describe a server this repository does not build.
   not boot, and every command's own help page.
 - [**reference/domain-config.md**](reference/domain-config.md): every
   field of the domain half, generated from the models.
+- [**reference/server-config.md**](reference/server-config.md): every
+  key of the server half, the `server:` section of the YAML file, with
+  its type, default, bounds and the combinations refused at boot,
+  generated from the same models. `config.example.yaml` is the
+  annotated starting point; this is the complete contract.
 - [**reference/api-openapi.json**](reference/api-openapi.json): the
   configuration API's contract, generated from the routes. It is what an
   install carrying the client alone reads instead of asking a server.

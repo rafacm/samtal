@@ -7,8 +7,12 @@
 #   uv run vinga-server --config /path/to/config.yaml
 #
 # This file holds the server half of the configuration: how the process
-# runs (server:). The domain half, everything about what the server says
-# and to whom
+# runs (server:). It is the annotated starting point, with a comment per
+# key; the complete contract is docs/reference/server-config.md,
+# generated from the models (also available as `vinga-server config
+# reference server`), which carries every key with its type, default,
+# bounds and the combinations refused at boot. The domain half,
+# everything about what the server says and to whom
 # (providers, mcp_servers, prompt_fragments, agent_defaults, agents,
 # devices, default_agent), lives in the Postgres database
 # server.database names and is written with the config commands. A whole
