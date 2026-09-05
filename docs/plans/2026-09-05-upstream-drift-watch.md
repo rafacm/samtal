@@ -102,10 +102,18 @@ validated target.
 When every diff is empty, the run ends green and writes nothing.
 When any is not, the report (changed files and commit subjects per
 repository and target, plus the manifest's pinned SHAs and the
-resolution loop's three steps) becomes the body of one issue: the
-workflow searches for an open issue labeled `upstream-drift`,
-updates its body if one exists, creates it (with the label) if none
-does, and never opens a second. The job's `permissions` grant
+resolution loop's three steps) becomes the body of one issue with
+a stable identity: the exact title "Upstream drift report", the
+`upstream-drift` label, and a machine marker comment in the body.
+The workflow searches open issues by label and holds candidates to
+the title and marker; exactly one match is updated, none means
+create (the label created with `--force` first), and more than one
+is a refusal that fails the run naming them rather than guessing
+which to overwrite. Concurrent runs are serialized by a
+workflow-level `concurrency` group with
+`cancel-in-progress: false`, so a manual dispatch landing beside
+the schedule queues instead of racing the search-then-create
+window. The job's `permissions` grant
 `issues: write` and `contents: read` and nothing else, and the
 permissions alone authorize nothing `gh` consumes: the
 issue-management step, and only that step, sets
@@ -335,6 +343,10 @@ so it rides, per the queue decision's condition.
    runs can both create. Use a stable identity (exact title plus a
    machine marker), refuse ambiguous matches, and serialize with
    workflow concurrency, cancellation disabled.
+
+   *Resolution*: accepted in full. Identity is exact title plus
+   label plus a body marker, ambiguity is a named refusal, and a
+   concurrency group with cancellation disabled serializes runs.
 
 8. **P2: the rename-behavior claim is false.** `git diff` never
    reports untracked files and an out-of-scope destination is
