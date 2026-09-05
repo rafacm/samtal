@@ -177,18 +177,29 @@ record that owns the reasoning) rather than a promise change.
   doc. A candidate that does not exist at the pin is a finding to
   record, not a path to guess.
 - `.github/workflows/upstream-drift.yml` (M1): the scheduled
-  workflow above. It never parses the manifest itself: it calls
-  `scripts/check_upstream_watch.py --print`, so exactly one parser
-  exists and the workflow reads shell-friendly rows.
-- `scripts/check_upstream_watch.py` (M1): the manifest's one parser,
-  run through the vinga-server environment
+  workflow above. It never parses the manifest itself and does no
+  selection logic in shell: it calls `scripts/upstream_watch.py`'s
+  `print`, `report` and `decide` subcommands, so exactly one parser
+  and one decision site exist.
+- `scripts/upstream_watch.py` (M1): one script, one parser, four
+  subcommands, run through the vinga-server environment
   (`uv run --project vinga-server`, where PyYAML is already a
-  dependency), in both workflows, so no runner-image Python detail
-  is load-bearing and hand-rolled YAML parsing is off the table.
-  Two modes: the default checks notes-table agreement (in the shape
-  of `check_doc_links.py`, fixed sentences naming the repository
-  that disagrees); `--print` emits `repo url pinned path` rows for
-  the drift workflow.
+  dependency), so no runner-image Python detail is load-bearing and
+  hand-rolled YAML parsing is off the table. `check` is the
+  agreement check the docs workflow runs (in the shape of
+  `check_doc_links.py`, fixed sentences naming the repository that
+  disagrees); `report` takes the manifest plus a directory of
+  already-fetched clones and builds the whole report (tag selection
+  under the stated policy, ancestry validation, the per-target
+  diffs, the body with its marker), writing it to a file so
+  upstream-controlled paths and subjects travel as file content and
+  quoted arguments, never through shell evaluation; `decide` takes
+  the report and the JSON of open labeled issues from
+  `gh issue list --json` and answers create, update (with the
+  number) or refuse (naming the ambiguous matches), so the
+  workflow's shell does no selection logic; `print` emits the rows
+  the clone step iterates. The workflow is thereby thin: clone,
+  `gh issue list`, and three script calls.
 - `docs/xiaozhi-notes.md` (M1): the currency section gains one
   paragraph naming the manifest, the workflow and the loop; the
   table itself is unchanged.
@@ -198,11 +209,23 @@ record that owns the reasoning) rather than a promise change.
 
 ## Tests and verification
 
-- `scripts/check_upstream_watch.py` runs in the docs workflow beside
-  the link checker, and its agreement check is exercised in both
-  directions locally before the PR: the committed state passes, and
-  a mutated SHA in a copied-aside manifest fails naming the
-  repository.
+- `scripts/upstream_watch.py check` runs in the docs workflow
+  beside the link checker, and the whole script is held by a
+  deterministic unit suite, `tests/unit/test_upstream_watch.py` in
+  vinga-server (the precedent is the link checker's own subprocess
+  suite from #329): synthetic local git repositories exercise no
+  change, changed watched paths, a deleted watched path, a
+  qualifying tag behind the pin (reported, not diffed), a divergent
+  tag, a missing pin SHA (a refusal naming the repository), and a
+  repository with no qualifying tag; `decide` is exercised over
+  fixture JSON for zero, one and two candidate issues, the
+  two-candidate case a refusal naming both; the agreement check is
+  exercised in both directions (the committed state passes; a
+  mutated SHA, a mutated read date, a missing row and a duplicated
+  row each fail naming the repository); and a report built from a
+  synthetic repository whose path and subject carry shell
+  metacharacters round-trips byte-identically through the file,
+  pinning the no-shell-evaluation property.
 - Pre-merge end-to-end evidence is the PR's own dry-run job: the
   `pull_request` trigger fires on the PR because the diff touches
   the workflow, the manifest and the script, and its run proves
@@ -245,7 +268,7 @@ record that owns the reasoning) rather than a promise change.
 
 - [ ] **M1: the manifest, the check, and the drift workflow.**
   `docs/upstream-watch.yaml` with the issue's candidate paths at the
-  currency table's pinned SHAs; `scripts/check_upstream_watch.py`
+  currency table's pinned SHAs; `scripts/upstream_watch.py`
   with the agreement check wired into the docs workflow and the
   `--print` mode the drift workflow parses with;
   `.github/workflows/upstream-drift.yml` (schedule plus dispatch,
@@ -365,3 +388,11 @@ so it rides, per the queue decision's condition.
    the report through files and quoted arguments so
    upstream-controlled paths and subjects are never evaluated as
    shell.
+
+   *Resolution*: accepted in full. The report and decision logic
+   move into the script (`report` and `decide` subcommands), the
+   deterministic synthetic-repository suite covers the named
+   branches plus the metacharacter round trip, `decide` is tested
+   over fixture issue JSON including the ambiguous case, and the
+   workflow's shell is reduced to clone, list and three script
+   calls.
