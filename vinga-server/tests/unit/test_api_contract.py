@@ -88,12 +88,6 @@ EXCLUDED: dict[tuple[str, str], str] = {
         "`vinga events tail` reads it through the streaming client seam instead of "
         "through a row (#342, milestone 2)"
     ),
-    ("POST", "/agents/{name}/rename"): (
-        "the rename, whose verb is the next milestone of #356. The route and the "
-        "boundary it announces land alone so that the reachable behavior is reviewed "
-        "without a client on top of it; the agent noun gains its rename verb in the "
-        "milestone after this one, and the act that carries it takes this row's place"
-    ),
     ("GET", "/sessions/{session}/turns"): (
         "the session's own timeline, which the grammar has no verb for: a turn listing "
         "wraps and a wrapped column is not a column, so reading dialogue is the "
