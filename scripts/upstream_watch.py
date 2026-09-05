@@ -4,7 +4,6 @@
 Usage:
   upstream_watch.py check [--manifest PATH] [--notes PATH]
   upstream_watch.py clone --clones DIR [--manifest PATH]
-  upstream_watch.py print [--manifest PATH]
   upstream_watch.py report --clones DIR --output FILE [--manifest PATH]
   upstream_watch.py decide --report FILE --issues FILE
 
@@ -23,7 +22,9 @@ shell.
   and unchecked-out, with an explicit all-tags fetch behind it. It
   lives here rather than in the workflow's shell so that no URL is
   ever handed to a shell and no git diagnostic ever reaches the log.
-- `print` emits one `<directory> <url>` row per repository.
+  It replaced a `print` subcommand that emitted rows for a shell loop:
+  once the loop was gone nothing consumed the rows, and a subcommand
+  with no caller is a name that hides nothing.
 - `report` takes a directory of already-fetched clones, resolves each
   repository's `origin/HEAD` and latest release tag, validates that the
   pin is an ancestor of each target, diffs the watched paths, and
@@ -83,6 +84,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -121,7 +123,7 @@ TABLE_ROW_RE = re.compile(
 )
 
 USAGE = (
-    "usage: upstream_watch.py {check|clone|print|report|decide} [options]\n"
+    "usage: upstream_watch.py {check|clone|report|decide} [options]\n"
     "the arguments were not understood; see the module docstring"
 )
 
@@ -201,6 +203,34 @@ def clone_dir(name: str) -> str:
     return name.replace("/", "__")
 
 
+def usable_url(url: str) -> bool:
+    """A manifest URL, held to a shape that cannot mean two things.
+
+    Strictly parsed rather than prefix-matched. A value carrying a
+    newline used to pass `startswith("https://")` and then arrive at
+    the workflow's line-oriented clone loop as two rows, one of them
+    naming a directory of the manifest's choosing; the loop is gone now
+    (`clone` does the work), and this makes the shape unrepresentable
+    as well as unused.
+
+    https is what upstreams are fetched over and what the committed
+    manifest carries, and `check` holds the committed manifest to
+    exactly that. file:// is accepted here alone, so the clone path can
+    be exercised against a local repository with no network.
+    """
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        return False
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    if parts.scheme == "https":
+        return bool(parts.hostname)
+    if parts.scheme == "file":
+        return bool(parts.path)
+    return False
+
+
 def load_manifest(path: Path) -> list:
     """The manifest's rows, in the manifest's own order.
 
@@ -228,12 +258,11 @@ def load_manifest(path: Path) -> list:
         paths = entry.get("paths")
         if not isinstance(name, str) or not REPO_NAME_RE.match(name):
             raise Refusal("a manifest entry has no owner/name repository")
-        # https is what upstreams are fetched over and what the
-        # committed manifest carries; `check` holds it to that. file://
-        # is accepted by the parser alone, so the clone path can be
-        # exercised against a local repository with no network.
-        if not isinstance(url, str) or not url.startswith(("https://", "file://")):
-            raise Refusal(f"{name}: the manifest url is not an https or file URL")
+        if not isinstance(url, str) or not usable_url(url):
+            raise Refusal(f"{name}: the manifest url is not a usable https or file URL")
+        directory = clone_dir(name)
+        if directory in (".", "..") or "/" in directory or "\\" in directory:
+            raise Refusal(f"{name}: its clone directory name is not usable")
         if not isinstance(pinned, str) or not SHA_RE.match(pinned):
             raise Refusal(f"{name}: the manifest pin is not a full commit")
         if not isinstance(read, str) or not DATE_RE.match(read):
@@ -327,6 +356,13 @@ def cmd_check(args) -> int:
         if name not in manifest_set:
             fail(f"{safe_name(name)}: in the notes' table, missing from the manifest")
 
+    # The committed manifest is fetched over the network by a scheduled
+    # workflow, so file:// has no business in it however useful it is to
+    # the tests. This is the guard that keeps that true.
+    for row in manifest:
+        if not row["url"].startswith("https://"):
+            fail(f"{safe_name(row['repository'])}: its manifest url is not https")
+
     for row in manifest:
         other = by_notes.get(row["repository"])
         if other is None:
@@ -339,13 +375,6 @@ def cmd_check(args) -> int:
 
     print(f"checked {len(manifest)} repositories, {failures} failures")
     return 1 if failures else 0
-
-
-def cmd_print(args) -> int:
-    """One `<directory> <url>` row per repository, for the clone loop."""
-    for row in load_manifest(args.manifest):
-        print(f"{clone_dir(row['repository'])} {row['url']}")
-    return 0
 
 
 def run_git(argv: list) -> GitResult:
@@ -718,10 +747,6 @@ def build_parser() -> argparse.ArgumentParser:
     clone.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     clone.add_argument("--clones", type=Path, required=True)
     clone.set_defaults(func=cmd_clone)
-
-    emit = subs.add_parser("print", help="clone rows for the workflow")
-    emit.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    emit.set_defaults(func=cmd_print)
 
     report = subs.add_parser("report", help="build the drift report")
     report.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)

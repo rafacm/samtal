@@ -812,18 +812,76 @@ def test_clone_refuses_to_write_over_an_existing_directory(tmp_path: Path) -> No
     assert done.stderr.strip() == "zeta/one: a clone directory for it already exists"
 
 
-# ----------------------------------------------------------------- print
+# ------------------------------------------------------------------- urls
 
 
-def test_print_emits_one_clone_row_per_repository(tmp_path: Path) -> None:
-    done = run("print", "--manifest", str(MANIFEST))
-    assert done.returncode == 0, done.stderr
-    rows = done.stdout.strip().splitlines()
-    assert rows == [
-        "78__xiaozhi-esp32 https://github.com/78/xiaozhi-esp32",
-        "xinnan-tech__xiaozhi-esp32-server "
-        "https://github.com/xinnan-tech/xiaozhi-esp32-server",
-    ]
+def one_repository_manifest(tmp_path: Path, url: str) -> Path:
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        yaml.safe_dump(
+            {
+                "repositories": [
+                    {
+                        "repository": "acme/thing",
+                        "url": url,
+                        "pinned": "0" * 40,
+                        "read": "2026-07-29",
+                        "paths": ["watched/"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_a_url_carrying_a_newline_is_refused(tmp_path: Path) -> None:
+    """It used to pass a prefix check and then mean two things.
+
+    The clone loop it would have been fed to is gone, and this makes
+    the value unrepresentable as well as unused.
+    """
+    smuggled = f"https://example.invalid/one\nevil__dir https://{SENTINEL}.invalid/two"
+    manifest = one_repository_manifest(tmp_path, smuggled)
+    done = run("clone", "--manifest", str(manifest), "--clones", str(tmp_path / "c"))
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr.strip() == (
+        "acme/thing: the manifest url is not a usable https or file URL"
+    )
+    for stream in (done.stdout, done.stderr):
+        assert SENTINEL not in stream
+        assert "Traceback" not in stream
+    assert not (tmp_path / "c" / "evil__dir").exists()
+
+
+def test_urls_with_no_host_or_a_foreign_scheme_are_refused(tmp_path: Path) -> None:
+    for url in (
+        "https:///no/host",
+        "http://example.invalid/plain",
+        "ssh://example.invalid/repo.git",
+        "javascript:alert(1)",
+        "https://exa mple.invalid/repo",
+        "file://",
+    ):
+        manifest = one_repository_manifest(tmp_path, url)
+        done = run("clone", "--manifest", str(manifest), "--clones", str(tmp_path / "c"))
+        assert done.returncode == 1, url
+        assert done.stderr.strip() == (
+            "acme/thing: the manifest url is not a usable https or file URL"
+        ), url
+
+
+def test_check_holds_the_committed_manifest_to_https(tmp_path: Path) -> None:
+    """file:// is for the tests, and must never reach the manifest."""
+    manifest, notes = copies(tmp_path)
+    parsed = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    parsed["repositories"][0]["url"] = "file:///tmp/a-local-mirror"
+    manifest.write_text(yaml.safe_dump(parsed), encoding="utf-8")
+    done = check(manifest, notes)
+    assert done.returncode == 1
+    assert f"{FIRMWARE}: its manifest url is not https" in done.stdout
 
 
 def test_a_bad_invocation_is_exit_two() -> None:
