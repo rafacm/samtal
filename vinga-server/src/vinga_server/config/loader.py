@@ -216,6 +216,27 @@ class DeviceAlreadyBoundError(ConfigError):
     Binding anyway would replace a newer decision with an older one."""
 
 
+class AgentRenameConflictError(ConfigError):
+    """A rename's destination name is not free everywhere the rename
+    would write, so nothing was written.
+
+    Its own type for `DeviceAlreadyBoundError`'s reason: it is a fact
+    about the world rather than about the request. The request named two
+    lawful names and asked for a lawful act; what refused it is what is
+    already filed under the second one, in the domain half, in memory or
+    in the conversation record. A caller that could not tell it from a
+    malformed request would answer 422 for a state the operator can
+    clear.
+
+    One class for all three destinations, because what a caller does
+    about them is the same: choose another name, or clear what is under
+    this one. Which of the three it was is the sentence, and each store
+    raises its own; the type is what carries all three, untranslated,
+    through the classifying arms of the two stores the transaction
+    crosses into, both of which let a `ConfigError` past.
+    """
+
+
 class DatabaseBusyError(ConfigError):
     """A lock this call needed did not arrive inside the lock timeout,
     because another connection was holding it. Nothing was changed, and

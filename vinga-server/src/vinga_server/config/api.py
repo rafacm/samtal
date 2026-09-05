@@ -82,6 +82,7 @@ from vinga_server.config.entities import (
     SNAPSHOT_NOTICE,
 )
 from vinga_server.config.loader import (
+    AgentRenameConflictError,
     ConfigError,
     DatabaseBusyError,
     DeviceAlreadyBoundError,
@@ -329,9 +330,18 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     # sides have nothing to span. Retrying will not help, and unlike the
     # others its sentence says so.
     SnapshotOnlyError: 409,
+    # The sixth is neither held nor moved but occupied: a rename whose
+    # destination name already holds an agent, remembered facts or
+    # recorded threads. It shares the status for the reason the five
+    # above share it, that nothing was changed, and it shares the
+    # fifth's honesty about retrying: making the request again will not
+    # help, and what does is another name or a destination cleared.
+    # Without this row it would fall through to the 422 below and read
+    # as a malformed request, which is what it is not.
+    AgentRenameConflictError: 409,
     StorageError: 500,
     NoRuntimeError: 503,
-    # The sixth is an ordinary 422 with a type of its own, which is what
+    # The seventh is an ordinary 422 with a type of its own, which is what
     # it is for: an apply that could not build the engines the stored
     # world names is a stored half this server cannot serve, exactly
     # like one that will not compose, and the separate type is what lets
