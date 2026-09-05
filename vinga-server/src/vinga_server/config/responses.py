@@ -645,9 +645,11 @@ class AssembledPrompt(BaseModel):
 
 
 class Applies(StrEnum):
-    """When a change of this kind reaches a conversation.
+    """When a change reaches a conversation.
 
-    Three boundaries and no fourth, because the server has three.
+    Four boundaries and no fifth, because the server has four, and a
+    comparison of two worlds can announce three of them.
+
     `restart` is what this process reads once and serves until it is
     started again, which is now the file half alone: the port, the
     directories, the limits and everything else `server` holds, none of
@@ -658,11 +660,38 @@ class Applies(StrEnum):
     what a device is answered as it asks, the bindings and the default
     agent, which are therefore in effect within seconds of a write and
     never pending at all.
+
+    `store-boot` is the fourth and is a write's answer rather than a
+    comparison's: a server serving a configuration it was handed rather
+    than one it read from a store runs nothing that reads what was just
+    written, so what is true of the write is that it is stored and that
+    a server booting from that store will serve it. Nothing is pending
+    against the process that answered, which is why no diff reports it
+    and why `DiffApplies` below leaves it out.
     """
 
     RESTART = "restart"
     RELOAD = "reload"
     CHECK_IN = "check-in"
+    STORE_BOOT = "store-boot"
+
+
+# The three of them a comparison can announce, which is what the seven
+# fields of the diff carry.
+#
+# A named alias rather than the enum, because a field that declares a
+# value it never sends is a seam that lies: this read compares what a
+# store holds against what a process serves, and a server serving no
+# store has nothing to compare. The two are held together from the
+# other side by a test asserting these three plus `STORE_BOOT` are the
+# whole enum, so a fifth boundary cannot be added on one side alone.
+#
+# One consequence is visible in the generated document: a `Literal` of
+# enum members renders inline rather than as a `$ref`, so the seven
+# fields below carry a three-value enum each and the `Applies`
+# component is reached through the acknowledgement's own field, which is
+# where the whole vocabulary is published.
+DiffApplies = Literal[Applies.RESTART, Applies.RELOAD, Applies.CHECK_IN]
 
 
 class EntityDiff(BaseModel):
@@ -677,7 +706,7 @@ class EntityDiff(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    applies: Applies
+    applies: DiffApplies
     added: tuple[str, ...] = Field(
         description=(
             "The names the database holds that this server is not serving, sorted."
@@ -707,7 +736,7 @@ class GrantsDiff(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    applies: Applies
+    applies: DiffApplies
     changed: tuple[str, ...] = Field(
         description=(
             "The agents that would reach a different set of MCP tools once the stored "
@@ -729,7 +758,7 @@ class PromptDiff(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    applies: Applies
+    applies: DiffApplies
     changed: tuple[str, ...] = Field(
         description=(
             "The agents whose stored `prompt` or `prompt_includes` differs from what "
@@ -752,7 +781,7 @@ class FillerDiff(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    applies: Applies
+    applies: DiffApplies
     changed: tuple[str, ...] = Field(
         description=(
             "The agents whose stored `filler` section differs from what this server is "
@@ -779,7 +808,7 @@ class FallbackDiff(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    applies: Applies
+    applies: DiffApplies
     changed: tuple[str, ...] = Field(
         description=(
             "The agents whose stored `fallback` section differs from what this server "
@@ -828,7 +857,7 @@ class SingletonDiff(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    applies: Applies
+    applies: DiffApplies
     changed: bool = Field(
         description=(
             "Whether the stored entry differs from the one this server is serving. A "
@@ -851,7 +880,7 @@ class LiveKind(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    applies: Applies
+    applies: DiffApplies
 
 
 class ConfigDiff(BaseModel):
