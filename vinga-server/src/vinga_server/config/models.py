@@ -299,10 +299,15 @@ class OnboardingConfig(BaseModel):
 
     Onboarding a stock board means typing its backend URL into a captive
     portal on a phone, with no feedback on a typo, so the string has to
-    be short and its alphabet unambiguous. The key is derived from the
-    device-auth secret the deployment already has, never stored and never
-    written here: it is stable across restarts and rotates only when the
-    secret does.
+    be short and its alphabet unambiguous. Left to itself, which is the
+    normal case, the key is derived from the device-auth secret the
+    deployment already has: nothing about it is stored, it is stable
+    across restarts, and it moves only when that secret does.
+
+    `key` below is the one exception, and the reason it exists: it pins
+    a key into this file so that the one a rotation would have retired
+    keeps working. Provisioned boards go on reaching the URL they were
+    given while the new secret takes over everything else.
 
     On by default. The legacy path keeps working beside it, and a
     deployment that wants only the legacy one turns this off.
