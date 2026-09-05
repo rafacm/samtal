@@ -145,13 +145,27 @@ def a_turn(
 
 
 @pytest.fixture
+def recording() -> Iterator[ConversationStore]:
+    """A store recording the way the server's does, with no parking seam.
+
+    For the cases whose subject is what the translation composes rather
+    than when the writer runs: each turn is waited on, so the order of
+    the renames around it is the arrangement and no gate is needed."""
+    store = ConversationStore(DatabaseConfig(), now=lambda: AT, retention_days=0)
+    store.start()
+    try:
+        yield store
+    finally:
+        store.stop()
+
+
+@pytest.fixture
 def gated() -> Iterator[tuple[ConversationStore, Gate]]:
     """A store recording the way the server's does, with the writer's
     parking seam installed, which is what makes an interleaving an
     arrangement rather than a wait.
 
-    Every case here has one, because every case here is about what the
-    writer does while the rename commits."""
+    Every case whose subject is the instant a rename commits has one."""
     gate = Gate()
     store = ConversationStore(
         DatabaseConfig(), now=lambda: AT, retention_days=0, gate=gate
@@ -514,10 +528,16 @@ async def test_a_freed_name_given_to_a_new_agent_is_not_translated(
     A rename frees the old name, and the grammar allows an operator to
     create a new agent under it straight away. A map keyed by nothing but
     the pair of names would file that new agent's turns under the renamed
-    one and land its threads there. The map is per session and a
-    publication marks the sessions live at that instant, so the session
-    that opened afterwards has nothing to translate: its name came out of
-    the store after the rename.
+    one and land its threads there. The map is per session, so the
+    session registered afterwards has nothing to translate.
+
+    What the second session stands for is a session on a world that
+    already knows the new names, which is what an apply installs: no
+    device can be served by the recreated agent until one has run,
+    because a binding resolves against the generation's own agents. The
+    case that a session opened after the rename and BEFORE that apply
+    still speaks the old name is the one beside this, driven through a
+    real session.
     """
     store, gate = gated
     a_working_configuration(config, OLD)
@@ -552,3 +572,59 @@ async def test_a_freed_name_given_to_a_new_agent_is_not_translated(
     assert [row["agent"] for row in turns_of(thread)] == [OLD, NEW]
     assert agent_of(other_thread) == OLD
     assert [row["agent"] for row in turns_of(other_thread)] == [OLD]
+
+
+async def test_the_freed_name_renamed_again_leaves_the_older_session_alone(
+    config: ConfigStore,
+    recording: ConversationStore,
+    session: str,
+    other_session: str,
+    thread: str,
+    other_thread: str,
+) -> None:
+    """The other half of the freed name, and the one composition gets
+    wrong if it only ever assigns.
+
+    A source key records what THIS session's world calls an agent. The
+    older session opened as the first name and holds it pointing at the
+    name its own agent answers to now. When the freed name is given to a
+    second agent and THAT one is renamed, the second rename is about an
+    agent the older session's world has never served: entering it as a
+    source again would file the older session's next turn under the
+    stranger's new name, on a thread its own agent owns, which is the
+    misattribution the protocol exists to prevent, and the writer would
+    drop the whole batch.
+
+    So the two sessions answer differently to the one name they both
+    opened under, which is the point: each resolves it to the agent its
+    own world meant by it.
+    """
+    store = recording
+    a_working_configuration(config, OLD)
+    store.open_session(session, 100.0, manifest(OLD))
+    landed = store.record_turn(session, a_turn(thread, OLD, "the older conversation"))
+    assert landed.wait(TIMEOUT_S) is True, "the first turn never landed"
+
+    config.rename_agent(OLD, NEW)
+    # The freed name, given to a second agent, whose own session opens
+    # under it and is then renamed in its turn.
+    config.set_agent(OLD, {"prompt": "A different agent under a free name."})
+    store.open_session(other_session, 200.0, manifest(OLD))
+    config.rename_agent(OLD, THIRD)
+
+    draining = store.record_turn(session, a_turn(thread, OLD, "still the older one"))
+    fresh = store.record_turn(other_session, a_turn(other_thread, OLD, "and the newer one"))
+    assert draining.wait(TIMEOUT_S) is True, "the older session's turn was dropped"
+    assert fresh.wait(TIMEOUT_S) is True
+    store.close_session(session, duration_s=2.0, reason="client")
+    store.close_session(other_session, duration_s=2.0, reason="client")
+    store.stop()
+
+    # The older session still resolves the name to its own agent, whose
+    # thread it goes on speaking into.
+    assert agent_of(thread) == NEW
+    assert [row["agent"] for row in turns_of(thread)] == [OLD, NEW]
+    # And the replacement's session resolves the same name to the
+    # replacement's new one.
+    assert agent_of(other_thread) == THIRD
+    assert [row["agent"] for row in turns_of(other_thread)] == [THIRD]

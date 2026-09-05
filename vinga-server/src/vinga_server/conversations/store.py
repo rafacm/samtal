@@ -418,6 +418,46 @@ def renamed(old: str, new: str) -> None:
         writer.translate(old, new)
 
 
+def _compose(moved: dict[str, str], old: str, new: str) -> None:
+    """Fold one rename into what a session's world calls its agents, in
+    place.
+
+    One rule in one place, because two callers apply it to the same
+    ordered stream of renames and a second copy of it would be a second
+    answer: the map a session is seeded with at its open, and the map
+    kept up to date while it records. Seeding replays the renames its
+    world has not heard through here, in publication order, so a session
+    registered late ends up holding exactly what a session registered at
+    its world's install would have held.
+
+    Two arms, and the second one is the one that is easy to get wrong.
+
+    An entry whose CURRENT VALUE is the old name moves on to the new
+    one, which is what keeps a chain of renames flat: a session that
+    opened as `a` through `a -> b` and `b -> c` resolves `a` to `c` in
+    one lookup rather than a walk.
+
+    The old name is entered as a source of its own only when nothing is
+    filed under it yet. A source key records what THIS session's world
+    calls an agent, and a rename frees the name it moved from: an
+    operator may create a second agent under it and rename that one too,
+    and the second rename is about an agent this session's world has
+    never served. Overwriting the entry would file this session's next
+    turn under the stranger's new name, on a thread its own agent owns,
+    which is the misattribution this whole protocol exists to prevent.
+    So a name that already means something here goes on meaning it.
+
+    Idempotent by the same arm, which the ordering needs: a rename that
+    reaches a session both through its seed and through the publication
+    that followed it is applied once.
+    """
+    for opened_as, current in list(moved.items()):
+        if current == old:
+            moved[opened_as] = new
+    if old not in moved:
+        moved[old] = new
+
+
 # What a rename that would merge two histories is refused with, and the
 # pair a rename that could not be written answers.
 #
@@ -1008,18 +1048,12 @@ class ConversationStore:
         given to a new agent, and a session opened under that new agent
         read its name after the rename and must be left alone.
 
-        Composed on insert rather than walked on read, so a chain of
-        renames stays flat: every entry already pointing at the old name
-        is moved on to the new one first, and then the old name itself is
-        entered. A session that opened as `a` through `a -> b` and
-        `b -> c` therefore resolves `a` to `c` in one lookup.
+        Composed on insert rather than walked on read, which is
+        `_compose` below.
         """
         with self._lock:
             for moved in self._renames.values():
-                for opened_as, current in list(moved.items()):
-                    if current == old:
-                        moved[opened_as] = new
-                moved[old] = new
+                _compose(moved, old, new)
 
     def _stores_events(self) -> bool:
         """Whether an events row would land. One rule, consulted twice:
