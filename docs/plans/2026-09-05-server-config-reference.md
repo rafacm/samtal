@@ -181,16 +181,21 @@ the validators actually raise: `RESUMPTION_NEEDS_RECORDING`,
 `RESUMPTION_NEEDS_TEXT`, and the discoverability refusal, whose
 inline string is hoisted to a module-level constant
 (`NOTHING_DISCOVERABLE`) in the same change so the page and the
-validator share one sentence. The renderer imports the constants
-and a registry tuple beside them
-(`BOOT_REFUSALS: tuple[str, ...]`) declared in `models.py` next to
-the sentences it collects, so adding a cross-field refusal without
-adding it to the page is a one-file diff a reviewer sees whole. A
-test walks the tuple and asserts each sentence appears verbatim in
-the rendered page, and each constant keeps its raising site (the
-existing resumption tests and a new discoverability pin already
-exercise them; the docgen-side test only holds the page to the
-tuple).
+validator share one sentence. The renderer imports a registry
+declared in `models.py` next to the sentences it collects, and the
+registry is checked in both directions rather than only the easy
+one. Each row carries the sentence and a provoking
+misconfiguration (a dict of field values that triggers exactly that
+refusal), so a row cannot be inert: the test validates each row's
+misconfiguration and asserts the raised messages are exactly the
+row's sentence, the rendered section is asserted to carry exactly
+the registry's sentences, and the reverse direction is mechanized
+by reflection rather than by memory: a sweep over every model
+reachable from `ServerConfig` collects the declared model-level
+validators (`__pydantic_decorators__.model_validators`) and asserts
+each validator is named by at least one registry row, so a new
+cross-field validator added without registry rows fails the sweep
+instead of silently missing the page.
 
 **The keys with no configuration form get their own section, with
 the environment override scheme beside them.** Two fixed prose
@@ -287,10 +292,15 @@ module's.
   (`port` shows `1 to 65535`, `resumption_budget_tokens` shows
   `>= 512`), asserted from the metadata rather than as literals
   where the sweep can derive them.
-- **The refusals section**: every sentence in `BOOT_REFUSALS`
-  appears verbatim; the tuple's three members each have a raising
-  site (the resumption pair's existing tests stand; a
-  discoverability boot-refusal pin is added if none exists).
+- **The refusals section**: bidirectional. Forward: the rendered
+  section carries exactly the registry's sentences, each verbatim.
+  Backward: each row's provoking misconfiguration raises exactly
+  its sentence when validated, and the reflection sweep over every
+  reachable model's declared model-level validators asserts each
+  validator is claimed by at least one row, so the registry cannot
+  fall behind the validators (the resumption pair's existing tests
+  stand beside this; a discoverability boot-refusal pin is added if
+  none exists).
 - **The no-key section**: the page names `VINGA_DB_PASSWORD`,
   `VINGA_DB_URL`, the four `VINGA_DB_*` spellings and the refused
   `VINGA_SERVER__DATABASE__` prefix.
@@ -436,6 +446,14 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    tests pass. Require a bidirectional assertion: exercise every
    cross-field validator branch and compare the emitted sentences
    with the registry, then the registry with the rendered section.
+
+   *Resolution*: accepted in full. Registry rows now carry the
+   sentence, the owning validator and a provoking misconfiguration;
+   the test asserts each provocation raises exactly its row's
+   sentence, the rendered section carries exactly the registry's
+   sentences, and a reflection sweep over every reachable model's
+   declared model-level validators asserts each is claimed by a
+   row, which is the reverse direction mechanized.
 
 5. **P2: environment-variable facts remain duplicated and can drift
    together.** The renderer and its test would name six variables
