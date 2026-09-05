@@ -54,7 +54,7 @@ EXPECTED_STATE_COLUMNS = {"conversation", "key", "value", "updated_at"}
 # which restore, erasure, retention and the sweep address.
 EXPECTED_INDEXES = {"ix_facts_scope", "ix_facts_forgotten"}
 
-HEAD = "2002_memory_scopes"
+HEAD = "2003_rename_moves_memory"
 
 SCHEMA = MEMORY_CHAIN.schema
 

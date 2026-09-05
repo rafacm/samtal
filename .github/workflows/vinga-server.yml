@@ -843,8 +843,8 @@ jobs:
 
           # The head of the packaged chain. A new migration moves this
           # line, deliberately, exactly as the two above.
-          if memory_revisions != {"2002_memory_scopes"}:
-              sys.exit(f"the wheel's memory chain is at {sorted(memory_revisions)}, not ['2002_memory_scopes']")
+          if memory_revisions != {"2003_rename_moves_memory"}:
+              sys.exit(f"the wheel's memory chain is at {sorted(memory_revisions)}, not ['2003_rename_moves_memory']")
           expected = {"facts", "state"}
           missing = expected - memory_tables
           if missing:

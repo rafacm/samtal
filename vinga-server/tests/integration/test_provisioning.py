@@ -75,7 +75,7 @@ from vinga_server.memory.store import MEMORY_CHAIN, open_memory
 # The head of the packaged memory chain, which is one revision. Written
 # here rather than derived, for the reason the sibling suites write
 # theirs: a chain that moved has to move this line, deliberately.
-MEMORY_HEAD = "2002_memory_scopes"
+MEMORY_HEAD = "2003_rename_moves_memory"
 
 PROVISIONING = Path(__file__).resolve().parents[3] / "deploy" / "postgres-init.sql"
 
