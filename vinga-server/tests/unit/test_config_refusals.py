@@ -21,7 +21,7 @@ for every request) and once inside a repository write.
 
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
-from sqlalchemy import update
+from sqlalchemy import insert, update
 
 from tests.support.stores import holding_the_write_lock, planted, the_lock_held
 from vinga_server.config.loader import (
@@ -187,6 +187,34 @@ def test_a_stored_row_naming_no_stage_is_a_storage_error(store: ConfigStore) -> 
 
     with pytest.raises(StorageError):
         store.load()
+
+
+def test_two_spellings_of_one_stored_mac_are_two_rows_and_are_refused(
+    store: ConfigStore,
+) -> None:
+    """The `devices` table is keyed by the column as written, so one MAC
+    spelled two ways is two rows, and a load that quietly kept the last
+    of them would drop a binding an operator can still see in the
+    database.
+
+    Pinned because the reader now makes each MAC canonical before it
+    composes a location from it (#382), and the tempting next step,
+    keying the composed mapping by that canonical form too, swallows
+    this pair: the duplicate is found by the model's own walk, which
+    only sees a duplicate while the two keys are still spelled
+    differently.
+    """
+    _populate(store)
+    store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"])
+    planted(
+        store,
+        insert(schema.devices).values(mac="AA-BB-CC-DD-EE-FF", agents=["sam"]),
+    )
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    assert "appears more than once" in str(caught.value)
 
 
 def test_an_unreachable_instance_is_a_storage_error() -> None:

@@ -754,6 +754,12 @@ def test_a_device_mac_cannot_carry_one_because_the_load_path_refuses_it(
     and a strip on that key would be code nothing can run. The refusal
     names the rule and not the value.
 
+    This row is the plain case, and the claim it makes is only as wide
+    as the row it plants: the `agents` column beside the MAC is
+    well-formed, so nothing reads it before the MAC has been read. The
+    case further down plants a row that gets both wrong at once, which
+    is where the order between those two reads is what decides whether
+    the MAC is repeated.
     """
     planted(store, insert(schema.devices).values(mac=HISTORIC, agents=["sam"]))
 
@@ -946,6 +952,36 @@ def test_a_row_filed_under_no_stage_names_neither_the_stage_nor_its_entry(
     message = str(caught.value)
     assert "the stage has to be one of" in message
     assert NOT_A_STAGE_AT_ALL not in message
+    assert HISTORIC_SHOWN not in message
+
+    with caplog.at_level(logging.DEBUG):
+        assert serving.run(None) == 1
+
+    printed = capsys.readouterr()
+    _carries_no_sentinel(chain(caught.value), printed.out, printed.err, *_logged(caplog))
+
+
+def test_a_malformed_binding_under_such_a_mac_repeats_neither(
+    store: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The combination the MAC guard used to arrive too late for.
+
+    A planted MAC alone is refused by the load without being repeated,
+    which the case further up pins. A planted MAC beside an `agents`
+    column that is not an array is refused by the column check first,
+    and that check was handed a location built from the MAC itself.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    planted(store, insert(schema.devices).values(mac=HISTORIC, agents="sam"))
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    message = str(caught.value)
+    assert "a MAC address is six colon-separated hex pairs" in message
     assert HISTORIC_SHOWN not in message
 
     with caplog.at_level(logging.DEBUG):
