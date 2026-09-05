@@ -1346,8 +1346,8 @@ vinga-server/src/vinga_server/events/catalog.py:2492  respell  vinga-server conf
 vinga-server/src/vinga_server/events/catalog.py:2521  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/events/catalog.py:2537  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/memory/__init__.py:35  respell  vinga memory
-vinga-server/src/vinga_server/memory/store.py:269  respell  vinga-server config memory list agent
-vinga-server/src/vinga_server/memory/store.py:270  respell  vinga-server config memory delete agent
+vinga-server/src/vinga_server/memory/store.py:278  respell  vinga-server config memory list agent
+vinga-server/src/vinga_server/memory/store.py:279  respell  vinga-server config memory delete agent
 vinga-server/src/vinga_server/onboarding/__init__.py:30  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:37  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:105  respell  vinga-server config ota-url
