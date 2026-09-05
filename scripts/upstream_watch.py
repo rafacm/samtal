@@ -3,6 +3,7 @@
 
 Usage:
   upstream_watch.py check [--manifest PATH] [--notes PATH]
+  upstream_watch.py clone --clones DIR [--manifest PATH]
   upstream_watch.py print [--manifest PATH]
   upstream_watch.py report --clones DIR --output FILE [--manifest PATH]
   upstream_watch.py decide --report FILE --issues FILE
@@ -18,8 +19,11 @@ shell.
   identical repository sets (a row missing from either side, or
   duplicated in either, is its own failure), equal full commits, equal
   read dates. The docs workflow runs it beside the link checker.
-- `print` emits one `<directory> <url>` row per repository for the
-  drift workflow's clone loop.
+- `clone` fetches every watched upstream into a directory, blobless
+  and unchecked-out, with an explicit all-tags fetch behind it. It
+  lives here rather than in the workflow's shell so that no URL is
+  ever handed to a shell and no git diagnostic ever reaches the log.
+- `print` emits one `<directory> <url>` row per repository.
 - `report` takes a directory of already-fetched clones, resolves each
   repository's `origin/HEAD` and latest release tag, validates that the
   pin is an ancestor of each target, diffs the watched paths, and
@@ -73,6 +77,7 @@ writes is ever evaluated.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -101,13 +106,18 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # happened to push last.
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
 
+# A ceiling on any one git call. A clone that stops to ask a runner
+# for a password would otherwise hold the job until the job's own
+# timeout, with nothing in the log saying why.
+GIT_TIMEOUT_SECONDS = 900
+
 TABLE_HEADER = "| Upstream project | Commit | Clone read |"
 TABLE_ROW_RE = re.compile(
     r"^\|\s*\[([^\]]*)\]\([^)]*\)\s*\|\s*`([^`]*)`\s*\|\s*([^|]*?)\s*\|\s*$"
 )
 
 USAGE = (
-    "usage: upstream_watch.py {check|print|report|decide} [options]\n"
+    "usage: upstream_watch.py {check|clone|print|report|decide} [options]\n"
     "the arguments were not understood; see the module docstring"
 )
 
@@ -214,8 +224,12 @@ def load_manifest(path: Path) -> list:
         paths = entry.get("paths")
         if not isinstance(name, str) or not REPO_NAME_RE.match(name):
             raise Refusal("a manifest entry has no owner/name repository")
-        if not isinstance(url, str) or not url.startswith("https://"):
-            raise Refusal(f"{name}: the manifest url is not an https URL")
+        # https is what upstreams are fetched over and what the
+        # committed manifest carries; `check` holds it to that. file://
+        # is accepted by the parser alone, so the clone path can be
+        # exercised against a local repository with no network.
+        if not isinstance(url, str) or not url.startswith(("https://", "file://")):
+            raise Refusal(f"{name}: the manifest url is not an https or file URL")
         if not isinstance(pinned, str) or not SHA_RE.match(pinned):
             raise Refusal(f"{name}: the manifest pin is not a full commit")
         if not isinstance(read, str) or not DATE_RE.match(read):
@@ -330,26 +344,91 @@ def cmd_print(args) -> int:
     return 0
 
 
-def git(repo: Path, *args: str) -> GitResult:
+def run_git(argv: list) -> GitResult:
     """A git call as an argument list. Never a shell, ever.
 
-    Both streams are captured. git quotes what it was given back at you
-    on failure, and this runs in a public log.
+    Both streams are captured, always. On a failed clone or fetch git
+    writes the URL it was handed and whatever the remote said straight
+    to stderr, and an inherited stderr puts all of that into a public
+    Actions log; every caller below answers with a fixed sentence
+    instead.
+
+    The environment is narrowed for the same reason a timeout exists:
+    a network call that stops to ask a human for a password does not
+    fail, it hangs, and a runner has no human.
     """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = ""
+    env["GCM_INTERACTIVE"] = "never"
     problem = None
     try:
         done = subprocess.run(
-            ["git", "-C", str(repo), *args],
+            ["git", *argv],
             capture_output=True,
             check=False,
+            env=env,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
     except OSError:
         problem = "git could not be run"
+    except subprocess.TimeoutExpired:
+        problem = "git took too long and was stopped"
     if problem is not None:
         raise Refusal(problem)
     return GitResult(
         done.returncode, decode_upstream(done.stdout), decode_upstream(done.stderr)
     )
+
+
+def git(repo: Path, *args: str) -> GitResult:
+    return run_git(["-C", str(repo), *args])
+
+
+def cmd_clone(args) -> int:
+    """Fetch every watched upstream into --clones, quietly.
+
+    This is a subcommand rather than three lines of shell in the
+    workflow because the shell version had to be handed the URLs, and
+    handing a URL to a shell loop is both an injection surface and, on
+    failure, git's stderr in the log.
+    """
+    manifest = load_manifest(args.manifest)
+    problem = None
+    try:
+        args.clones.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        problem = "the clones directory could not be created"
+    if problem is not None:
+        raise Refusal(problem)
+
+    for row in manifest:
+        name = row["repository"]
+        target = args.clones / clone_dir(name)
+        if target.exists():
+            raise Refusal(f"{name}: a clone directory for it already exists")
+        # Blobless and unchecked-out: this needs history and trees,
+        # never file contents.
+        done = run_git(
+            [
+                "clone",
+                "--filter=blob:none",
+                "--no-checkout",
+                "--quiet",
+                row["url"],
+                str(target),
+            ]
+        )
+        if done.returncode != 0:
+            raise Refusal(f"{name}: cloning it failed")
+        # Not redundant with the clone, which brings only the tags
+        # reachable from the history it fetched; a release branch's tag
+        # can sit outside that.
+        fetched = git(target, "fetch", "--tags", "--filter=blob:none", "--quiet")
+        if fetched.returncode != 0:
+            raise Refusal(f"{name}: fetching its tags failed")
+    print(f"cloned {len(manifest)} repositories")
+    return 0
 
 
 def latest_release_tag(repo: Path):
@@ -592,6 +671,11 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     check.add_argument("--notes", type=Path, default=DEFAULT_NOTES)
     check.set_defaults(func=cmd_check)
+
+    clone = subs.add_parser("clone", help="fetch the watched upstreams")
+    clone.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    clone.add_argument("--clones", type=Path, required=True)
+    clone.set_defaults(func=cmd_clone)
 
     emit = subs.add_parser("print", help="clone rows for the workflow")
     emit.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)

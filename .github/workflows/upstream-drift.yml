@@ -13,9 +13,9 @@ name: upstream drift
 # the manifest's header.
 #
 # The workflow parses nothing and decides nothing itself. It calls
-# scripts/upstream_watch.py's print, report and decide, so exactly one
-# parser and one decision site exist, and upstream-controlled paths and
-# subjects never reach a shell.
+# scripts/upstream_watch.py's clone, report and decide, so exactly one
+# parser and one decision site exist, and no upstream-controlled URL,
+# path or subject ever reaches a shell.
 on:
   # Mondays 06:17 UTC. An off-peak minute rather than the hour, where
   # every other repository's cron is queued.
@@ -98,22 +98,15 @@ jobs:
         working-directory: vinga-server
         run: uv sync --frozen
 
-      # Blobless and unchecked-out: this needs history and trees, never
-      # file contents. The explicit all-tags fetch is not redundant with
-      # the clone, which brings only the tags reachable from the history
-      # it fetched, and a release branch's tag can sit outside that.
+      # The cloning is the script's, not the shell's. A failed clone or
+      # fetch writes the URL git was handed and whatever the remote said
+      # to stderr, and this log is public; the script captures both
+      # streams and answers with a fixed sentence naming only the
+      # repository. It also means no URL is ever expanded by a shell.
       - name: Clone the watched upstreams
         run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/upstream-clones"
-          uv run --project vinga-server python scripts/upstream_watch.py print \
-            > "${RUNNER_TEMP}/clone-rows"
-          while read -r dir url; do
-            git clone --filter=blob:none --no-checkout --quiet \
-              "$url" "${RUNNER_TEMP}/upstream-clones/$dir"
-            git -C "${RUNNER_TEMP}/upstream-clones/$dir" \
-              fetch --tags --filter=blob:none --quiet
-          done < "${RUNNER_TEMP}/clone-rows"
+          uv run --project vinga-server python scripts/upstream_watch.py clone \
+            --clones "${RUNNER_TEMP}/upstream-clones"
 
       # An unparseable manifest or a pin that does not resolve in its
       # clone fails here, before any diffing: a run that measured

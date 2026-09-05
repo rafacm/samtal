@@ -146,7 +146,7 @@ def stage(tmp_path: Path, entries: list) -> tuple:
         rows.append(
             {
                 "repository": repository,
-                "url": f"https://example.invalid/{repository}",
+                "url": source.as_uri(),
                 "pinned": pinned,
                 "read": "2026-07-29",
                 "paths": list(paths),
@@ -538,6 +538,112 @@ def test_an_unparseable_manifest_is_a_sentence_not_a_traceback(
     assert done.stdout == ""
     assert len(done.stderr.strip().splitlines()) == 1
     assert "Traceback" not in done.stderr
+
+
+# ----------------------------------------------------------------- clone
+
+
+def test_clone_fetches_every_repository_with_its_tags(tmp_path: Path) -> None:
+    first = upstream(tmp_path, "one")
+    second = upstream(tmp_path, "two")
+    git(first, "tag", "v1.2.3")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        yaml.safe_dump(
+            {
+                "repositories": [
+                    {
+                        "repository": "zeta/one",
+                        "url": first.as_uri(),
+                        "pinned": head_of(first),
+                        "read": "2026-07-29",
+                        "paths": ["watched/"],
+                    },
+                    {
+                        "repository": "alpha/two",
+                        "url": second.as_uri(),
+                        "pinned": head_of(second),
+                        "read": "2026-07-29",
+                        "paths": ["watched/"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    clones = tmp_path / "clones"
+    done = run("clone", "--manifest", str(manifest), "--clones", str(clones))
+    assert done.returncode == 0, done.stderr
+    assert "cloned 2 repositories" in done.stdout
+    assert (clones / "zeta__one" / ".git").is_dir()
+    assert (clones / "alpha__two" / ".git").is_dir()
+    tags = subprocess.run(
+        ["git", "-C", str(clones / "zeta__one"), "tag", "--list"],
+        capture_output=True,
+        text=True,
+        env=GIT_ENV,
+        timeout=60,
+    )
+    assert "v1.2.3" in tags.stdout
+
+
+def test_a_clone_that_fails_never_shows_the_url(tmp_path: Path) -> None:
+    """git's own stderr quotes the URL and the remote's words.
+
+    The host is in the reserved .invalid domain, so this resolves
+    nowhere and needs no network to fail.
+    """
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        yaml.safe_dump(
+            {
+                "repositories": [
+                    {
+                        "repository": "acme/thing",
+                        "url": f"https://{SENTINEL}.invalid/acme/thing.git",
+                        "pinned": "0" * 40,
+                        "read": "2026-07-29",
+                        "paths": ["watched/"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    done = run("clone", "--manifest", str(manifest), "--clones", str(tmp_path / "c"))
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr.strip() == "acme/thing: cloning it failed"
+    for stream in (done.stdout, done.stderr):
+        assert SENTINEL not in stream
+        assert "invalid" not in stream
+        assert "Traceback" not in stream
+
+
+def test_clone_refuses_to_write_over_an_existing_directory(tmp_path: Path) -> None:
+    repo = upstream(tmp_path, "one")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        yaml.safe_dump(
+            {
+                "repositories": [
+                    {
+                        "repository": "zeta/one",
+                        "url": repo.as_uri(),
+                        "pinned": head_of(repo),
+                        "read": "2026-07-29",
+                        "paths": ["watched/"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    clones = tmp_path / "clones"
+    (clones / "zeta__one").mkdir(parents=True)
+    done = run("clone", "--manifest", str(manifest), "--clones", str(clones))
+    assert done.returncode == 1
+    assert done.stderr.strip() == "zeta/one: a clone directory for it already exists"
 
 
 # ----------------------------------------------------------------- print
