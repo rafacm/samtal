@@ -288,7 +288,7 @@ record that owns the reasoning) rather than a promise change.
   server code. Documentation footprint: `docs/xiaozhi-notes.md`'s
   currency section and `CHANGELOG.md`; the docs index needs no entry
   (the manifest is not a page and the notes route to it).
-- [ ] **M2: the floor ADR and its citation.** The ADR above;
+- [x] **[M2: the floor ADR and its citation.](2026-09-05-upstream-drift-watch-implementation.md#m2-the-floor-adr-and-its-citation)** (PR TBD) The ADR above;
   the one-line citation in the stock-firmware promise section;
   the changelog entry; the implementation-doc section. Design
   footprint: none in code. Documentation footprint:
