@@ -870,12 +870,12 @@ docs/plans/2026-09-05-server-state-vocabulary.md:184  historical  vinga apply
 docs/plans/2026-09-05-server-state-vocabulary.md:184  historical  vinga diff
 docs/plans/2026-09-05-server-state-vocabulary.md:210  historical  vinga-server config list
 docs/plans/2026-09-05-server-state-vocabulary.md:225  historical  vinga agent preview
-docs/plans/2026-09-05-server-state-vocabulary.md:300  historical  vinga info
-docs/plans/2026-09-05-server-state-vocabulary.md:343  historical  vinga-server config openapi
-docs/plans/2026-09-05-server-state-vocabulary.md:355  historical  vinga apply
-docs/plans/2026-09-05-server-state-vocabulary.md:399  historical  vinga apply
-docs/plans/2026-09-05-server-state-vocabulary.md:399  historical  vinga diff
-docs/plans/2026-09-05-server-state-vocabulary.md:484  historical  vinga-server config openapi
+docs/plans/2026-09-05-server-state-vocabulary.md:349  historical  vinga info
+docs/plans/2026-09-05-server-state-vocabulary.md:402  historical  vinga-server config openapi
+docs/plans/2026-09-05-server-state-vocabulary.md:414  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:464  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:464  historical  vinga diff
+docs/plans/2026-09-05-server-state-vocabulary.md:590  historical  vinga-server config openapi
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:6527  generated  vinga ota-url
 docs/reference/api-openapi.json:7488  generated  vinga provider secret set

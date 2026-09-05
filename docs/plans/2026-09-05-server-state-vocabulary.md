@@ -329,6 +329,19 @@ tuple of the token the diff already publishes, beside the prose.
   verbatim, and a state-only sentence is never wrong. Removing the
   command from it is therefore the load-bearing half of this plan, and
   the token is what buys back the advice the operator loses.
+- **Every place that calls the sentence a boundary is corrected in the
+  same milestone that stops it being one.** Three of them, all in
+  `responses.py` and all published: `Acknowledgement.notice`'s
+  description, which is stale today and is rewritten in M1 with the
+  field beside it; `AppliedEntry.notice`'s description
+  (`responses.py:1206-1211`), which is accurate today and becomes wrong
+  the moment the sentence stops carrying the boundary; and
+  `_one_outcome`'s docstring and refusal text
+  (`responses.py:1214-1244`), which call the notice "the boundary its
+  change takes effect at". After M2 the boundary is `applies` and the
+  notice is the state's own words, so all three say so, and the
+  validator's own rule is unchanged: outcome and notice are still one
+  fact.
 
 ### Skew detection: no version comparison, and the hook recorded
 
@@ -538,10 +551,15 @@ Reusing what exists wherever the assertion already has a home.
 - **The census manifest stales on this plan's own files.** It does,
   every time; regenerate through its module before the unit lane, as
   the two most recent plans record.
-- **The stale `Acknowledgement.notice` description is load-bearing
-  prose in a committed contract.** Rewriting it in M1, where the field
-  it describes is being changed anyway, is what keeps it from being
-  rewritten twice.
+- **The descriptions are load-bearing prose in a committed contract,
+  and they are the half a code change does not fail on.** Three of them
+  describe the notice as the thing that carries the boundary. Each is
+  rewritten in the milestone that makes it wrong rather than in a later
+  tidy-up: `Acknowledgement.notice` in M1, where the field beside it is
+  changing and it is already stale; `AppliedEntry.notice` and
+  `_one_outcome`'s text in M2, where the sentence stops being a
+  boundary. The regenerated document is the review surface for all
+  three.
 
 ## Milestones
 
@@ -584,7 +602,11 @@ Reusing what exists wherever the assertion already has a home.
   sentence where there is not; the two inverted pins, the
   no-`PROGRAM`-in-a-sentence invariant, the fallback cases through
   `Act.read()` and the mixed-version import case;
-  the licensed substitution and the amended docstring in
+  `AppliedEntry.notice`'s description and `_one_outcome`'s docstring
+  and refusal text rewritten to describe a state sentence with the
+  boundary semantics directed to `applies`, and the OpenAPI document
+  regenerated for them; the licensed substitution and the amended
+  docstring in
   `test_config_cli_respelling.py`; the follow-up issue for class (a)'s
   five refusals is filed; a CHANGELOG `Changed` entry; the
   implementation-doc section. Behavior changes sit alone in this
@@ -733,3 +755,14 @@ amendments.
    Rewrite `AppliedEntry.notice` in M2 to describe the state sentence
    and direct boundary semantics to `applies`, update `_one_outcome`'s
    prose and error text, then regenerate the OpenAPI document.
+
+   *Resolution*: accepted in full. Unlike `Acknowledgement.notice`,
+   which is stale today, these two are accurate today and become wrong
+   exactly at M2, which is why they belong there and not in the M1
+   sweep. The plan now names all three published places that call the
+   sentence a boundary, states the rule that each is corrected in the
+   milestone that makes it wrong rather than in a later tidy-up, adds
+   them to M2's deliverables with the regeneration, and records in the
+   risk that the descriptions are the half no code change fails on.
+   `_one_outcome`'s rule itself does not move: outcome and notice stay
+   one fact, and only the words calling the notice a boundary change.
