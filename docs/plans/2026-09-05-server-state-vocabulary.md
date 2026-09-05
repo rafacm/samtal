@@ -288,6 +288,30 @@ tuple of the token the diff already publishes, beside the prose.
   server's sentence alone and adds nothing. This is `board.py:552`'s
   rule (`reply.access if reply.access in KNOWN_ACCESS else None`)
   applied to a set instead of a word.
+- **And the rule has to be kept before the renderer, in
+  `cli._declared`.** The OTA precedent gets its tolerance from a second
+  module: `ota/reply.py` types the producer closed and
+  `simulator/board.py:366-385` types the consumer `str | None`, with a
+  comment saying a `Literal` there would make an unknown word a
+  malformed reply, "the harsher of the two readings and the wrong one
+  for a client". This surface has no second module to put that in, and
+  is not allowed one: `cli.py:2255-2258` records that a hand-kept
+  second encoding of the API's shapes is what the `_understood` helper
+  exists to have removed. So the tolerance is a rule about the shape,
+  in the one place that already holds shape-guided rules. `_declared`'s
+  tuple branch gains it: **a sequence of a closed token is read whole
+  or not at all**, so one member this client does not recognize makes
+  the sequence a fact it cannot act on, and the honest reading of that
+  is the same as an older server's silence, the field's default. Stated
+  as a shape rule and not as a field name, which is the discipline that
+  branch is written to ("guided by the shape and not by a list of field
+  names"). The scalar enum branch is untouched: an unknown `applies` on
+  a diff still refuses the whole answer, which is today's behavior and
+  is not this plan's to change. Verified against pydantic before
+  writing this: a missing key and an explicit `()` both validate to the
+  default under `strict=True`, and a tuple carrying one unrecognized
+  member raises `ValidationError`, which is exactly the refusal the new
+  rule intercepts.
 - **The prose stays, and stops naming commands.** Keeping it is what
   makes an old client safe against a new server: it prints the sentence
   verbatim, and a state-only sentence is never wrong. Removing the
@@ -416,14 +440,26 @@ Reusing what exists wherever the assertion already has a home.
   `tests/unit/test_command_spellings.py`. That the spelling is now
   inside the guard's reach is the plan's central claim, and the guard
   proving it needs no new code is the evidence.
-- **The fallback cases**, three of them, driven through the rendering
-  the way `test_config_cli_rendering.py` drives the others: an
-  acknowledgement with no `applies` key prints the server's sentence
-  alone; one carrying a token this client does not know does the same;
-  one carrying a known set prints the server's sentence and the
-  client's remedy under it. The middle case is #369's
+- **The fallback cases, driven through `Act.read()` and not through the
+  renderer.** A renderer-only case would pass while the real path
+  refuses the body before rendering, which is the failure mode the
+  review round caught, so each case starts from a body and goes through
+  the act that reads it: an acknowledgement with no `applies` key
+  prints the server's sentence alone; one carrying a token this client
+  does not know does the same, rather than raising; one carrying a
+  known set prints the server's sentence and the client's remedy under
+  it. All three run twice, once through the single-write act
+  (`Acknowledgement`) and once through the import act
+  (`AppliedDocument`), because the tolerance lives in a shape walk and
+  a nested entry is where a walk goes wrong. The unknown-token case
+  also asserts the token itself is never printed: what a body put in a
+  closed field is not this client's to echo. The middle case is #369's
   `sometime-in-the-future` bite (`test_simulator_board.py:471`) in this
   surface's terms.
+- **The producer side stays closed**, asserted from the other end: every
+  `Notice.applies` member is an `Applies` member, so no route can emit
+  the token the client is being taught to tolerate. Tolerance is a
+  reading rule, never a licence to send.
 - `tests/unit/test_config_cli_respelling.py` gains one licensed
   substitution for the new stderr text, and its docstring's claim that
   a notice names the command that applies a write is amended to say
@@ -444,6 +480,12 @@ Reusing what exists wherever the assertion already has a home.
   equality pin, which fails if either side gains a member alone. The
   regenerated OpenAPI document is where a reviewer sees the whole
   effect in one diff.
+- **The shape rule in `_declared` reaches further than one field.** It
+  is written for a sequence of closed tokens, and today there is
+  exactly one such shape in `responses.py`, the field this plan adds.
+  That is the bound: the scalar enum branch keeps refusing, so no
+  existing field's reading changes, and the two `Act.read()` cases are
+  what hold the new branch to the shape it claims.
 - **A defaulted field is a hole a server could fall through.** The
   server always sets it; nothing but an older server omits it. Held by
   the pin that every `Notice` carries a non-empty `applies`, and by the
@@ -469,13 +511,20 @@ Reusing what exists wherever the assertion already has a home.
   seven diff fields narrow to `DiffApplies`; `Acknowledgement` and
   `AppliedEntry` gain `applies`, defaulted so an older server's body
   still validates; the five notice constants become `Notice` pairs in
-  `entities.py` and `api.py` reads both halves; `tests/support/notices.py`
+  `entities.py` and `api.py` reads both halves; `cli._declared` gains
+  the read-whole-or-not-at-all rule for a sequence of closed tokens,
+  with the two `Act.read()` cases proving an unknown member reads as
+  the default rather than raising; `tests/support/notices.py`
   reads the field instead of the prose; the stale
   `Acknowledgement.notice` description is rewritten to describe what
-  the server sends today; the closed-set pin; `docs/reference/api-openapi.json`
+  the server sends today; the closed-set pin and the
+  `STORE_BOOT`-rejection pin; `docs/reference/api-openapi.json`
   and the census manifest regenerate; a CHANGELOG `Added` entry; the
-  implementation-doc section. No printed byte changes, so this merges
-  releasable on its own. Design footprint: deepens `responses.py` (the
+  implementation-doc section. The field and the rule for reading it
+  land together, because a field whose tolerance arrives a milestone
+  later is a field that refuses in between. No printed byte changes, so
+  this merges releasable on its own. Design footprint: deepens
+  `responses.py` (the
   vocabulary it publishes now covers every boundary a write can wait
   at) and `entities.py` (a notice is the pair it always was); removes
   the fourth encoding in the test support; no new module, and the only
@@ -537,6 +586,28 @@ amendments.
    consumer-side forward compatibility coexist, and exercise both
    `Acknowledgement` and `AppliedDocument` through `Act.read()` with an
    unknown token, asserting the token is never emitted.
+
+   *Resolution*: accepted in full, and verified against pydantic before
+   amending (a missing key and an explicit `()` both validate to the
+   default under `strict=True`; a tuple carrying one unrecognized
+   member raises `ValidationError`). The tolerance cannot be a second
+   client-side shape here, the way `simulator/board.py` gets one,
+   because there is one shared module and `cli.py:2255-2258` records
+   that a hand-kept second encoding is exactly what `_understood` was
+   introduced to remove. So it becomes a shape rule in the one place
+   that already holds shape-guided rules: `_declared`'s tuple branch
+   reads a sequence of closed tokens whole or not at all, and one
+   member this client does not recognize reads as the field's default,
+   which is an older server's silence. The scalar enum branch is
+   untouched, so no existing field's reading moves. The plan now states
+   the rule and its reasoning beside the forward-compatibility bullet,
+   moves the field and the rule into the same milestone (a field whose
+   tolerance arrives later is a field that refuses in between), drives
+   every fallback case through `Act.read()` rather than the renderer
+   and runs each twice, once through `Acknowledgement` and once through
+   `AppliedDocument`, asserts the unknown token is never printed, adds
+   the producer-side pin that no `Notice` can emit a token outside the
+   enum, and records the new branch's blast radius as a risk.
 
 2. **P2: boundary-only import deduplication loses old-server notices.**
    Every entry from an older server defaults to the same empty set, so
