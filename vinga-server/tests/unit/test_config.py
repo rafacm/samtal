@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
 from tests.support.configs import load_config_from_data
-from vinga_server.config import Config, ConfigError, load_file_config
+from vinga_server.config import Config, ConfigError, docgen, load_file_config
 from vinga_server.config.entities import PROGRAM, SERVER_PROGRAM
 from vinga_server.config.loader import (
     CONFIG_ENV_VAR,
@@ -22,6 +23,7 @@ from vinga_server.config.models import (
     DOMAIN_KEYS,
     NOT_A_MAC,
     UNRECOGNIZED_KEY_REFUSED,
+    ServerConfig,
     normalize_mac,
 )
 from vinga_server.conversations.store import RETENTION_DAYS_DEFAULT
@@ -1391,3 +1393,73 @@ def test_multiple_problems_reported_together() -> None:
     assert "devices.aa:bb:cc:dd:ee:ff: entry 1 names no agent that exists" in message
     assert "names no llm provider that exists" in message
 
+
+
+# The server half's own documentation
+#
+# The domain models' descriptions are held to being present by
+# `test_config_docgen.py`, because three surfaces render them. The
+# server half's are new, they render nowhere yet, and a field written
+# without one would be invisible until a page appeared with a hole in
+# it. So the guard lands with the descriptions: what keeps a
+# `Field(description=...)` on the forty-seventh field is a test that
+# fails on the forty-eighth without one.
+#
+# Walked by reflection through `docgen.nested_model`, never by a hand
+# list: a section added to `ServerConfig` is covered by existing, and a
+# section renamed cannot fall out of a list nobody remembered to edit.
+
+
+def _reachable(root: type[BaseModel]) -> list[type[BaseModel]]:
+    """Every model reachable from a root, root first, in declaration
+    order. An optional section is a union and is found the way a
+    required one is, which is what `nested_model` is for."""
+    found: list[type[BaseModel]] = []
+
+    def walk(model: type[BaseModel]) -> None:
+        if model in found:
+            return
+        found.append(model)
+        for info in model.model_fields.values():
+            nested = docgen.nested_model(info.annotation)
+            if nested is not None:
+                walk(nested)
+
+    walk(root)
+    return found
+
+
+def test_the_walk_finds_the_whole_server_half() -> None:
+    """Without this the two checks below pass on an empty walk, which is
+    what a renamed section or a changed annotation would produce."""
+    reachable = _reachable(ServerConfig)
+
+    assert reachable[0] is ServerConfig
+    assert len(reachable) >= 8
+    assert sum(len(model.model_fields) for model in reachable) >= 47
+
+
+def test_every_server_field_carries_a_description() -> None:
+    """A field with none renders as an undescribed cell, which is a
+    defect the reference makes visible rather than an empty space to
+    skim past. This is where it is caught instead."""
+    missing = [
+        f"{model.__name__}.{name}"
+        for model in _reachable(ServerConfig)
+        for name, info in model.model_fields.items()
+        if not (info.description or "").strip()
+    ]
+
+    assert not missing, f"undescribed server fields: {', '.join(missing)}"
+
+
+def test_every_server_model_carries_a_docstring() -> None:
+    """The docstrings are the sections' prose, so a model without one is
+    a section of a page with a heading and no explanation."""
+    missing = [
+        model.__name__
+        for model in _reachable(ServerConfig)
+        if not (model.__doc__ or "").strip()
+    ]
+
+    assert not missing, f"undocumented server models: {', '.join(missing)}"
