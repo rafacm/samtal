@@ -40,10 +40,14 @@ from tests.support.stores import (
     the_lock_held,
 )
 from vinga_server import db as db_module
-from vinga_server.config.loader import ConfigError, DatabaseBusyError
+from vinga_server.config.loader import (
+    AgentRenameConflictError,
+    ConfigError,
+    DatabaseBusyError,
+)
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN
-from vinga_server.db import advisory_key, connection_url
+from vinga_server.db import advisory_key, connection_url, write_engine
 from vinga_server.memory import store as store_module
 from vinga_server.memory.store import (
     MEMORY_CHAIN,
@@ -1186,8 +1190,6 @@ async def test_a_purge_on_a_callers_connection_belongs_to_its_transaction() -> N
     On the record chain's own write engine, which is the caller this
     exists for: a transaction already holding key 2 reaches here and
     takes key 3, which is the ascending order the deadlock rule is."""
-    from vinga_server.db import write_engine
-
     store = memory()
     await _a_thread_with_memory(store, THREAD)
 
@@ -1205,6 +1207,131 @@ async def test_a_purge_on_a_callers_connection_belongs_to_its_transaction() -> N
     # the rows are exactly where they were.
     assert _state(THREAD) == [("turn", "white to move")]
     assert len(_held("poet")) == 1
+
+
+# One owner's rows moved onto another name
+#
+# The memory third of an agent rename, which is `purge`'s seam widened by
+# one verb. What the cross-schema transaction above it promises has a
+# suite of its own (`test_agent_rename.py`); what belongs here is the
+# function's own contract: which rows it moves, what it answers, what it
+# refuses, and that its writes are the caller's transaction's.
+
+
+async def test_renaming_an_owner_moves_its_active_and_its_held_rows() -> None:
+    """Both areas, because a held row carries `owner` like any other and
+    a restore after the rename has to find it. The count is the rows that
+    moved, so a caller can say what the write did without reading the
+    table back."""
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await _a_thread_with_memory(store, THREAD)
+
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            moved = store_module.rename_owner(
+                connection, MemoryScope.AGENT, "poet", "bard"
+            )
+    finally:
+        engine.dispose()
+
+    assert moved == 2
+    assert _rows("poet") == [] and _held("poet") == []
+    assert _rows("bard") == ["the user is vegetarian"]
+    assert [fact for fact, _ in _held("bard")] == [f"a fact forgotten in {THREAD}"]
+
+
+async def test_renaming_an_owner_leaves_another_scope_alone() -> None:
+    """The address is the pair, not the name: a device whose canonical
+    MAC happened to spell an agent's name would not be moved by an agent
+    rename, and neither is any row of the other scope."""
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "an agent fact", agent="poet")
+    await store.add(MemoryScope.DEVICE, "poet", "a device note", agent="poet")
+
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            store_module.rename_owner(connection, MemoryScope.AGENT, "poet", "bard")
+    finally:
+        engine.dispose()
+
+    assert _rows("bard") == ["an agent fact"]
+    assert _rows("poet", scope="device") == ["a device note"]
+
+
+async def test_renaming_onto_an_occupied_name_is_refused_and_moves_nothing() -> None:
+    """The rule the refusal comes from is one sentence: the destination
+    has to be free. A merge could not be undone, because no second rename
+    could tell the two owners' rows apart afterwards.
+
+    The sentence names neither name, and the whole transaction is left
+    for the caller to roll back.
+    """
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "an agent fact", agent="poet")
+    await store.add(MemoryScope.AGENT, "bard", "somebody else's fact", agent="bard")
+
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            with pytest.raises(AgentRenameConflictError) as refused:
+                store_module.rename_owner(
+                    connection, MemoryScope.AGENT, "poet", "bard"
+                )
+    finally:
+        engine.dispose()
+
+    assert str(refused.value) == store_module.RENAME_OCCUPIED
+    assert "poet" not in str(refused.value)
+    assert "bard" not in str(refused.value)
+    assert _rows("poet") == ["an agent fact"]
+    assert _rows("bard") == ["somebody else's fact"]
+
+
+async def test_renaming_an_owner_that_holds_nothing_moves_nothing() -> None:
+    """Not addressed at a row, so nothing is refused for being absent,
+    which is the contract `erase_facts` keeps for the same reason."""
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            moved = store_module.rename_owner(
+                connection, MemoryScope.AGENT, "poet", "bard"
+            )
+    finally:
+        engine.dispose()
+
+    assert moved == 0
+
+
+async def test_a_rename_on_a_callers_connection_belongs_to_its_transaction() -> None:
+    """The seam again, from the side that writes rather than deletes: the
+    caller owns the transaction, so a rollback takes the rename with it
+    and there is never a moment when an agent has been renamed and its
+    memory has not.
+
+    On the record chain's own write engine, which is one lock short of
+    the caller this exists for and enough to show the crossing: a
+    transaction already holding key 2 reaches here and takes key 3.
+    """
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+
+    engine = write_engine(DatabaseConfig(), CONVERSATIONS_CHAIN)
+    try:
+        with engine.connect() as connection:
+            with connection.begin() as transaction:
+                moved = store_module.rename_owner(
+                    connection, MemoryScope.AGENT, "poet", "bard"
+                )
+                transaction.rollback()
+    finally:
+        engine.dispose()
+
+    assert moved == 1
+    assert _rows("poet") == ["the user is vegetarian"]
+    assert _rows("bard") == []
 
 
 # A thread id is a value too, and a purge binds them
