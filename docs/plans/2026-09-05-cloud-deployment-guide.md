@@ -164,8 +164,12 @@ memory.
   `kubectl create secret generic` from values kept wherever the
   deployment keeps secrets, never by editing the template in
   place),
-  `job-postgres-init.yaml` (a one-shot Job running
-  `psql "$ADMIN_URL" -f` over the mounted ConfigMap). The Job's
+  `job-postgres-init.yaml` (a one-shot Job on the `postgres:17-alpine`
+  client image the trial file already uses, the ConfigMap mounted
+  read-only at `/sql`, command
+  `psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -f /sql/postgres-init.sql`,
+  so a failing statement fails the Job instead of scrolling past).
+  The Job's
   credentials are an init-only Secret of their own
   (`secret-init.example`: `ADMIN_URL`, the administrative connection
   able to create roles and schemas; `VINGA_DB_USER`; and
@@ -219,8 +223,10 @@ memory.
   default plus margin; the security context's user, group and
   `fsGroup` equal the Dockerfile's `vinga` UID (read from the
   Dockerfile, not restated); `/tmp` is memory-backed; the init
-  Job's env references the init-Secret's required keys and the
-  Deployment references no key of that Secret. Across the network
+  Job's env references the init-Secret's required keys, the
+  Deployment references no key of that Secret, and the Job mounts
+  the ConfigMap volume and names `/sql/postgres-init.sql` as its
+  `-f` argument. Across the network
   path: the Deployment's labels match the Service's selector, the
   Service's `targetPort` reaches the Deployment's container port,
   and every Ingress backend names that Service and its declared
@@ -515,3 +521,36 @@ answer every finding, and a delta re-review confirms them.
     *Resolution*: accepted in full. M1's milestone now names the
     census regeneration after the artifact files are tracked; M2's
     already did.
+
+### Delta re-review
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-terra`, sandbox
+read-only, 2026-09-05, against commit ad35ab91; about 4 minutes.
+Verdict: all ten resolutions verified as delivered; ready after two
+new P1 amendments and one P2, all inside the amended territory.
+
+1. **P1: the init Job command is incomplete.** `psql "$ADMIN_URL"
+   -f` names no file; the Job needs the client image, the ConfigMap
+   mount path and key, and the complete command. Specify, for
+   example, `psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -f
+   /sql/postgres-init.sql`, and assert the volume and file argument
+   in the agreement test.
+
+   *Resolution*: accepted in full. The Job bullet now names the
+   `postgres:17-alpine` client image, the read-only `/sql` mount and
+   the complete `ON_ERROR_STOP` command, and the agreement test
+   asserts the ConfigMap volume and the `-f` argument.
+
+2. **P1: the TLS-terminating Ingress lacks a certificate
+   contract.** TLS termination is `spec.tls` with a host and an
+   operator-provisioned certificate Secret, none of which was
+   planned. Add `spec.rules[].host` and matching `spec.tls.hosts`
+   with a named TLS Secret outside the apply glob, document how the
+   certificate is supplied without naming a hosting provider, and
+   extend the agreement test to connect the Ingress host, the TLS
+   host and the URL placeholders' host.
+
+3. **P2: the GID assertion claims a Dockerfile fact it does not
+   establish.** The Dockerfile sets only `--uid 1000`; either make
+   the group contract explicit in the image or limit the assertion
+   to the UID and document the group mechanism separately.
