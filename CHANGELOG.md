@@ -168,6 +168,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   document exported from a store holding such a row used to be refused
   whole by the very import path it was written for.
 
+- **A URL credential in a mapping KEY is refused and no longer
+  displayed** (#408). The rule above, and the one #279 wrote, both
+  asked their question of values. Three groups are keyed by whatever
+  the caller wrote and were never asked it at all: a provider's
+  options, the structures those options pass through, and an MCP
+  server's `env` and `headers`. A key spelled
+  `https://user:password@host/x` was therefore accepted by every write
+  and handed back verbatim by every read, every export and every
+  capture or conversation manifest, which is the value-side leak over
+  again on the other half of the pair. The write path now refuses such
+  a key at all four doors, in a refusal that names the entry, or the
+  declared group inside it, and never the key, since the key is the
+  credential. The display and record boundaries strip one from a key
+  exactly as they do from a value, at one shared site. Where two keys
+  reach the same spelling once the credential is out of them, both are
+  kept: the first keeps the spelling and the next takes `#2`, in the
+  order the row holds its keys, because dropping a pair from a read
+  would delete configuration on the re-import the read is meant to
+  feed.
+
 ## 2026-09-04
 
 ### Added
