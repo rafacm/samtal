@@ -279,7 +279,7 @@ record that owns the reasoning) rather than a promise change.
   `docs/upstream-watch.yaml` with the issue's candidate paths at the
   currency table's pinned SHAs; `scripts/upstream_watch.py`
   with the agreement check wired into the docs workflow and the
-  `--print` mode the drift workflow parses with;
+  `print` subcommand the drift workflow parses with;
   `.github/workflows/upstream-drift.yml` (schedule plus dispatch,
   blobless clones, both distances, one labeled open-or-update issue,
   `--dry-run` input); the notes paragraph; the changelog entry; the
