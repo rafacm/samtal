@@ -1,0 +1,176 @@
+name: upstream drift
+
+# vinga speaks a wire contract it does not own. The paths that carry it
+# live in docs/upstream-watch.yaml beside the commit each was last read
+# at, and nothing else notices when upstream moves: the currency table
+# in docs/xiaozhi-notes.md stales silently, and the first symptom of
+# drift would be a board that stops conversing after a firmware update.
+#
+# So once a week this diffs the watched paths from each pinned commit to
+# upstream's HEAD and to upstream's latest release, and writes what moved
+# into one issue. Pure git and no judgment: the report names files and
+# commit subjects, triage stays human, and the resolution loop lives in
+# the manifest's header.
+#
+# The workflow parses nothing and decides nothing itself. It calls
+# scripts/upstream_watch.py's print, report and decide, so exactly one
+# parser and one decision site exist, and upstream-controlled paths and
+# subjects never reach a shell.
+on:
+  # Mondays 06:17 UTC. An off-peak minute rather than the hour, where
+  # every other repository's cron is queued.
+  schedule:
+    - cron: "17 6 * * 1"
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build the report and print it, without touching the tracker"
+        type: boolean
+        default: false
+
+  # The pre-merge evidence, and the reason this trigger exists at all:
+  # GitHub accepts workflow_dispatch only for a workflow already on the
+  # default branch, so a new or changed watch cannot be dispatch-tested
+  # before it merges. A pull request touching the watch runs the whole
+  # thing in dry-run mode instead, which proves clone, resolve, diff and
+  # report construction against live upstream without writing anything.
+  pull_request:
+    paths:
+      - ".github/workflows/upstream-drift.yml"
+      - "docs/upstream-watch.yaml"
+      - "scripts/upstream_watch.py"
+
+# Serialized rather than cancelled. The issue step searches, then
+# creates or edits, and two runs interleaving inside that window is how
+# one drift report becomes two. A manual dispatch landing beside the
+# schedule queues behind it.
+concurrency:
+  group: upstream-drift
+  cancel-in-progress: false
+
+# The report is read-only work; only the last step writes, and it writes
+# one issue. Nothing here needs more than that.
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The manifest parser runs through the vinga-server environment,
+      # where PyYAML is already a dependency, so no runner-image Python
+      # detail is load-bearing and no hand-rolled YAML parsing exists.
+      # This is the docs workflow's provisioning, step for step; the
+      # discipline is no additional unpinned or drift-analysis action,
+      # not no action at all.
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "vinga-server/uv.lock"
+          # The unit lane owns this cache key's save; a second writer on
+          # the same key is a race one of them loses.
+          save-cache: false
+
+      - name: Install
+        working-directory: vinga-server
+        run: uv sync --frozen
+
+      # Blobless and unchecked-out: this needs history and trees, never
+      # file contents. The explicit all-tags fetch is not redundant with
+      # the clone, which brings only the tags reachable from the history
+      # it fetched, and a release branch's tag can sit outside that.
+      - name: Clone the watched upstreams
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/upstream-clones"
+          uv run --project vinga-server python scripts/upstream_watch.py print \
+            > "${RUNNER_TEMP}/clone-rows"
+          while read -r dir url; do
+            git clone --filter=blob:none --no-checkout --quiet \
+              "$url" "${RUNNER_TEMP}/upstream-clones/$dir"
+            git -C "${RUNNER_TEMP}/upstream-clones/$dir" \
+              fetch --tags --filter=blob:none --quiet
+          done < "${RUNNER_TEMP}/clone-rows"
+
+      # An unparseable manifest or a pin that does not resolve in its
+      # clone fails here, before any diffing: a run that measured
+      # nothing must not report "no drift".
+      - name: Build the drift report
+        run: |
+          set -euo pipefail
+          uv run --project vinga-server python scripts/upstream_watch.py report \
+            --clones "${RUNNER_TEMP}/upstream-clones" \
+            --output "${RUNNER_TEMP}/drift-report.md"
+
+      # Nothing moved: the file is empty, the two steps below skip, and
+      # the run ends green having written nothing.
+      - name: Note the report's state
+        id: report
+        run: |
+          set -euo pipefail
+          if [ -s "${RUNNER_TEMP}/drift-report.md" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            echo "No watched upstream path moved." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Dry run, the report into the step summary
+        if: >-
+          steps.report.outputs.drift == 'true'
+          && (github.event_name == 'pull_request'
+              || inputs.dry_run)
+        run: cat "${RUNNER_TEMP}/drift-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # The only step that writes, and therefore the only step that sees
+      # a token: permissions authorize the token, they do not make gh
+      # consume it, and scoping GH_TOKEN here is what keeps every other
+      # step unable to act as the repository. Every gh call passes
+      # --repo, because gh otherwise infers the repository from the
+      # working directory. No set -x and no env dump anywhere in this
+      # file, so nothing traces a token into a log.
+      #
+      # decide, not shell, picks between create and edit: identity is
+      # the exact title plus the marker in the body, and more than one
+      # match is a refusal that fails the run rather than a guess about
+      # which issue to overwrite.
+      - name: Open or update the drift report issue
+        if: >-
+          steps.report.outputs.drift == 'true'
+          && github.event_name != 'pull_request'
+          && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create upstream-drift --force \
+            --repo rafacm/vinga \
+            --color B60205 \
+            --description "The upstream wire contract moved under a watched path"
+          gh issue list --repo rafacm/vinga \
+            --label upstream-drift --state open \
+            --json number,title,body > "${RUNNER_TEMP}/open-issues.json"
+          decision=$(uv run --project vinga-server python scripts/upstream_watch.py decide \
+            --report "${RUNNER_TEMP}/drift-report.md" \
+            --issues "${RUNNER_TEMP}/open-issues.json")
+          case "$decision" in
+            create)
+              gh issue create --repo rafacm/vinga \
+                --title "Upstream drift report" \
+                --label upstream-drift \
+                --body-file "${RUNNER_TEMP}/drift-report.md"
+              ;;
+            "update "*)
+              gh issue edit "${decision#update }" --repo rafacm/vinga \
+                --body-file "${RUNNER_TEMP}/drift-report.md"
+              ;;
+            *)
+              echo "the decision was not recognized" >&2
+              exit 1
+              ;;
+          esac
