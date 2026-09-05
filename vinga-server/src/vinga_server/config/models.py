@@ -150,8 +150,10 @@ PROBE_PATHS = (HEALTH_PATH, READY_PATH)
 # the derivation truncates to.
 _ONBOARDING_KEY_RE = re.compile(r"^[A-Z2-7]{8}$")
 
-# The logging level names, most to least verbose. NOTSET is left out: on
-# the root logger it means WARNING, which is not what writing it says.
+# The logging level names, most to least verbose, and the one home of
+# that set: `log_level`'s description names them from here, its refusal
+# lists them from here, and the reason NOTSET is not among them is on
+# the field where an operator meets it.
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # Identifiers (provider names, agent names, references between them) must
@@ -730,130 +732,293 @@ def url_problem(url: str, schemes: tuple[str, ...]) -> str | None:
 
 
 class ServerConfig(BaseModel):
+    """How this process runs: the `server:` section of the YAML file.
+
+    The server half of the configuration, and the whole of what the file
+    holds. Everything about what the server says and to whom (providers,
+    MCP servers, prompt fragments, agent defaults, agents, devices, the
+    default agent) is the domain half, which lives in the database this
+    section names and is written through the configuration API.
+
+    Read once at start and never re-read by a running process: the port,
+    the paths, the limits, the barge-in tuning and the storage switches
+    are what one server is serving until the next one starts. That is
+    the line between the two halves, and it is why a change here is a
+    restart while a change to the domain half is an apply or, for a
+    device binding, nothing at all.
+
+    Any key of it can be overridden from the environment as
+    `VINGA_SERVER__<PATH>`, with `__` joining the nesting
+    (`VINGA_SERVER__PORT`, `VINGA_SERVER__ONBOARDING__KEY`); environment
+    beats file beats these defaults. The `database` section is the one
+    recorded exception, with four short spellings of its own.
+
+    No secret is ever written here. A key that carries one names the
+    environment variable holding it instead, and the two values that are
+    environment-only, the database password and the whole database URL,
+    have no key on any of these models at all.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    host: str = "0.0.0.0"
-    port: int = Field(default=8003, ge=1, le=65535)
+    host: str = Field(
+        default="0.0.0.0",
+        description=(
+            "The address the server listens on. 0.0.0.0 accepts connections on "
+            "every interface, which is what a device elsewhere on the network "
+            "needs; 127.0.0.1 keeps the server to this host, which is what a "
+            "deployment behind a proxy on the same machine wants."
+        ),
+    )
+    port: int = Field(
+        default=8003,
+        ge=1,
+        le=65535,
+        description=(
+            "The port the server listens on. Everything it serves is on this one "
+            f"port: the websocket channel, the OTA endpoint, the short onboarding "
+            f"route, the configuration API at `{API_MOUNT_PATH}` and the health "
+            f"probes."
+        ),
+    )
 
-    # The websocket URL handed to devices by the OTA endpoint. Left unset it
-    # is derived from the address the device reached the OTA endpoint on,
-    # which is right for a plain LAN deployment; set it explicitly when the
-    # server sits behind a proxy or a name the request headers do not carry.
-    websocket_url: str | None = None
+    websocket_url: str | None = Field(
+        default=None,
+        description=(
+            "The websocket URL the OTA endpoint hands to devices. A `ws://` or "
+            "`wss://` URL that names a host and carries no `user:password`, since "
+            "this value is read back out verbatim by the OTA endpoint's own GET, "
+            "which anyone holding the onboarding URL can reach. Left unset it is "
+            "derived from the address the device reached the OTA endpoint on, "
+            "which is right for a plain LAN deployment; set it explicitly when the "
+            "server sits behind a proxy or a name the request headers do not carry."
+        ),
+    )
 
-    # The origin devices reach this server on, written exactly as a person
-    # would type it: scheme, host, optional port, and an optional path
-    # prefix when a proxy serves the server under one. Its only job is to
-    # say the onboarding URL out loud at startup and on the OTA GET.
-    # Unset, the origin is derived from websocket_url. Failing that, the
-    # OTA GET answers with the address the request arrived on, and the
-    # startup line, which has no request to read, guesses from the listen
-    # address and says it is a guess.
-    public_url: str | None = None
+    public_url: str | None = Field(
+        default=None,
+        description=(
+            "The origin devices reach this server on, written exactly as a person "
+            "would type it. An `http://` or `https://` origin, with an optional "
+            "path prefix when a proxy serves the server under one, and with no "
+            "`user:password`, no query and no fragment: this is an origin rather "
+            "than a whole URL, and it is printed at startup and handed to somebody "
+            "to type. Its only job is to say the onboarding URL out loud at "
+            "startup and on the OTA GET. Unset, the origin is derived from "
+            "`websocket_url`. Failing that, the OTA GET answers with the address "
+            "the request arrived on, and the startup line, which has no request to "
+            "read, guesses from the listen address and says it is a guess."
+        ),
+    )
 
-    # Where the OTA endpoint is served. It is the token issuer, so it cannot
-    # itself require a token; an operator exposing the server publicly hides
-    # it behind a long random segment (/xiaozhi/ota/8f3a.../) and writes that
-    # URL into the device's NVS. The websocket path is fixed: the token is
-    # what protects it.
-    #
-    # Null unmounts it, which a deployment does once every board it serves
-    # has been moved to the onboarding path below.
-    ota_path: str | None = "/xiaozhi/ota/"
+    ota_path: str | None = Field(
+        default="/xiaozhi/ota/",
+        description=(
+            "Where the OTA endpoint is served, or null to unmount it. It must "
+            f"start and end with `/`, and four places are reserved: "
+            f"`{API_MOUNT_PATH}/` and anything under it, where the OTA route would "
+            f"be found before the configuration API is mounted and would answer a "
+            f"request its token gate never saw; `{ONBOARDING_MOUNT_PATH}/` and "
+            f"anything under it, which serves this same endpoint at "
+            f"`{ONBOARDING_MOUNT_PATH}/<key>/`; and the health probes "
+            f"`{HEALTH_PATH}` and `{READY_PATH}`, which are registered first and "
+            f"each answer both spellings of their own path, so an OTA endpoint "
+            f"served at either would never be reached. It is the token issuer, so "
+            f"it cannot itself require a token: an operator exposing the server "
+            f"publicly hides it behind a long random segment "
+            f"(`/xiaozhi/ota/8f3a.../`) and writes that whole URL into the "
+            f"device's NVS. The websocket path never moves, since the token is "
+            f"what protects it. Null unmounts the route, which a deployment does "
+            f"once every board it serves has moved to the onboarding path, and "
+            f"unmounting it with `onboarding.enabled` false as well is refused at "
+            f"boot."
+        ),
+    )
 
-    # The short onboarding alias of the OTA endpoint. On by default.
-    onboarding: OnboardingConfig = Field(default_factory=OnboardingConfig)
+    onboarding: OnboardingConfig = Field(
+        default_factory=OnboardingConfig,
+        description=(
+            "The short onboarding alias of the OTA endpoint, the URL a person "
+            "types into a board's captive portal. On by default."
+        ),
+    )
 
-    # Binary protocol version advertised to devices. The firmware defaults to
-    # 1 (bare Opus frames); 2 and 3 add timestamp headers.
-    protocol_version: int = Field(default=1, ge=1, le=3)
+    protocol_version: int = Field(
+        default=1,
+        ge=1,
+        le=3,
+        description=(
+            "Binary protocol version advertised to devices. The firmware defaults "
+            "to 1, which is bare Opus frames; 2 and 3 add timestamp headers."
+        ),
+    )
 
-    # Minutes east of UTC, sent so the device can set its clock to local time.
-    # Left unset the server's own current offset is used.
-    timezone_offset_minutes: int | None = Field(default=None, ge=-1440, le=1440)
+    timezone_offset_minutes: int | None = Field(
+        default=None,
+        ge=-1440,
+        le=1440,
+        description=(
+            "Minutes east of UTC, sent so the device can set its clock to local "
+            "time. Left unset the server's own current offset is used."
+        ),
+    )
 
-    # How the server logs. "text" is the human format; "json" is one object
-    # per line, which is what the container image defaults to, and what a
-    # collector groups by session to measure the pipeline. The records are
-    # metadata; what was said is in the conversation store.
-    log_format: Literal["text", "json"] = "text"
-    log_level: str = "INFO"
+    log_format: Literal["text", "json"] = Field(
+        default="text",
+        description=(
+            'How the server logs. "text" is the human format; "json" is one object '
+            "per line, which is what the container image defaults to, and what a "
+            "collector groups by session to measure the pipeline. The records are "
+            "metadata; what was said is in the conversation record."
+        ),
+    )
+    log_level: str = Field(
+        default="INFO",
+        description=(
+            "How much the server logs, as one of: "
+            + ", ".join(_LOG_LEVELS)
+            + ". Written in any case and normalized to upper; anything else refuses "
+            "the boot. NOTSET is deliberately not accepted: on the root logger it "
+            "means WARNING, which is not what writing it says."
+        ),
+    )
 
-    auth: AuthConfig = Field(default_factory=AuthConfig)
+    auth: AuthConfig = Field(
+        default_factory=AuthConfig,
+        description=(
+            "Device authentication for the websocket endpoint. On by default, and "
+            "a server started with it on and no secret in the environment refuses "
+            "to boot rather than quietly serving open."
+        ),
+    )
 
-    # The configuration API mounted at /api. Always on, so the section
-    # exists only to name the variable its bearer token comes from.
-    api: ApiConfig = Field(default_factory=ApiConfig)
+    api: ApiConfig = Field(
+        default_factory=ApiConfig,
+        description=(
+            f"The configuration REST API, mounted at `{API_MOUNT_PATH}` on the "
+            f"port above. Always on and always behind a bearer token, so the "
+            f"section exists only to name the variable that token comes from."
+        ),
+    )
 
-    limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    limits: LimitsConfig = Field(
+        default_factory=LimitsConfig,
+        description="What one server will hold at once, and for how long.",
+    )
 
-    # The Postgres database this server keeps both of its halves in:
-    # the domain configuration `vinga-server config` writes and the
-    # server reads at each start, and the conversation record below.
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    database: DatabaseConfig = Field(
+        default_factory=DatabaseConfig,
+        description=(
+            "The Postgres database this server keeps both of its halves in: the "
+            "domain configuration written through the configuration API and read "
+            "at each start, and the conversation record below."
+        ),
+    )
 
-    # Absent, or present with enabled off, means no session is ever
-    # recorded. Absent is the default.
-    capture: CaptureConfig | None = None
+    capture: CaptureConfig | None = Field(
+        default=None,
+        description=(
+            "Recording room audio to disk for offline analysis. Absent, or present "
+            "with `enabled` off, means no session is ever recorded, and absent is "
+            "the default."
+        ),
+    )
 
-    # Absent, or present with enabled off, means no session is ever
-    # recorded and no writer is started. Absent is the default. The
-    # schema is still migrated at boot either way, because a deployment
-    # that recorded last month and records nothing today still has to be
-    # able to read what it kept, and empty tables are not a recording.
-    conversations: ConversationsConfig | None = None
+    conversations: ConversationsConfig | None = Field(
+        default=None,
+        description=(
+            "Recording what was said into a database that can be queried. Absent, "
+            "or present with `enabled` off, means no session is ever recorded and "
+            "no writer is started, and absent is the default. The schema is "
+            "migrated at boot either way, because a deployment that recorded last "
+            "month and records nothing today still has to be able to read what it "
+            "kept, and empty tables are not a recording."
+        ),
+    )
 
-    # Refuse to boot any provider that sends session data off this host.
-    # Running without a cloud dependency is otherwise a documentation
-    # property of a carefully chosen configuration; this makes it a
-    # checked one. Boot-time, never runtime: a local_only server that
-    # starts is a local_only server (#30).
-    local_only: bool = False
+    local_only: bool = Field(
+        default=False,
+        description=(
+            "Refuse to boot any provider that sends session data off this host. "
+            "Running without a cloud dependency is otherwise a documentation "
+            "property of a carefully chosen configuration; this makes it a checked "
+            "one. Boot-time, never runtime: a local_only server that starts is a "
+            "local_only server (#30)."
+        ),
+    )
 
-    # Whether speech arriving while a reply is playing interrupts it. On
-    # by default, because a device only streams its mic through playback
-    # when its echo cancellation is on, and what arrives is then the
-    # user's voice. Turn it off for a board whose cancellation leaks the
-    # speaker back into the mic (a single-mic board), where the reply
-    # would otherwise interrupt itself: conversations stay multi-turn,
-    # and what arrives during a reply is dropped instead.
-    barge_in: bool = True
+    barge_in: bool = Field(
+        default=True,
+        description=(
+            "Whether speech arriving while a reply is playing interrupts it. On by "
+            "default, because a device only streams its mic through playback when "
+            "its echo cancellation is on, and what arrives is then the user's "
+            "voice. Turn it off for a board whose cancellation leaks the speaker "
+            "back into the mic (a single-mic board), where the reply would "
+            "otherwise interrupt itself: conversations stay multi-turn, and what "
+            "arrives during a reply is dropped instead."
+        ),
+    )
 
-    # The least endpointer-classified speech, in milliseconds, an
-    # utterance needs before it may interrupt a reply. Noise blips and
-    # playback bleed rarely sustain half a second of speech; a real
-    # interjection does (#28).
-    barge_in_min_speech_ms: float = Field(default=500.0, ge=0)
+    barge_in_min_speech_ms: float = Field(
+        default=500.0,
+        ge=0,
+        description=(
+            "The least endpointer-classified speech, in milliseconds, an utterance "
+            "needs before it may interrupt a reply. Noise blips and playback bleed "
+            "rarely sustain half a second of speech; a real interjection does (#28)."
+        ),
+    )
 
-    # How long after a reply's first audio frame that interruptions are
-    # ignored, covering the transient a device's echo cancellation lets
-    # through at playback onset.
-    barge_in_refractory_ms: float = Field(default=1000.0, ge=0)
+    barge_in_refractory_ms: float = Field(
+        default=1000.0,
+        ge=0,
+        description=(
+            "How long after a reply's first audio frame interruptions are ignored, "
+            "in milliseconds. It covers the transient a device's echo cancellation "
+            "lets through at playback onset."
+        ),
+    )
 
-    # How much audio from before the detected start of speech rides
-    # along to ASR, so the first phoneme survives the trim. The rest of
-    # the leading silence a continuously listening device piles up is
-    # dropped before transcription (#14).
-    utterance_pre_roll_ms: float = Field(default=300.0, ge=0)
+    utterance_pre_roll_ms: float = Field(
+        default=300.0,
+        ge=0,
+        description=(
+            "How much audio from before the detected start of speech rides along "
+            "to ASR, in milliseconds, so the first phoneme survives the trim. The "
+            "rest of the leading silence a continuously listening device piles up "
+            "is dropped before transcription (#14)."
+        ),
+    )
 
-    # How long the LLM may take to its first token before the round is
-    # cancelled and retried once; a second timeout gives the round up.
-    # Only the wait for the first token is bounded, because a long
-    # generation that is streaming is healthy. Any stream activity
-    # stops the clock: the adapters announce their first chunk off the
-    # wire, so a round that streams only a buffered tool call is not
-    # mistaken for a stall. The default is chosen
-    # against field data: healthy first tokens cluster at 500 to 800 ms,
-    # the worst spike that still answered sat at 8.9 s, and the stall
-    # this exists for held the session for 17 s with nothing on the
-    # wire (#68).
-    llm_first_token_timeout_s: float = Field(default=10.0, gt=0)
+    llm_first_token_timeout_s: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "How long the LLM may take to its first token, in seconds, before the "
+            "round is cancelled and retried once; a second timeout gives the round "
+            "up. Only the wait for the first token is bounded, because a long "
+            "generation that is streaming is healthy, and any stream activity "
+            "stops the clock: the adapters announce their first chunk off the "
+            "wire, so a round that streams only a buffered tool call is not "
+            "mistaken for a stall. The default is chosen against field data: "
+            "healthy first tokens cluster at 500 to 800 ms, the worst spike that "
+            "still answered sat at 8.9 s, and the stall this exists for held the "
+            "session for 17 s with nothing on the wire (#68)."
+        ),
+    )
 
-    # How long a shutdown waits for conversations in flight to finish
-    # speaking before the process goes. Twenty seconds sits inside the
-    # thirty an orchestrator commonly allows between SIGTERM and SIGKILL;
-    # `docker stop` needs its own timeout raised above this.
-    drain_s: float = Field(default=20.0, ge=0)
+    drain_s: float = Field(
+        default=20.0,
+        ge=0,
+        description=(
+            "How long a shutdown waits for conversations in flight to finish "
+            "speaking before the process goes, in seconds. Twenty seconds sits "
+            "inside the thirty an orchestrator commonly allows between SIGTERM and "
+            "SIGKILL; `docker stop` needs its own timeout raised above this, since "
+            "its default is ten."
+        ),
+    )
 
     @field_validator("log_level")
     @classmethod
