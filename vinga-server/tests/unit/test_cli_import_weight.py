@@ -80,6 +80,13 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 # closed pipe is `events_cli`, which the client tier may not reach: it
 # would drag the whole event catalog in behind it.
 #
+# `config.server_reference` joined them with the `reference` verb's HALF
+# selector (#396). It renders the server half's page out of the same
+# models `docgen` renders the domain half from, and its whole import list
+# is `docgen`, `entities`, `loader`, `models`, `textwrap` and
+# annotated-types: the grammar was already paying for every one of them,
+# so what this entry costs is one module object.
+#
 # What is NOT here is the other point of the list: no `store`, so no
 # SQLAlchemy; no `secrets`, so no cryptography; no `api` and no
 # `onboarding`, so no FastAPI; no `db`, so no Alembic. Each of those
@@ -98,6 +105,7 @@ CLI_REACH = frozenset(
         "vinga_server.config.printing",
         "vinga_server.config.provider_options",
         "vinga_server.config.responses",
+        "vinga_server.config.server_reference",
         "vinga_server.config.transport",
         "vinga_server.device_endpoint",
         "vinga_server.logs",
