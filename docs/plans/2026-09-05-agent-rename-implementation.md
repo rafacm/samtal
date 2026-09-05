@@ -594,8 +594,29 @@ through the registered command are M4's.
 ### Verification
 
 - `uv run ruff check .`: clean.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: TBD.
-- `uv run pytest tests/integration -q`: TBD.
-- `scripts/check_doc_links.py .`: TBD.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5785 passed,
+  19 skipped.
+- `uv run pytest tests/integration -q`: 243 passed.
+- `scripts/check_doc_links.py .`: 206 files, 0 failures.
 - `uv run mypy`: clean.
-- The generated-document drift checks: TBD.
+- **All seven generated-document drift checks: current**, each
+  regenerated in the commit that moved it and re-diffed against the
+  committed copy at the end. `domain-config.md` moved with the
+  descriptor's note, `conversations-schema.md` with the record
+  migration, `api-openapi.json` twice, once for the route and once for
+  the memory docstrings; `server-config.md`, `events.md`, `cli.md` and
+  the recipes inside it are untouched and were diffed anyway.
+- **The CI wheel-migration step's chain-head half, run locally**, which
+  is where the two new heads have to hold: the wheel built and installed
+  into a venv of its own with `[serve]` and `psycopg[binary]`, a blank
+  database migrated from the installed artifact, and the three heads
+  read off the version tables as `3002_drop_max_tokens_secrets`,
+  `1003_rename_moves_ownership` and `2003_rename_moves_memory`. The
+  migrated comments were read back from `col_description` and are the
+  new ones. What was not run locally is the rest of that step, the table
+  and column inventories, which this change does not move.
+
+The first spelling of the record revision id is what caught the version
+column's width, and it was caught by running the migration rather than
+by reading about it: the migration altered the comment and then failed
+on its own stamp.
