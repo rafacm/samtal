@@ -761,9 +761,11 @@ class ServerConfig(BaseModel):
     Read once at start and never re-read by a running process: the port,
     the paths, the limits, the barge-in tuning and the storage switches
     are what one server is serving until the next one starts. That is
-    the line between the two halves, and it is why a change here is a
-    restart while a change to the domain half is an apply or, for a
-    device binding, nothing at all.
+    the line between the two halves. A change here is a restart; a
+    change to the domain half is an apply, except for the two kinds a
+    running server re-reads as a device asks for them, `devices` and
+    `default_agent`, which reach a board at its next check-in with
+    nothing asked of the server at all.
 
     Any key of it can be overridden from the environment as
     `VINGA_SERVER__<PATH>`, with `__` joining the nesting
