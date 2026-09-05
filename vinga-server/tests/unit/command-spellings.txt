@@ -214,8 +214,8 @@ docs/architecture/observability-surfaces.md:37  respell  vinga memory list
 docs/architecture/observability-surfaces.md:37  respell  vinga memory set
 docs/architecture/observability-surfaces.md:37  respell  vinga memory delete
 docs/concepts.md:316  respell  vinga conversation list
-docs/deployment.md:533  respell  vinga info
-docs/deployment.md:535  respell  vinga events
+docs/deployment.md:534  respell  vinga info
+docs/deployment.md:536  respell  vinga events
 docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md:132  respell  vinga-server config device pending claim
 docs/features/2026-08-06-session-capture.md:70  historical  config schema already
 docs/features/2026-08-12-agent-not-persona.md:61  historical  config openapi
