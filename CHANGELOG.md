@@ -188,6 +188,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   would delete configuration on the re-import the read is meant to
   feed.
 
+- **A URL credential in an entity NAME is no longer displayed** (#408).
+  The third place a stored string reaches a caller, after a field and a
+  mapping key, is the identity a view is keyed by or hands back. Names
+  are held to one URL path segment at write time only, and the rule
+  says so in as many words: a row written before it still boots and
+  still appears in a whole-configuration read. It appeared with the
+  credential in it, as a map key in the document and in every listing,
+  in the secret locations beside them, in a device's bindings and in
+  the default agent's name. All of them now show the name without the
+  credential, through the same site and the same collision rule as a
+  mapping key. The device map's own key is the one exception and is
+  deliberately untouched: a MAC that is not six colon-separated hex
+  pairs is refused by the load path, not just the write, so such a row
+  never reaches a view and a strip there would be unreachable code.
+  The trade-off, stated rather than buried: a sanitized name cannot be
+  used to address the row it names. It costs nothing in practice,
+  because a name this rule changes contains `://` and therefore a
+  slash, which is exactly what the addressability rule refuses, so such
+  a row already could not be fetched, replaced or deleted over the API
+  and answered 404 raw or percent-encoded. The delete routes were
+  deliberately not widened to accept sanitized spellings; no read
+  carries a credential outranks addressability derived from a display,
+  and the suffix rule already makes a shown name a display artifact
+  rather than a guaranteed address.
+
 ## 2026-09-04
 
 ### Added
