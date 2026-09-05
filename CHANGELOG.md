@@ -9,6 +9,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The server half has a generated reference.**
+  `docs/reference/server-config.md` documents every key of the
+  `server:` section: its type, its default, the bounds pydantic
+  enforces and its description, section by section in declaration
+  order, with each section's own prose, the `VINGA_SERVER__<PATH>`
+  override scheme and the database section's four short spellings, the
+  two values that deliberately have no key (`VINGA_DB_PASSWORD` and
+  `VINGA_DB_URL`), and the combinations refused at boot in the
+  sentences the validators raise. It is rendered from the models by
+  `vinga-server config reference server`, a new optional `HALF`
+  selector on the existing verb whose bare form still prints the domain
+  page, and CI regenerates and diffs it beside the other generated
+  documents. `config.example.yaml` keeps its role as the annotated
+  starting point; the page is the complete contract.
 - **The identity's leading claim is recorded.** A new decision record,
   `docs/adr/2026-09-05-pluggability-leads-self-hosting-supports.md`,
   states that when vinga explains itself, mix-and-match leads (every

@@ -1403,7 +1403,13 @@ It is passed as
 environment variable; with neither set, defaults apply, and it is
 handled by
 [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
-[`config.example.yaml`](config.example.yaml) documents every key of it,
+[`../docs/reference/server-config.md`](../docs/reference/server-config.md)
+is the complete contract: every key with its type, default, bounds and
+description, the environment overrides, and the combinations refused at
+boot, generated from the models by `vinga-server config reference
+server` and diffed by CI.
+[`config.example.yaml`](config.example.yaml) is the annotated starting
+point to copy, with a comment per key in its own voice,
 and [`config.deploy.example.yaml`](config.deploy.example.yaml) is a
 ready-to-adapt profile for the container image behind a proxy on a small
 CPU quota, holding values validated by latency measurements from a live
@@ -1482,8 +1488,9 @@ notes.
 Every field of the domain half is documented in
 [`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
 generated from the models: `vinga-server config reference` prints that
-same document, and `vinga-server config schema [entity]` prints the JSON
-Schema behind it. The command line itself is
+same document, `vinga-server config reference server` prints the server
+half's page beside it, and `vinga-server config schema [entity]` prints
+the JSON Schema behind the domain one. The command line itself is
 [`../docs/reference/cli.md`](../docs/reference/cli.md), whose command
 pages and recipes are generated the same way, by `vinga-server config
 cli-reference`. [`examples/`](examples/) holds a commented fragment per
