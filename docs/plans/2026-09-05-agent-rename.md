@@ -871,14 +871,23 @@ Reusing the assets that exist wherever the assertion already has a home.
   plants a name carrying a URL credential as the *old* name and asserts
   the acknowledgement's line carries the stripped form, which is #381's
   door and #382's policy in this surface's terms.
-- **The boundary arms, through `Act.read()` rather than the renderer**,
-  which is the shape #386's review round settled: a rename that moved
-  only the row prints the apply notice and its remedy; one that moved a
-  binding prints the new sentence and both remedies; a snapshot-only
-  server prints the store-boot arm. The producer-side pin from that plan
-  covers the sixth notice for free, since it asserts every
-  `Notice.applies` member is an `Applies` member and no `Notice.sentence`
-  contains `PROGRAM`.
+- **The boundary arms, twice, once per side of the wire.** In the
+  milestone that adds the route they are asserted on what the route
+  answers: a rename that moved only the row carries the apply notice and
+  `(reload,)`; one that moved a binding or the default agent carries the
+  new sentence and `(reload, check-in)`; a snapshot-only server carries
+  the store-boot arm. In the milestone that adds the verb the same three
+  are driven end to end through the registered command, which is where a
+  client assertion can honestly be made: the request it sends is a POST
+  to `/agents/{name}/rename` carrying `{"to": ...}` and nothing else,
+  and its stderr is the server's sentence with this client's remedy
+  under it, one per arm. Split this way because the `Act` arrives with
+  the verb and `Act.read()` validates an answer rather than rendering
+  one, so a rendering assertion in the earlier milestone would be
+  asserting a client that is not there yet. The producer-side pin from
+  #386 covers the sixth notice for free, since it asserts every
+  `Notice.applies` member is an `Applies` member and no
+  `Notice.sentence` contains `PROGRAM`.
 - **The reversibility claim is a test rather than a sentence**, because
   it is what the confirmation decision rests on: rename and rename back,
   and the store, the memory rows (held ones included) and the threads are
@@ -1020,7 +1029,8 @@ where it is enforced rather than asserting it.
   retires.** `POST /agents/{name}/rename` with its request model and
   `Acknowledgement` answer; the sixth `Notice` and the three-arm choice;
   the acknowledgement's line composed from `Renamed` with the old name
-  stripped; the route's cases and the boundary arms through `Act.read()`;
+  stripped; the route's cases and the three boundary arms asserted on
+  what the route answers;
   `2003_rename_moves_memory` altering the `facts.owner` comment and
   `1003_rename_moves_thread_ownership` altering
   `conversations.agent`'s, each with its `schema.py` moved in the same
@@ -1038,7 +1048,9 @@ where it is enforced rather than asserting it.
 - [ ] **M4: the verb.** `vinga agent rename <old> <new>` as one
   `Command` row with one `Act`, `destroys=False` with the reasoning in a
   comment on the row; the payload field on `Invocation`; the `declare`
-  for one address and one payload word; `docs/reference/cli.md`
+  for one address and one payload word; the end-to-end cases through the
+  registered command, one per boundary arm, asserting the request it
+  sends and the two lines it prints; `docs/reference/cli.md`
   regenerated; the licensed substitution in the respelling suite; the
   census manifest; a CHANGELOG `Added` entry; the implementation-doc
   section. The client half lands alone, so the review sees the terminal
@@ -1223,6 +1235,16 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    in the milestone that adds the verb: the POST path, the raw
    `{"to": ...}` body, the acknowledgement's rendering, and the remedy
    for each of the three boundary arms.
+
+   *Resolution*: accepted in full. The plan had lifted #386's test shape
+   without noticing that the shape belongs to a milestone that has an
+   `Act` to read with, and this one does not until the verb lands. The
+   boundary arms are now asserted twice, once per side of the wire: on
+   what the route answers in the milestone that adds it, and end to end
+   through the registered command in the milestone that adds the verb,
+   where the request's method, path and body and both printed lines are
+   the assertion. Both milestones' deliverables say which half they
+   carry.
 
 8. **P2: the credential-bearing old name cannot be reached through the
    route.** A URL carrying a credential contains a slash, and a
