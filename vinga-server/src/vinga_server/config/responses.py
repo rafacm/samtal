@@ -1177,7 +1177,11 @@ class Acknowledgement(BaseModel):
             "installed on the running server, which no restart is needed for. A "
             "binding naming an agent this server is not serving yet carries a sentence "
             "of its own, because both halves are true at once: the row is live, and "
-            "the agent arrives with the install that adds it. A server serving a "
+            "the agent arrives with the install that adds it. So does a rename that "
+            "moved a device binding or the default agent with the agent it renamed, "
+            "for the same pair of reasons and about the references rather than about "
+            "one binding; a rename that moved the agents row alone waits at the "
+            "install like any other write of that kind. A server serving a "
             "configuration no store describes says that the write is stored and takes "
             "effect when a server boots from that store. Nothing this API writes waits "
             "for a server start."
@@ -1324,7 +1328,7 @@ class AppliedDocument(BaseModel):
     )
 
 
-# The three bodies that are arguments rather than fragments, as the
+# The four bodies that are arguments rather than fragments, as the
 # document describes them. The models below are documentation and
 # nothing else: `api.py` injects them into `components` and names them
 # from the routes' `openapi_extra`, and they are deliberately not
@@ -1359,6 +1363,30 @@ class DefaultAgentName(BaseModel):
             "The agent an unbound device reaches. It has to be an agent that exists. "
             "To unset it, DELETE this resource, which leaves the devices map as the "
             "allowlist."
+        )
+    )
+
+
+class AgentRename(BaseModel):
+    """What a rename carries: the name the agent is to have.
+
+    A body rather than a second path segment, because the new name is
+    not part of the address. The agent is addressed by the name it has,
+    which is the identity this act is performed on; what the request
+    carries is the name it is to be given.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    to: str = Field(
+        description=(
+            "The name the agent is to have. Held to what every agent name is held "
+            "to: it is stripped of surrounding whitespace, may not be empty after "
+            "that, and may hold no slash and no control character. It has to be free "
+            "everywhere the rename would write, so the request is refused when an "
+            "agent, remembered facts or recorded conversation threads already sit "
+            "under it, because a rename may never merge two pasts into one. Nothing "
+            "sent is quoted back in any refusal."
         )
     )
 
