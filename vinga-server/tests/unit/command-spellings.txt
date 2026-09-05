@@ -852,6 +852,30 @@ docs/plans/2026-09-05-server-config-reference.md:243  historical  vinga-server c
 docs/plans/2026-09-05-server-config-reference.md:454  historical  vinga-server config reference server
 docs/plans/2026-09-05-server-config-reference.md:563  historical  vinga-server config reference
 docs/plans/2026-09-05-server-config-reference.md:571  historical  vinga reference
+docs/plans/2026-09-05-server-state-vocabulary.md:13  historical  vinga import
+docs/plans/2026-09-05-server-state-vocabulary.md:14  historical  vinga reload
+docs/plans/2026-09-05-server-state-vocabulary.md:102  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:102  historical  vinga diff
+docs/plans/2026-09-05-server-state-vocabulary.md:103  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:104  historical  vinga-server config device pending list
+docs/plans/2026-09-05-server-state-vocabulary.md:105  historical  vinga-server config list
+docs/plans/2026-09-05-server-state-vocabulary.md:106  historical  vinga-server config apply
+docs/plans/2026-09-05-server-state-vocabulary.md:107  historical  vinga-server config device show
+docs/plans/2026-09-05-server-state-vocabulary.md:123  historical  vinga-server config reload
+docs/plans/2026-09-05-server-state-vocabulary.md:124  historical  vinga reload
+docs/plans/2026-09-05-server-state-vocabulary.md:164  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:177  historical  vinga-server config mcp-server set
+docs/plans/2026-09-05-server-state-vocabulary.md:178  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:184  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:184  historical  vinga diff
+docs/plans/2026-09-05-server-state-vocabulary.md:210  historical  vinga-server config list
+docs/plans/2026-09-05-server-state-vocabulary.md:225  historical  vinga agent preview
+docs/plans/2026-09-05-server-state-vocabulary.md:300  historical  vinga info
+docs/plans/2026-09-05-server-state-vocabulary.md:343  historical  vinga-server config openapi
+docs/plans/2026-09-05-server-state-vocabulary.md:355  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:399  historical  vinga apply
+docs/plans/2026-09-05-server-state-vocabulary.md:399  historical  vinga diff
+docs/plans/2026-09-05-server-state-vocabulary.md:484  historical  vinga-server config openapi
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:6527  generated  vinga ota-url
 docs/reference/api-openapi.json:7488  generated  vinga provider secret set
