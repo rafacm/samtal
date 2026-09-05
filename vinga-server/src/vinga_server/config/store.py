@@ -46,6 +46,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from vinga_server.config import entities
 from vinga_server.config.entities import EntityDescriptor, addressed
 from vinga_server.config.loader import (
+    AgentRenameConflictError,
     ConfigError,
     DatabaseBusyError,
     DeviceAlreadyBoundError,
@@ -96,7 +97,20 @@ from vinga_server.config.transport import (
     check_transportable,
     untransportable,
 )
+
+# The two foreign schemas a rename writes, imported rather than injected.
+# Neither closes a cycle: `memory.store` reads `config.loader`,
+# `config.models` and `conversations.store`, `conversations.store` reads
+# `config.loader` and `config.models`, and neither of them imports this
+# module. Handing the two functions in as parameters, the way `app.py`
+# hands `purge_memory=purge` to the conversation store, exists to break a
+# cycle that is not here and would put wiring in the composition root for
+# a fact that is not a choice: there is exactly one way to rewrite an
+# agent name in each store.
+from vinga_server.conversations import store as conversation_record
 from vinga_server.db import is_busy, schema
+from vinga_server.memory import store as agent_memory
+from vinga_server.memory.scopes import MemoryScope
 
 # The two groups of an MCP server's dotted secret slots. A slot is
 # `env.<KEY>` or `headers.<KEY>`, which is where the value would have
@@ -186,6 +200,34 @@ class BoundDevice:
 
 
 @dataclass(frozen=True)
+class Renamed:
+    """What a rename rewrote: the two names as the rows now hold them,
+    and every live reference that moved with them.
+
+    Beside `BoundDevice` and `Applied` for their reason. What a caller
+    says about the write afterwards is about the transaction rather than
+    about the request, and nothing here can be recovered by re-reading
+    the store: which boards were bound to the old name and whether it
+    was the default agent are facts about the state the rename found,
+    and after the commit that state is gone.
+
+    `devices` is the canonical MACs whose bindings moved, `default_agent`
+    whether the default agent moved with them, and the two counts are the
+    rows the memory schema and the conversation record rewrote. The two
+    fields above the counts are what chooses the boundary a rename
+    announces, so a rewrite target added later without a reader here is
+    visible in review rather than silently unannounced.
+    """
+
+    old: str
+    new: str
+    devices: tuple[str, ...]
+    default_agent: bool
+    facts: int
+    threads: int
+
+
+@dataclass(frozen=True)
 class LiveBinding:
     """What a running server re-reads about one device: its binding, and
     the default agent standing behind it.
@@ -236,6 +278,38 @@ ALREADY_COVERED = (
     "activation code, and it covers every device that has no binding of its own, so "
     "the code binds nothing now. Nothing was changed. To give this device an agent of "
     "its own, bind it by its MAC"
+)
+
+# What a rename refuses with, for the two states this module can be in
+# before it writes. The other five are somebody else's sentence: the
+# agent that is not there answers with the kind's own missing line, the
+# two occupied foreign destinations answer with the sentence of the
+# store that found them, a new name that is not addressable answers with
+# `_check_addressable`'s, and a contended database answers with the
+# retryable one every write here answers with.
+#
+# One rule stands behind the three collisions, and it is what makes the
+# verb reversible rather than tidy: the destination name has to be free
+# everywhere this rename would write. A rename that merged two agents,
+# two memories or two histories could not be undone by renaming back,
+# because afterwards nothing can tell the two apart.
+#
+# Neither name is in either sentence. The new one arrived in this
+# request, so it is caller text and is echoed nowhere; the old one is a
+# stored identity, which may be spoken, and a refusal naming one and not
+# the other would read as a claim about which of them was at fault.
+AGENT_EXISTS = (
+    "agents: an agent already exists under the new name, and a rename may not merge "
+    "two agents into one. Nothing was changed, and neither name is quoted back. "
+    "Rename to a name nothing holds, or remove what is under this one with "
+    "`vinga-server config agent delete <name>`"
+)
+
+SAME_NAME = (
+    "agents: the new name is the name the agent already has, so there is nothing to "
+    "rename. Nothing was changed, and the name is not quoted back. Names are compared "
+    "with the surrounding whitespace taken off, which is what every path here stores, "
+    "so a name differing only in spacing is the same name"
 )
 
 
@@ -430,6 +504,91 @@ class ConfigStore:
         """Refused while a device binding or default_agent still names
         it, by the same reference pass every other write runs."""
         self._delete(_AGENT, name)
+
+    def rename_agent(self, old: str, new: str) -> Renamed:
+        """Give one agent another name, and move every live reference to
+        it in the same transaction, or write nothing at all.
+
+        The act the delete-and-create workaround cannot make. A device
+        binding and the default agent both refuse the delete half while
+        they name the agent, so the workaround is six writes with the
+        memory lost in the middle; this is one transaction over three
+        schemas, and what comes out the other side keeps what the agent
+        remembered, which boards are bound to it, whether it is the
+        default, and the threads it can still be asked to resume.
+
+        The four phases every write here runs. Both names are made
+        usable outside the lock, so nothing a caller got wrong costs
+        one; the rename is staged into the candidate domain state inside
+        it; `check_references` is asked once about the state the rename
+        would leave, which is what proves the bindings and the setting
+        moved with the row; and the rows that moved are written.
+
+        Then the two foreign schemas, in ascending key order and for the
+        reason `db.advisory_key` states: this transaction opened on the
+        domain engine, whose begin listener took key 1, so the record
+        chain's 2 and the memory chain's 3 follow in that order and
+        cannot close a cycle with the erasure that takes the same two.
+        Each of them takes its own lock and checks its own destination
+        inside this transaction, so a refusal there rolls the whole
+        rename back and there is no half-renamed state to compensate
+        for.
+
+        What is rewritten is every reference something reads to decide
+        what happens next, and nothing else. The agents row's key, the
+        device bindings that name it, the default agent, the facts filed
+        under it, and the threads it owns. What is not touched is the
+        record of what happened: a turn spoken last month was spoken by
+        an agent whose name at the time was the old one, and the row
+        saying so is evidence rather than a reference.
+
+        Reversible by construction, which is what keeps it out of the
+        confirmation table: `rename_agent(new, old)` puts everything
+        back, including the memory and the threads, with information the
+        operator has in the shell history of the command they just
+        typed. The three destination refusals are what makes that true,
+        because a rename that merged two pasts could not be told apart
+        afterwards by any second rename.
+
+        The old name is stripped and not checked for addressability. A
+        row written before that rule still boots, still reads and is
+        still deletable by membership, and it stays exactly as reachable
+        after this verb as before it; the new name is checked, because
+        it is a name being chosen now.
+        """
+        # Preparation, outside the lock. The old name is an address into
+        # the store and the new one is a name being written, which is
+        # the whole of why they are treated differently here.
+        source = old.strip()
+        destination = _identifier(_location(_AGENT), new)
+        if source == destination:
+            raise ConfigError(SAME_NAME)
+        with self._transaction() as connection:
+            domain = _read_domain(connection)
+            if source not in domain.agents:
+                raise UnknownEntityError(_missing(_AGENT))
+            if destination in domain.agents:
+                raise AgentRenameConflictError(AGENT_EXISTS)
+            staged = _stage_rename(domain, source, destination)
+            _refuse_unresolved(domain)
+            _rename_agent_row(connection, source, destination)
+            _persist(connection, staged.rows)
+            # Key 2, then key 3. Each function takes its own chain's
+            # lock as its first statement, so the order is a property of
+            # the two functions rather than of this call site; what this
+            # site owes them is the sequence.
+            threads = conversation_record.rename_agent(connection, source, destination)
+            facts = agent_memory.rename_owner(
+                connection, MemoryScope.AGENT, source, destination
+            )
+        return Renamed(
+            old=source,
+            new=destination,
+            devices=staged.devices,
+            default_agent=staged.default_agent,
+            facts=facts,
+            threads=threads,
+        )
 
     def set_agent_defaults(self, fragment: object) -> None:
         self._write(_AGENT_DEFAULTS, (), fragment)
@@ -1322,6 +1481,87 @@ def _stage_default_agent(domain: DomainConfig, setting: _DefaultAgent) -> _Stage
         ),
         row=_default_agent_row(setting.name) if moved else None,
     )
+
+
+@dataclass(frozen=True)
+class _Renaming:
+    """One agent's rename, staged: what moved with it, and the rows that
+    say so.
+
+    The two facts and the rows are one value because they are one pass:
+    which bindings moved is decided by walking them, and a caller that
+    recovered the answer by walking them again would be reading a state
+    the rename has already changed.
+    """
+
+    devices: tuple[str, ...]
+    default_agent: bool
+    rows: tuple[_Staged, ...]
+
+
+def _stage_rename(domain: DomainConfig, old: str, new: str) -> _Renaming:
+    """One agent's name moved through the candidate state, with every
+    domain reference to it moved too.
+
+    The staging phase of the rename, mutating the snapshot this
+    transaction read for `_stage_change`'s reason: what
+    `_refuse_unresolved` is then asked about is the configuration the
+    whole act would leave, rather than any state on the way to it. A
+    binding that still named the old name and a default agent that still
+    did would both be caught there, which is the inventory pin: what
+    counts as a reference to an agent is `check_references`'s own walk
+    rather than a list written beside it.
+
+    The entry itself moves rather than being copied, so a field the
+    agent model gains later travels with it and nothing here has to
+    learn about it.
+    """
+    domain.agents[new] = domain.agents.pop(old)
+    moved: list[str] = []
+    rows: list[_Staged] = []
+    for mac, bound in domain.devices.items():
+        if old not in bound:
+            continue
+        # Every position, not the first: a binding is a list of names,
+        # and a rename that left a second mention behind would leave a
+        # reference `check_references` refuses.
+        rebound = [new if name == old else name for name in bound]
+        domain.devices[mac] = rebound
+        moved.append(mac)
+        rows.append(
+            _Staged(
+                applied=Applied(
+                    section="devices", identity=mac, wrote=True, agents=tuple(rebound)
+                ),
+                row=_device_row(mac, rebound),
+            )
+        )
+    default = domain.default_agent == old
+    if default:
+        domain.default_agent = new
+        rows.append(
+            _Staged(
+                applied=Applied(
+                    section="default_agent", identity="", wrote=True, agents=(new,)
+                ),
+                row=_default_agent_row(new),
+            )
+        )
+    return _Renaming(tuple(moved), default, tuple(rows))
+
+
+def _rename_agent_row(connection: Connection, old: str, new: str) -> None:
+    """The agents row under its new key.
+
+    An UPDATE of the primary key rather than a delete and an insert, and
+    the difference is what it carries: the body travels verbatim, and so
+    does any column this table gains later, which a rewrite naming the
+    columns it knew about would silently drop. The row is known to be
+    there, because the transaction refused a missing source before it
+    staged anything.
+    """
+    table = _table(_AGENT)
+    connection.execute(update(table).where(table.c.name == old).values(name=new))
 
 
 def _persist(connection: Connection, staged: Sequence[_Staged]) -> None:
@@ -2822,6 +3062,7 @@ __all__ = [
     "DomainConfig",
     "Entity",
     "LiveBinding",
+    "Renamed",
     "read_live_binding",
     "Snapshot",
     "StoredSecret",
