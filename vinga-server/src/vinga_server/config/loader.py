@@ -434,12 +434,40 @@ def compose_config(
     values are the loaded models themselves, which pydantic accepts as
     they are; a mapping of raw sections is equally acceptable, and is
     what a test that has no database in hand passes.
+
+    Rendered by the shared policy, `stored` half and all, which is what
+    #382 decided and what this function used to have a renderer of its
+    own for. What the two halves of a boot disagreed about was a mapping
+    key: the file half's keys are text an operator typed into a file a
+    moment ago and nothing has accepted, and the domain half's are the
+    identities of rows a write already accepted, which the store's own
+    refusals, the API's answers and this deployment's documents all
+    print in full. Provenance decides, so the halves converge on one
+    renderer that is told which it is holding rather than on one
+    truncation rule for both: a boot refusal about a stored world says
+    exactly what the write that stored it says, and a typed key that is
+    not this repository's vocabulary is still answered by the name of
+    the rule rather than repeated. What a stored name may carry does not
+    survive either (#381), for the reason a display of one does not.
+
+    The file half arrives here as a validated `ServerConfig` instance
+    rather than as data, so pydantic does not walk into it and every
+    location this renders is the domain half's. Only the sentence is
+    kept: the structured half is a form a caller corrects, and nothing
+    reaches this composition except a server's own start and its
+    reload, where there is no request to answer.
     """
     problem: str | None = None
     try:
         return Config(server=file_half.server, **domain)
     except ValidationError as exc:
-        problem = _format_validation_error(exc, source)
+        # Recorded rather than raised inside the handler, the rule every
+        # refusal built from a ValidationError in this package follows:
+        # `errors()` carry the rejected input, and an exception raised
+        # in a handler keeps the one being handled as its __context__.
+        problem, _ = validation_problems(
+            f"invalid config in {source}:", Config, exc, stored=True
+        )
     raise ConfigError(problem)
 
 
@@ -847,33 +875,3 @@ def _check_retired_environment() -> None:
         f"invalid configuration environment:\n{problems}\n"
         f"  Unset these variables: they configure nothing any more."
     )
-
-
-def _format_validation_error(exc: ValidationError, source: str) -> str:
-    """One failed validation of the DOMAIN half, as the boot path
-    reports it.
-
-    The file half is rendered by `models.validation_problems` instead,
-    which is the shared policy: every location segment is walked against
-    the model, so a segment the operator wrote rather than this
-    repository declared reaches neither the sentence nor the pointers.
-    This half is deliberately not on it yet, and the reason is a
-    question rather than an oversight (#291). Its locations name stored
-    entities, `agents.<name>.llm` and `devices.<mac>`, which are mapping
-    keys and which that walk therefore truncates to `agents` and
-    `devices`; and the store's own refusals over the same entities print
-    those names in full, deliberately and under test. Converging this
-    half would make a boot refusal say less about a stored world than
-    the write that stored it does, which is a decision about the store's
-    surface and not about this loader's.
-    """
-    lines = [f"invalid config in {source}:"]
-    for error in exc.errors():
-        location = ".".join(str(part) for part in error["loc"])
-        message = error["msg"]
-        # Errors raised as ValueError inside validators arrive prefixed by
-        # pydantic; strip that to keep our own wording.
-        message = message.removeprefix("Value error, ")
-        for line in message.splitlines():
-            lines.append(f"  - {location}: {line}" if location else f"  - {line}")
-    return "\n".join(lines)
