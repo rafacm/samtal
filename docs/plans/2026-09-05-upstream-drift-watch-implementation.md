@@ -269,3 +269,17 @@ here rather than implied.
   fixes**, through the new `clone` subcommand rather than a shell loop:
   both repositories cloned blobless with their tags, and the report
   came back with the same drift as before.
+
+#### Delta re-review
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-terra`, sandbox
+read-only, 2026-09-05, against commit c06edb0b (the fix round's
+head); a few minutes. No delta findings: all seven resolutions
+verified in place (the permission split with empty workflow-level
+permissions and non-persisted credentials, the fixed-message
+refusal boundary, the captured clone streams, the listing limit,
+the git-fault distinctions, the total release ordering, and the
+strict URL validation with the print handoff retired), the
+artifact handoff confirmed conditional on drift, and the issue job
+confirmed unreachable from a pull request. Verdict: mergeable as
+is.
