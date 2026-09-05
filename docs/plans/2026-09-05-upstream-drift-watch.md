@@ -87,11 +87,18 @@ the watch gets a free end-to-end dry run. Dry-run mode does
 everything but write: clone, resolve, diff, build the report, and
 print it to the step summary instead of touching the tracker. For each repository in the
 manifest: a blobless clone (`--filter=blob:none`, full history, no
-checkout), resolve `origin/HEAD` and the latest release tag (highest
-`v*` tag by version sort; the firmware repo tags releases, and a
-repository with no tag skips that half with a line saying so), then
+checkout), resolve `origin/HEAD` and the latest release tag under a
+stated policy: tags matching `v<digits>.<digits>[.<digits>]`
+exactly, no prerelease or suffix forms, highest by version sort; a
+repository with no qualifying tag skips that half with a line
+saying so. Each target is validated before it is diffed: the pinned
+commit must be an ancestor of the target
+(`git merge-base --is-ancestor`), and a target the pin is ahead of
+or divergent from is reported as its own line naming the
+relationship and is never diffed backward. Then
 `git diff --name-status <pinned>..<target> -- <paths>` and
-`git log --oneline <pinned>..<target> -- <paths>` for each target.
+`git log --oneline <pinned>..<target> -- <paths>` for each
+validated target.
 When every diff is empty, the run ends green and writes nothing.
 When any is not, the report (changed files and commit subjects per
 repository and target, plus the manifest's pinned SHAs and the
@@ -317,6 +324,11 @@ so it rides, per the queue decision's condition.
    Define tag syntax and prerelease policy, validate ancestry, and
    report or skip targets behind the pin rather than diffing
    backward.
+
+   *Resolution*: accepted in full. The tag policy is exact
+   (`v<digits>.<digits>[.<digits>]`, no prerelease forms), ancestry
+   is validated per target, and a behind-or-divergent target is a
+   reported line, never a backward diff.
 
 7. **P2: open-or-update can overwrite the wrong issue and race into
    duplicates.** A label alone is not an identity, and concurrent
