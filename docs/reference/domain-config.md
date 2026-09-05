@@ -9,8 +9,10 @@ field description lives on the model in
 The domain half of the configuration (providers, MCP servers, agent
 defaults, agents, devices, the default agent) is held in the server's
 database and written with the `vinga` commands. The server
-half (`server:`) stays in the YAML file and is documented there, in
-[`config.example.yaml`](../../vinga-server/config.example.yaml).
+half (`server:`) stays in the YAML file and is documented in
+[`server-config.md`](server-config.md), generated from its own models
+the way this page is. The annotated starting point a deployment
+copies is [`config.example.yaml`](../../vinga-server/config.example.yaml).
 
 Those commands are a client of the configuration API the server mounts
 at `/api` on its own port, so they need a running server, and the API is

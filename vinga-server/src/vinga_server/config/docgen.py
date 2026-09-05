@@ -87,6 +87,13 @@ ENTITIES: tuple[DocumentedShape, ...] = (*COMMANDED, *NESTED)
 # reference in the same directory, so the reference points at it by name.
 API_DOCUMENT = "api-openapi.json"
 
+# And the other half's committed page, beside this one in the same
+# directory. Its filename rather than an import of the module that
+# renders it: that module reads this one for the vocabulary a page is
+# written in, so naming it here would be a cycle, and what this page
+# needs is a link rather than a renderer.
+SERVER_DOCUMENT = "server-config.md"
+
 # The domain model, one directory up from the committed reference. This
 # document is the authority on the fields; that page is where what they
 # mean to a user is explained, and it links back here for exactly that
@@ -224,8 +231,10 @@ def reference() -> str:
         "The domain half of the configuration (providers, MCP servers, agent",
         "defaults, agents, devices, the default agent) is held in the server's",
         f"database and written with the `{PROGRAM}` commands. The server",
-        "half (`server:`) stays in the YAML file and is documented there, in",
-        f"[`config.example.yaml`]({CONFIG_FILE}).",
+        "half (`server:`) stays in the YAML file and is documented in",
+        f"[`{SERVER_DOCUMENT}`]({SERVER_DOCUMENT}), generated from its own models",
+        "the way this page is. The annotated starting point a deployment",
+        f"copies is [`config.example.yaml`]({CONFIG_FILE}).",
         "",
         "Those commands are a client of the configuration API the server mounts",
         "at `/api` on its own port, so they need a running server, and the API is",
