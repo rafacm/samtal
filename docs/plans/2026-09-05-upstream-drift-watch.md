@@ -91,9 +91,12 @@ resolution loop's three steps) becomes the body of one issue: the
 workflow searches for an open issue labeled `upstream-drift`,
 updates its body if one exists, creates it (with the label) if none
 does, and never opens a second. The job's `permissions` grant
-`issues: write` and `contents: read` and nothing else. All of it is
-`gh api`/`gh issue` plus git; no third-party action, matching the
-repository's pinned-tool discipline.
+`issues: write` and `contents: read` and nothing else, and the
+permissions alone authorize nothing `gh` consumes: the
+issue-management step, and only that step, sets
+`GH_TOKEN: ${{ github.token }}`, every `gh` invocation passes
+`--repo rafacm/vinga`, and no step traces or prints its environment
+(no `set -x`, no `env`). All of it is `gh api`/`gh issue` plus git.
 
 **Report content is names and subjects, never patch text.** The
 issue body lists file paths and commit subjects, which is what
@@ -244,6 +247,10 @@ so it rides, per the queue decision's condition.
    consume it. Set `GH_TOKEN` on the issue-management step alone,
    pass `--repo rafacm/vinga` on every `gh` call, and forbid
    printing the environment.
+
+   *Resolution*: accepted in full. `GH_TOKEN` is scoped to the
+   issue-management step alone, every `gh` call carries the repo
+   flag, and the workflow bans environment tracing.
 
 3. **P2: "no third-party action" conflicts with the declared parser
    runtime.** The vinga-server environment arrives via
