@@ -840,8 +840,9 @@ docs/plans/2026-09-04-reply-failure-fallback.md:445  historical  vinga events
 docs/plans/2026-09-04-simulator-tokenless-admission-implementation.md:181  historical  vinga-server config cli-reference
 docs/plans/2026-09-04-simulator-tokenless-admission-implementation.md:187  historical  vinga simulator
 docs/plans/2026-09-04-simulator-tokenless-admission.md:240  historical  vinga simulator run
-docs/plans/2026-09-05-server-config-reference-implementation.md:288  historical  vinga reference server
-docs/plans/2026-09-05-server-config-reference-implementation.md:462  historical  vinga-server config reference server
+docs/plans/2026-09-05-server-config-reference-implementation.md:289  historical  vinga reference server
+docs/plans/2026-09-05-server-config-reference-implementation.md:451  historical  vinga-server config reference server
+docs/plans/2026-09-05-server-config-reference-implementation.md:496  historical  vinga-server config reference server
 docs/plans/2026-09-05-server-config-reference.md:88  historical  vinga reference server
 docs/plans/2026-09-05-server-config-reference.md:102  historical  vinga-server config reference server
 docs/plans/2026-09-05-server-config-reference.md:239  historical  vinga reference server
