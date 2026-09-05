@@ -1135,7 +1135,7 @@ where it is enforced rather than asserting it.
   module and no new seam beyond the two signatures. Documentation
   footprint: `CHANGELOG.md`, a dated execution record; the census
   manifest; the implementation-doc section.
-- [ ] **M2: the order that covers the sessions in flight.** The rename
+- [x] **[M2: the order that covers the sessions in flight](2026-09-05-agent-rename-implementation.md#m2-the-order-that-covers-the-sessions-in-flight)** (PR TBD). The rename
   enters `erasure_order()` before it opens its transaction and publishes
   after it commits, still inside the order, through a sibling of
   `erased()` that reaches the same register of writers; the comment
