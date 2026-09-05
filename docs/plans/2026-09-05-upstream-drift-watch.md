@@ -96,7 +96,13 @@ permissions alone authorize nothing `gh` consumes: the
 issue-management step, and only that step, sets
 `GH_TOKEN: ${{ github.token }}`, every `gh` invocation passes
 `--repo rafacm/vinga`, and no step traces or prints its environment
-(no `set -x`, no `env`). All of it is `gh api`/`gh issue` plus git.
+(no `set -x`, no `env`). The job's own steps are
+`actions/checkout@v7`, the repository's pinned
+`astral-sh/setup-uv@v9.0.0` and `uv sync --frozen` (the same
+provisioning the docs workflow uses, since the manifest parser runs
+through the vinga-server environment), then git and
+`gh api`/`gh issue`; the discipline is no additional unpinned or
+drift-analysis action, not no action at all.
 
 **Report content is names and subjects, never patch text.** The
 issue body lists file paths and commit subjects, which is what
@@ -257,6 +263,11 @@ so it rides, per the queue decision's condition.
    `actions/checkout` and the pinned `astral-sh/setup-uv` plus
    `uv sync --frozen`. Name those steps and narrow the claim to no
    additional unpinned or drift-analysis action.
+
+   *Resolution*: accepted in full. The workflow names checkout, the
+   pinned setup-uv and the frozen sync as its provisioning, and the
+   claim is narrowed to no additional unpinned or drift-analysis
+   action.
 
 4. **P2: the server-side watched paths remain unresolved.** The
    plan repeats descriptive candidates instead of
