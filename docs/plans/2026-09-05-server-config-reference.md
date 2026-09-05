@@ -216,12 +216,20 @@ domain page's preamble prose:
   stance exists to prevent, and a URL carries one in its authority
   and can carry another in its query).
 
-The facts behind both blocks are load-bearing in
-`DatabaseConfig`'s docstring and `loader.py`'s two functions; the
-section states them at the page's altitude and the tests hold the
-page to naming the four short spellings, the two forbidden names
-and the refused generic prefix, so the section cannot silently stop
-covering them.
+The names themselves get one home rather than four. Today the four
+short spellings live in `loader.DATABASE_ENV_NAMES` (with
+`DATABASE_ENV_PREFIX` beside them) and the two no-key names in
+`db/__init__.py` (`URL_ENV`, `PASSWORD_ENV`); a renderer and tests
+that restated them as literals would keep passing across a rename.
+M2 moves the inert declarations to `config/models.py` beside
+`DatabaseConfig`, whose docstring already carries their reasoning:
+`DATABASE_ENV_PREFIX`, `DATABASE_ENV_NAMES`, and the two
+credential-only names. `loader.py` and `db/__init__.py` import them
+from there (models imports neither module, so no cycle), the
+renderer reads the same constants without importing the database
+package, and the tests derive their expected inventories from the
+constants rather than from literals, so the page, the loader, the
+database code and the tests cannot come to disagree about a name.
 
 **The page's committed home and header.** Committed at
 `docs/reference/server-config.md`, opening with the same
@@ -238,7 +246,9 @@ order, no timestamps, no set iteration).
 
 - `config/models.py` (M1): descriptions and docstrings on the
   server-half models; `NOTHING_DISCOVERABLE` hoisted;
-  `BOOT_REFUSALS` declared beside the refusal sentences (M2).
+  `BOOT_REFUSALS` declared beside the refusal sentences (M2); the
+  database environment-name constants move here from `loader.py`
+  and `db/__init__.py` (M2), with both importing them back.
   Deepened at the fields' one home; no new module.
 - `config/docgen.py` (M2): `_paragraph`, `_cell`, `_nested_model`
   promoted to `paragraph`, `cell`, `nested_model`; the domain
@@ -301,9 +311,12 @@ module's.
   fall behind the validators (the resumption pair's existing tests
   stand beside this; a discoverability boot-refusal pin is added if
   none exists).
-- **The no-key section**: the page names `VINGA_DB_PASSWORD`,
-  `VINGA_DB_URL`, the four `VINGA_DB_*` spellings and the refused
-  `VINGA_SERVER__DATABASE__` prefix.
+- **The no-key section**: the page carries the values of the moved
+  constants (the two credential-only names, the four short
+  spellings, the refused generic prefix), and the test derives its
+  expected strings from those same constants rather than from
+  literals, so a renamed variable fails the test instead of
+  passing against a stale page.
 - **The committed copy matches**: the freshness pin, mirroring
   `test_the_committed_reference_matches_the_models`, with the
   regenerate command in the failure message.
@@ -465,6 +478,14 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    the database code, the renderer and the tests derive their
    inventories from them; the renderer must not import the database
    package to obtain them.
+
+   *Resolution*: accepted in full. The inert declarations
+   (`DATABASE_ENV_PREFIX`, `DATABASE_ENV_NAMES`, the URL and
+   password names) move to `config/models.py` beside
+   `DatabaseConfig`; `loader.py` and `db/__init__.py` import them
+   back, the renderer reads the constants without touching the
+   database package, and the tests derive their expected
+   inventories from the constants.
 
 6. **P2: the constraints test does not establish complete
    coverage.** Two examples and a qualified sweep do not hold the
