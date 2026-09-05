@@ -234,6 +234,11 @@ so it rides, per the queue decision's condition.
    `pull_request` dry-run path or defer end-to-end verification to
    after merge and say so.
 
+   *Resolution*: accepted, first option. The workflow gains a
+   paths-filtered `pull_request` trigger forced into dry-run mode,
+   which is both the pre-merge evidence and a standing free dry run
+   for every future PR touching the watch.
+
 2. **P1: the issue-writing commands have no authentication path.**
    `permissions:` authorizes the token; it does not make `gh`
    consume it. Set `GH_TOKEN` on the issue-management step alone,
