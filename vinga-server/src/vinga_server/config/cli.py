@@ -2292,6 +2292,14 @@ def _understood(shape: object, answer: object, refusal: str) -> Any:
     raise ConfigError(problem)
 
 
+# What a field of a shape this client cannot read is worth, which is
+# nothing: the key is dropped, and the field takes the default its model
+# declares. A sentinel rather than the default itself, because only the
+# model above a value knows what its default is, and only the walk below
+# knows that a value could not be read.
+_UNREADABLE_FIELD = object()
+
+
 def _declared(shape: object, answer: object) -> object:
     """The answer with anything the shape does not declare left out.
 
@@ -2325,10 +2333,20 @@ def _declared(shape: object, answer: object) -> object:
         return {member.value: member for member in shape}.get(answer, answer)
     if isinstance(shape, type) and issubclass(shape, BaseModel):
         if isinstance(answer, Mapping):
-            return {
+            read = {
                 name: _declared(field.annotation, answer[name])
                 for name, field in shape.model_fields.items()
                 if name in answer
+            }
+            # A field the walk could not read is dropped, which leaves
+            # the model's own default in its place. Dropping rather than
+            # substituting, because the default is the model's fact and
+            # this walk does not hold it, and because a key that is not
+            # there is exactly what an older server sent.
+            return {
+                name: value
+                for name, value in read.items()
+                if value is not _UNREADABLE_FIELD
             }
         return answer
     origin, arguments = get_origin(shape), get_args(shape)
@@ -2343,7 +2361,28 @@ def _declared(shape: object, answer: object) -> object:
         # about the model and not about the wire, so the conversion
         # belongs here with the other shape-guided ones rather than as a
         # tolerance inside the validator.
-        return tuple(_declared(arguments[0], item) for item in answer)
+        read = tuple(_declared(arguments[0], item) for item in answer)
+        # And a sequence of a closed token is read whole or not at all.
+        #
+        # A set of tokens is one fact rather than a list of facts: it
+        # says which boundaries a write is waiting at, and a client that
+        # kept the members it recognized and dropped the one it did not
+        # would act on half of an answer while believing it had all of
+        # it. So one unrecognized member makes the whole sequence a fact
+        # this client cannot read, and the honest reading of that is the
+        # one an older server gives by saying nothing: the field's
+        # default.
+        #
+        # A rule about the shape and not about a field name, which is
+        # what this walk is written to be, and deliberately narrower
+        # than the scalar branch above: an unknown token where one word
+        # is expected still refuses the whole answer, because a value
+        # that is printed as itself has no honest default to fall back
+        # to.
+        if isinstance(arguments[0], type) and issubclass(arguments[0], Enum):
+            if any(not isinstance(item, arguments[0]) for item in read):
+                return _UNREADABLE_FIELD
+        return read
     # Anything else is a leaf as far as this is concerned, including the
     # unions, which carry no model in any of these shapes, and
     # `dict[str, Any]`, which is where a masked entity body travels
