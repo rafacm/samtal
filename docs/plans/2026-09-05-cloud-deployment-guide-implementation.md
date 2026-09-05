@@ -131,3 +131,118 @@ from.
   `terminationGracePeriodSeconds`, the startup `failureThreshold`, the
   readiness path and the emptyDir medium) and each produced its own
   named failure; the file was restored by copy-back and touched.
+
+### PR review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, 2026-09-05,
+against commit `88a099fb` of PR #402; the reviewer ran about 4m53s.
+Two P1 and two P2, mergeable after fixes, and a fifth finding raised by
+PR #403's own terra round about a file this milestone owns. All five
+answered, one commit each.
+
+1. **P1: the Ingress recreated at the proxy the leak the server refuses
+   at the origin.** `serving.py` keeps uvicorn's access log off
+   deliberately, because an access line is a request line and two of
+   this server's request lines are things nothing may print: the OTA
+   path carries the deployment's secret segment, and `/x/<key>/` is the
+   key standing in front of the endpoint that issues device tokens
+   (`onboarding/keys.py` will not even quote a rejected attempt, since
+   a near miss of a real key is a hint at the real key). Both paths
+   this Ingress routes are exactly those two, so a controller logging
+   request lines puts back everything the server took out.
+
+   *Fixed*: `nginx.ingress.kubernetes.io/enable-access-log: "false"`,
+   with the header carrying the reason in the code's own terms and
+   saying an operator on another controller owes the same property by
+   whatever name it uses, including for any legacy OTA rule they add.
+   The agreement test asserts the annotation is present and false.
+
+2. **P1: `deployment.yaml`'s header advertised a bulk apply.** It said
+   what is here "is applied with `kubectl apply -f deploy/k8s/`", which
+   is the one command this set must not be applied with: a Job's pod
+   template is immutable, so an apply over a completed Job fails rather
+   than rerunning it, and a directory sweep would update the Deployment
+   and then fail on the Job, leaving the new image booting against a
+   database nothing had reprovisioned.
+
+   *Fixed*: the header carries the ordered per-resource workflow
+   instead, terse (secrets out of band, the PVC, the init transaction
+   of idempotent ConfigMap apply, delete-then-create Job and
+   `kubectl wait`, then the Deployment, Service and Ingress), matching
+   the transaction the plan records; M2's guide is still where it is
+   walked. `secret.yaml.example` keeps its own mention of the bulk
+   apply, since that hazard is why its name ends in `.example`.
+
+3. **P2: the host agreement was a union of four values.** Asserting a
+   one-member set is green for every way the contract actually breaks:
+   an empty `spec.tls` contributes nothing to a union, and so did a
+   dropped `secretName`, an `http` public URL, a `ws` websocket URL and
+   a websocket URL on the right host with the wrong path.
+
+   *Fixed*: split in two and made specific. Exactly one rule with a
+   non-empty host; exactly one `spec.tls` entry whose hosts are that
+   host alone and whose `secretName` is both present and the one the
+   header's `kubectl create secret tls` line names, read off the
+   resource rather than typed twice; `https` and `wss` schemes; and the
+   websocket path equal to `device.boundary.WEBSOCKET_PATH`.
+
+4. **P2: the init Job's command was sampled rather than asserted.** The
+   test proved `ADMIN_URL` was referenced in the env and never that the
+   command uses it, so an argv that dropped `$(ADMIN_URL)` would stay
+   green while psql fell back to a local socket.
+
+   *Fixed*: the argv is asserted whole, in order and with nothing
+   extra, with the file argument still what the mount is looked up from
+   so the mount path is derived rather than restated. Two more
+   agreements read off one place each: the ConfigMap's name comes from
+   the volume and the header's `kubectl create configmap` line is held
+   to naming it and to building it from the committed SQL, and the
+   image is read from the trial compose file's `postgres` service
+   rather than pinned again, since which Postgres this repository runs
+   is one decision and the SQL's `\getenv` needs psql 15 or later.
+
+5. **P1 (from PR #403's terra round, in this milestone's file): an
+   unguarded `VINGA_DB_URL` could beat all five guarded database
+   fields.** `db.connection_url` lets that one variable replace the
+   discrete facts whole, and this file requires an env file for the
+   provider credentials its guards cannot enumerate, so one line there
+   would point the container at another database with every guard
+   beside it satisfied by values nothing then reads. The trial file has
+   prevented exactly this since it was written; the production file did
+   not.
+
+   *Fixed*: pinned `VINGA_DB_URL: ""` rather than guarded, because this
+   lane's convention is deliberately the five discrete fields and a
+   deployment whose convention is one connection string writes its own
+   file. Empty rather than absent, since absent is what the env file
+   could fill in. Verified against the real resolver rather than
+   assumed: unset and empty both yield the discrete facts and a set one
+   yields itself. The agreement test asserts the pin, reading the
+   variable's name from `db.URL_ENV`.
+
+**Template-guide alignment**, alongside the round and surfaced by the
+M2 agent working on the guide. `secret-init.example`'s header carried
+two shapes the guide had just corrected, and a template that disagrees
+with the page walking it is worse than no template. Its
+`kubectl create secret generic` is now piped through
+`--dry-run=client -o yaml | kubectl apply -f -`, since the init
+transaction is rerunnable and a retry after a failed Job would
+otherwise die on AlreadyExists before reaching the thing that actually
+failed. And `VINGA_DB_RO_PASSWORD` no longer appears as an inline
+`$(openssl rand -hex 32)`: the SQL runs `ALTER ROLE ... WITH LOGIN
+PASSWORD` on every run, so generating a fresh value each rerun rotates
+the analyst role's password on every upgrade and silently invalidates
+the credential in use. The header and the key's own comment both say
+to generate it once and pass the same value after that.
+
+Re-verified after the round: `uv run ruff check .` clean; the deploy
+and census cases green; the new TLS, whole-command and `VINGA_DB_URL`
+assertions each proven to bite by breaking a copied-aside value and
+reading the named failure (`assert 0 == 1` for the emptied `spec.tls`,
+the whole argv diff for the dropped connection, `assert 'ws' == 'wss'`
+for the downgraded scheme, and `'<absent>' == ''` for the removed pin),
+restored by copy-back and touched; the extracted kubeconform step body
+rerun so the new annotation is schema-checked (5 valid, plus 1 each for
+the templates); and the extracted compose step body rerun, with a
+`VINGA_DB_URL` planted in the temporary env file confirmed not to reach
+the rendered config with a value.
