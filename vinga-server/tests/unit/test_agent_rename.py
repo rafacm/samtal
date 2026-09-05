@@ -37,7 +37,16 @@ What it pins:
 - **The competing write**, once per store that checks a destination: a
   second writer of the same chain, released exactly between the check
   and the update, is queued on the lock rather than landing inside the
-  decision.
+  decision. The waiter is required to be that writer's own backend by
+  pid, because this lane runs its files across worker processes against
+  one instance and a count of anybody's waiters would have been
+  satisfied by a suite next door.
+- **The order the lock and the check are issued in**, which the three
+  pins above cannot see: each of them starts its writer at the statement
+  that WRITES, so all three would still pass with a chain's lock taken
+  between the destination check and the update rather than before both.
+  That is asserted directly, off the statements the one connection
+  sends.
 
 Every thread here is minted per test, because a deletion names an id for
 the life of the process and a suite that reused one would be arranging
@@ -55,7 +64,7 @@ from typing import Any
 
 import psycopg
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from tests.support.stores import (
     holding_the_write_lock,
@@ -80,11 +89,17 @@ from vinga_server.conversations import schema as record_schema
 from vinga_server.conversations import store as record_store
 from vinga_server.conversations.records import TurnLeg, TurnRecord
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN, ConversationStore
-from vinga_server.db import DOMAIN_CHAIN, connection_url, open_database, write_engine
+from vinga_server.db import (
+    DOMAIN_CHAIN,
+    connection_url,
+    open_database,
+    read_engine,
+    write_engine,
+)
 from vinga_server.db import schema as domain_schema
 from vinga_server.memory import schema as memory_schema
 from vinga_server.memory import store as memory_store
-from vinga_server.memory.store import MEMORY_CHAIN, MemoryScope
+from vinga_server.memory.store import MEMORY_CHAIN, MemoryScope, MemoryStore
 
 # The agent kind's own descriptor, which is where the sentence a missing
 # agent is refused with lives.
@@ -655,20 +670,56 @@ def _connection() -> psycopg.Connection:
     return psycopg.connect(url.render_as_string(hide_password=False))
 
 
-def _queued_on(key: int) -> bool:
-    """Whether somebody is really parked on one chain's advisory lock,
-    asked of the database rather than slept for."""
+def _queued_on(key: int, pid: int) -> bool:
+    """Whether ONE named backend is really parked on one chain's
+    advisory lock, asked of the database rather than slept for.
+
+    The pid is the whole of this predicate, and it was not always. A
+    count of ungranted waiters on the key answers yes for anybody's
+    waiter, and this lane runs its files across worker processes against
+    one instance, so a suite next door writing to the same chain would
+    have satisfied it. What the pin claims is that THIS writer was made
+    to wait, so it asks about that writer's own backend.
+    """
     asking = _connection()
     try:
         row = asking.execute(
             "select count(*) from pg_locks where locktype = 'advisory' "
-            "and not granted and ((classid::bigint << 32) | objid::bigint) = %s",
-            (key,),
+            "and not granted and ((classid::bigint << 32) | objid::bigint) = %s "
+            "and pid = %s",
+            (key, pid),
         ).fetchone()
         return bool(row and row[0])
     finally:
         asking.rollback()
         asking.close()
+
+
+def a_writers_engine(chain: Any) -> "tuple[Any, list[int]]":
+    """One chain's write engine, with the backend pid of every
+    connection it makes recorded as it is made.
+
+    On `connect` and deliberately not on `begin`, which was tried first
+    and does not work. A write engine's own `begin` handler is what takes
+    the chain's advisory lock, and a second handler does not run before
+    it: `insert=True` did not put this one in front, so the pid was
+    recorded only once the lock had been granted, which is exactly when a
+    blocked writer is no longer blocked. `connect` is strictly earlier
+    than any transaction, so the pid of the backend that is about to wait
+    is in hand before it waits, which is what lets the predicate above
+    name it.
+
+    A fresh engine per competitor, so its pool is empty and the first
+    connection it makes is the one that blocks.
+    """
+    engine = write_engine(DatabaseConfig(), chain)
+    pids: list[int] = []
+
+    def remember(dbapi_connection: Any, record: Any) -> None:
+        pids.append(int(dbapi_connection.info.backend_pid))
+
+    event.listen(engine, "connect", remember)
+    return engine, pids
 
 
 class Competing:
@@ -681,11 +732,17 @@ class Competing:
     the interleaving under test is forced rather than hoped for: the
     second writer is started exactly in that window, and the assertion is
     that the database will not let it in.
+
+    `pids` is the list `a_writers_engine` fills, and it is what makes the
+    waiting claim about this writer rather than about anybody's: the
+    first entry is the backend that is about to take the chain's lock, so
+    it is waited for first and then required to BE the ungranted waiter.
     """
 
-    def __init__(self, key: int, work: Callable[[], Any]) -> None:
+    def __init__(self, key: int, work: Callable[[], Any], pids: list[int]) -> None:
         self._key = key
         self._work = work
+        self._pids = pids
         self.answered: list[Any] = []
         self.queued = False
         self.finished_early = False
@@ -697,14 +754,19 @@ class Competing:
         except Exception as exc:  # noqa: BLE001 - a refusal is an answer here
             self.answered.append(exc)
 
+    def _waited_for(self, question: Callable[[], bool]) -> bool:
+        for _ in range(int(QUEUED_TIMEOUT_S / QUEUED_POLL_S)):
+            if question():
+                return True
+            time.sleep(QUEUED_POLL_S)
+        return False
+
     def start_and_wait_to_be_queued(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        for _ in range(int(QUEUED_TIMEOUT_S / QUEUED_POLL_S)):
-            if _queued_on(self._key):
-                self.queued = True
-                break
-            time.sleep(QUEUED_POLL_S)
+        if self._waited_for(lambda: bool(self._pids)):
+            pid = self._pids[0]
+            self.queued = self._waited_for(lambda: _queued_on(self._key, pid))
         # Recorded rather than asserted here, because this runs inside
         # the transaction under test and an assertion would leave it open.
         self.finished_early = bool(self.answered)
@@ -750,18 +812,28 @@ async def test_a_memory_write_cannot_land_between_the_check_and_the_update(
     true when it writes."""
     a_working_configuration(store, SENTINEL)
     await a_remembered_fact(SENTINEL, "the user is vegetarian")
+    engine, pids = a_writers_engine(MEMORY_CHAIN)
 
     def competing_add() -> int:
+        # The store's own public call, on engines of its own rather than
+        # the lane's, which is what a second process's writer is and what
+        # lets its backend be named before it blocks.
+        elsewhere = MemoryStore(engine, read_engine(DatabaseConfig()))
         return asyncio.run(
-            memory().add(MemoryScope.AGENT, RENAMED, "a fact from elsewhere", agent=RENAMED)
+            elsewhere.add(
+                MemoryScope.AGENT, RENAMED, "a fact from elsewhere", agent=RENAMED
+            )
         )
 
-    writer = Competing(MEMORY_CHAIN.lock_key, competing_add)
-    with released_between_the_check_and_the_write(
-        monkeypatch, memory_store, "sql_update", writer
-    ):
-        renamed = store.rename_agent(SENTINEL, RENAMED)
-    writer.join()
+    writer = Competing(MEMORY_CHAIN.lock_key, competing_add, pids)
+    try:
+        with released_between_the_check_and_the_write(
+            monkeypatch, memory_store, "sql_update", writer
+        ):
+            renamed = store.rename_agent(SENTINEL, RENAMED)
+        writer.join()
+    finally:
+        engine.dispose()
 
     assert writer.queued, "the second writer was never parked on the memory chain"
     assert not writer.finished_early, "the second writer landed inside the decision"
@@ -781,29 +853,29 @@ async def test_a_record_write_cannot_land_between_the_check_and_the_update(
     takes as its own first statement."""
     a_working_configuration(store, SENTINEL)
     a_recorded_thread(thread, SENTINEL, "alpha")
+    engine, pids = a_writers_engine(CONVERSATIONS_CHAIN)
 
     def competing_thread() -> None:
-        engine = write_engine(DatabaseConfig(), CONVERSATIONS_CHAIN)
-        try:
-            with engine.begin() as connection:
-                connection.execute(
-                    record_schema.conversations.insert().values(
-                        conversation=other_thread,
-                        agent=RENAMED,
-                        device=MAC,
-                        created_at=AT.isoformat(),
-                        last_active_at=AT.isoformat(),
-                    )
+        with engine.begin() as connection:
+            connection.execute(
+                record_schema.conversations.insert().values(
+                    conversation=other_thread,
+                    agent=RENAMED,
+                    device=MAC,
+                    created_at=AT.isoformat(),
+                    last_active_at=AT.isoformat(),
                 )
-        finally:
-            engine.dispose()
+            )
 
-    writer = Competing(CONVERSATIONS_CHAIN.lock_key, competing_thread)
-    with released_between_the_check_and_the_write(
-        monkeypatch, record_store, "update", writer
-    ):
-        renamed = store.rename_agent(SENTINEL, RENAMED)
-    writer.join()
+    writer = Competing(CONVERSATIONS_CHAIN.lock_key, competing_thread, pids)
+    try:
+        with released_between_the_check_and_the_write(
+            monkeypatch, record_store, "update", writer
+        ):
+            renamed = store.rename_agent(SENTINEL, RENAMED)
+        writer.join()
+    finally:
+        engine.dispose()
 
     assert writer.queued, "the second writer was never parked on the record chain"
     assert not writer.finished_early, "the second writer landed inside the decision"
@@ -829,26 +901,83 @@ async def test_a_domain_write_cannot_land_between_the_check_and_the_update(
     commit, which is what the lock forces, it resolves and is written.
     """
     a_working_configuration(store, SENTINEL)
+    engine, pids = a_writers_engine(DOMAIN_CHAIN)
 
     def competing_bind() -> Any:
-        engine = open_database(DatabaseConfig())
-        try:
-            return ConfigStore(engine).bind_device(OTHER_MAC, [RENAMED])
-        finally:
-            engine.dispose()
+        return ConfigStore(engine).bind_device(OTHER_MAC, [RENAMED])
 
-    writer = Competing(DOMAIN_CHAIN.lock_key, competing_bind)
-    with released_between_the_check_and_the_write(
-        monkeypatch, store_module, "_rename_agent_row", writer
-    ):
-        store.rename_agent(SENTINEL, RENAMED)
-    writer.join()
+    writer = Competing(DOMAIN_CHAIN.lock_key, competing_bind, pids)
+    try:
+        with released_between_the_check_and_the_write(
+            monkeypatch, store_module, "_rename_agent_row", writer
+        ):
+            store.rename_agent(SENTINEL, RENAMED)
+        writer.join()
+    finally:
+        engine.dispose()
 
     assert writer.queued, "the second writer was never parked on the domain chain"
     assert not writer.finished_early, "the second writer landed inside the decision"
     assert not isinstance(writer.answered[0], Exception), writer.answered[0]
     assert set(store.load().domain.agents) == {RENAMED}
     assert store.load().domain.devices[OTHER_MAC] == [RENAMED]
+
+
+# And the order the lock and the check are issued in
+
+
+async def test_each_store_locks_its_chain_before_it_looks_at_its_destination(
+    thread: str,
+) -> None:
+    """The half the three pins above cannot see.
+
+    Each of them starts its second writer at the statement that WRITES,
+    which is after the destination check, so all three would still pass
+    if a chain's lock were taken between the check and the update rather
+    than before both. That arrangement is not the one the stores claim:
+    a check made outside the lock can go stale before the update runs,
+    which is precisely the merge the destination rule exists to refuse.
+
+    So the order is asserted directly, off the statements the one
+    connection issues. `before_cursor_execute` sees every statement of
+    the rename's transaction in the order it is sent, the advisory lock
+    among them, and each chain's lock has to come before the first
+    statement that names that chain's table.
+    """
+    issued: list[str] = []
+    engine = open_database(DatabaseConfig())
+
+    def record(connection: Any, cursor: Any, statement: str, *rest: Any) -> None:
+        issued.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        store = ConfigStore(engine)
+        a_working_configuration(store, SENTINEL)
+        a_recorded_thread(thread, SENTINEL, "alpha")
+        await a_remembered_fact(SENTINEL, "the user is vegetarian")
+        issued.clear()
+
+        store.rename_agent(SENTINEL, RENAMED)
+    finally:
+        engine.dispose()
+
+    def first(fragment: str) -> int:
+        for position, statement in enumerate(issued):
+            if fragment in statement:
+                return position
+        raise AssertionError(f"no statement of the rename contained {fragment!r}")
+
+    locked_record = first(f"pg_advisory_xact_lock({CONVERSATIONS_CHAIN.lock_key})")
+    locked_memory = first(f"pg_advisory_xact_lock({MEMORY_CHAIN.lock_key})")
+    assert locked_record < first("record.conversations")
+    assert locked_memory < first("memory.facts")
+    # And the whole of the ascending order at statement level, which the
+    # lock-order walk asserts by recording the keys and this asserts by
+    # reading the wire: the domain chain's lock is the transaction's
+    # first statement, and the other two follow it in order.
+    assert first(f"pg_advisory_xact_lock({DOMAIN_CHAIN.lock_key})") < locked_record
+    assert locked_record < locked_memory
 
 
 def test_the_lane_can_read_all_three_schemas_through_one_connection() -> None:
