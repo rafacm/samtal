@@ -54,6 +54,13 @@ COMPOSE = REPO / "deploy" / "docker-compose.production.yml"
 DOCKERFILE = REPO / "vinga-server" / "Dockerfile"
 INIT_SQL = REPO / "deploy" / "postgres-init.sql"
 
+# The trial file at the repository root, read here for one fact: which
+# Postgres image this repository has settled on. The init Job runs psql
+# out of that same image, so the version the SQL's `\getenv` needs is
+# one decision with one home rather than a pin in every file that has to
+# talk to a database.
+TRIAL_COMPOSE = REPO / "docker-compose.yml"
+
 # What `kubectl apply -f deploy/k8s/` installs, which is the glob the
 # guard at the foot of this file is about.
 APPLY_GLOB = "*.yaml"
@@ -84,6 +91,13 @@ GRACE_MARGIN_S = 5
 # says so; what it stands for is the property, which an operator on
 # another controller owes under whatever name it uses.
 ACCESS_LOG = "nginx.ingress.kubernetes.io/enable-access-log"
+
+# The administrative connection the provisioning SQL is run over, and
+# the three keys its Secret carries. One home: the env assertion reads
+# the whole tuple and the command assertion reads the first of them, so
+# a rename is one edit here.
+ADMIN_URL = "ADMIN_URL"
+INIT_SECRET_KEYS = (ADMIN_URL, "VINGA_DB_USER", "VINGA_DB_RO_PASSWORD")
 
 # An environment name that carries a credential. Anything matching this
 # in an applicable manifest has to arrive from a Secret rather than as a
@@ -119,12 +133,16 @@ def _load(path: Path) -> Any:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def _of_kind(kind: str) -> Any:
+def _file_of_kind(kind: str) -> Path:
     """The one applicable manifest of a kind, so a test that names a
     resource fails loudly rather than silently reading the wrong one."""
-    found = [document for path in _applicable() if (document := _load(path)).get("kind") == kind]
+    found = [path for path in _applicable() if _load(path).get("kind") == kind]
     assert len(found) == 1, f"expected exactly one {kind} under deploy/k8s/, found {len(found)}"
     return found[0]
+
+
+def _of_kind(kind: str) -> Any:
+    return _load(_file_of_kind(kind))
 
 
 @pytest.fixture(scope="module")
@@ -365,21 +383,63 @@ def test_every_ingress_backend_names_the_service_and_its_port(
             assert next(iter(port.values())) == expected, f"{path['path']} routes to {port}"
 
 
-def test_the_public_host_is_one_value(ingress: Any, container: Any) -> None:
-    """The Ingress rule, the certificate and the two URLs the server
-    hands devices are one name. A certificate for one host and a
-    websocket URL for another is a board that fails at the handshake
-    with every log line looking right."""
+def test_the_ingress_terminates_tls_for_the_host_it_routes(ingress: Any) -> None:
+    """TLS termination is this resource's own contract rather than an
+    annotation, and every part of it can go missing while the manifest
+    stays schema-valid: an empty `spec.tls`, an entry for another host,
+    or one naming no certificate at all. Each of those is a deployment
+    serving plaintext, or serving nothing, with everything else looking
+    right.
+
+    The Secret's name is not restated here. It is read off the resource
+    and the header's own `kubectl create secret tls` line is held to
+    naming the same one, so the certificate an operator is told to
+    create is the certificate this Ingress asks for.
+    """
+    rules = ingress["spec"]["rules"]
+    assert len(rules) == 1, f"expected one rule, found {len(rules)}"
+    host = rules[0]["host"]
+    assert host, "the rule matches every host, so the certificate below covers none of them"
+
+    tls = ingress["spec"]["tls"]
+    assert len(tls) == 1, f"expected exactly one spec.tls entry, found {len(tls)}"
+    assert tls[0]["hosts"] == [host], f"the certificate covers {tls[0]['hosts']}, not {host}"
+
+    secret = tls[0].get("secretName")
+    assert secret, "spec.tls names no certificate Secret, so TLS terminates nowhere"
+    written = _file_of_kind("Ingress").read_text(encoding="utf-8")
+    assert f"kubectl create secret tls {secret}" in written, (
+        f"the header does not tell an operator how to create {secret}"
+    )
+
+
+def test_the_urls_the_server_hands_devices_are_that_host_over_tls(
+    ingress: Any, container: Any
+) -> None:
+    """The other side of the same agreement. A certificate for one host
+    and a websocket URL for another is a board that fails at the
+    handshake with every log line looking right, and a `ws://` value
+    behind an `https://` ingress is the exact fault the server's own
+    doctor command exists to name.
+
+    The websocket path is the server's, read from the constant the
+    application mounts the channel at rather than typed again here.
+    """
     from urllib.parse import urlsplit
 
-    hosts = {rule["host"] for rule in ingress["spec"]["rules"]}
-    hosts |= {host for entry in ingress["spec"]["tls"] for host in entry["hosts"]}
-
+    host = ingress["spec"]["rules"][0]["host"]
     env = _env(container)
-    for name in ("VINGA_SERVER__PUBLIC_URL", "VINGA_SERVER__WEBSOCKET_URL"):
-        hosts.add(urlsplit(env[name]["value"]).hostname)
 
-    assert len(hosts) == 1, f"the placeholder host is written more than one way: {sorted(hosts)}"
+    public = urlsplit(env["VINGA_SERVER__PUBLIC_URL"]["value"])
+    assert public.scheme == "https", f"the public URL is {public.scheme}, not https"
+    assert public.hostname == host
+
+    websocket = urlsplit(env["VINGA_SERVER__WEBSOCKET_URL"]["value"])
+    assert websocket.scheme == "wss", f"the websocket URL is {websocket.scheme}, not wss"
+    assert websocket.hostname == host
+    assert websocket.path == WEBSOCKET_PATH, (
+        f"the websocket URL points at {websocket.path}, not {WEBSOCKET_PATH}"
+    )
 
 
 def test_the_ingress_routes_exactly_the_device_paths(ingress: Any) -> None:
