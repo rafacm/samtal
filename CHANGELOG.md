@@ -40,11 +40,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   nothing answers to made by the act that removes them. The rename now
   takes the same ordering lock a deletion takes, across its transaction
   and the publication that follows it, and announces the pair of names
-  to whichever writer is recording in this process. That writer keeps
-  one translation per recording session, marked for the sessions live at
-  that instant and no others, and resolves the name once at the boundary
-  where a name enters the record, so the turn, its handover legs and the
-  thread it lands on all say the same thing. What a session writes after
+  to whichever writer is recording in this process. Which conversations
+  that reaches is decided by the world each of them speaks from rather
+  than by the instant it registered: a conversation binds its
+  configuration before it awaits the device's hello and goes on speaking
+  that world's names until it ends, so a rename published while a device
+  is connecting, or while a stored change waits for its apply, reaches
+  it too. The writer keeps one translation per recording session, seeded
+  with what its world has not heard, and resolves the name once at the
+  boundary where a name enters the record, so the turn, its handover
+  legs and the thread it lands on all say the same thing. A world
+  installed after a rename has nothing to translate, which is what makes
+  a freed name safe to give to a second agent. What a session writes after
   a rename is a new write and carries the name the agent has now; what
   was written before it is dated record and is never touched; and the
   session row keeps the name it opened with, because that column's

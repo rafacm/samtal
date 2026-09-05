@@ -238,11 +238,19 @@ claims.
   session, `_renames`, guarded by the lock the producer state is guarded
   by, because a publication writes it from a request thread and the
   writer reads it inside its durable transaction. `open_session`
-  registers an empty map, which is what makes a session translatable at
-  all; `translate(old, new)` is `forget`'s sibling and marks every
-  session live at that instant, composing on insert so a chain of
-  renames resolves in one lookup; `_retire` drops a session's map where
-  `_devices` is dropped, at the Close marker and at the tombstone.
+  seeds the map from what this session's world has not heard (see the
+  review round below); `translate(old, new)` is `forget`'s sibling and
+  marks every session live at that instant; both fold a rename in
+  through `_compose`, which is the one rule for both; `_retire` drops a
+  session's map where `_devices` is dropped, at the Close marker and at
+  the tombstone.
+- **`Generations` keeps what each world has not heard,** and hears it
+  through `renames_announced_to`, the rename's own listener register
+  beside the erasure's, wired by the composition root. A world is
+  stamped with its place in that list when it is installed and loses it
+  when it is disposed of. `DeviceSession._start_recording` hands the
+  store a thunk over its own generation, which the store calls at the
+  instant it registers the session.
 - **The resolution sits at the durable-write boundary.** `_write` reads
   the session's translations once for the whole marker (`_naming`) and
   resolves each turn's agent once, handing that one value to
@@ -252,12 +260,20 @@ claims.
 - **`config/store.py`'s `rename_agent` enters the order before it opens
   its transaction and publishes after the commit, still inside it.** Two
   lines and a docstring paragraph; nothing else about the write moved.
-- **`tests/unit/test_agent_rename_in_flight.py`,** nine cases: the two
-  defects with the writer parked and the rename committing in front of
-  it, the ordering lock's own claim, the row read back whole, a leg
+- **`tests/unit/test_agent_rename_in_flight.py`,** thirteen cases: the
+  two defects with the writer parked and the rename committing in front
+  of it, the ordering lock's own claim, the row read back whole, a leg
   naming a second renamed agent, an agent nothing renamed, a chain of
-  renames, a batch queued behind a close, and the freed name given to a
-  new agent.
+  renames, a batch queued behind a close, the freed name given to a new
+  agent and that agent renamed in its turn, and the three the review
+  round added: a rename landing between a served session's world and its
+  registration, a session opened after a rename and before the apply,
+  and a world installed after a rename having nothing to translate.
+- **`tests/support/sessions.py`** grows two optional parameters and one
+  helper, all additive: `served` and `open_session` take the holder for
+  the suites that publish something to it, and `bound_to_its_world`
+  waits for the capture the way `handshaken` waits for the handshake, so
+  a test can hold a session in the window between them.
 
 ### Deviations from the plan
 
@@ -314,6 +330,69 @@ the plan's own test list asks for that the code cannot answer.
   rather than a decision spread over the call site: the function names
   itself as the hook a change of that decision would attach to.
 
+### The review round
+
+Backend codex, model `gpt-5.6-sol`, against PR #417: 2 P1, mergeable
+after the fixes. Both are fixed on the branch, in one commit each, and
+the first of them moved a design decision the plan had made.
+
+1. **P1: a session could miss a rename before it was registered.** The
+   writer marked the sessions it already had, and a served session
+   registers long after it has decided which names it speaks:
+   `device/session.py` captures its generation, builds the runtime from
+   it with no await in between, and only then awaits the device's hello,
+   which is several awaits before `open_session`. A rename published in
+   that window reached nothing, and the same hole is open far wider
+   between a rename's commit and the apply that installs a world built
+   from it, which is every conversation begun while an operator has not
+   applied yet. The reuse case in this suite had encoded the wrong
+   premise with it: it assumed a session opened after the publication
+   took its name from the store, which no served session does.
+
+   *Fixed as prescribed, and the code decided the shape.* The anchor is
+   the generation, because that is the object that decides which names a
+   conversation speaks and it is the only thing that knows when a world
+   began. `Generations` keeps every rename published in this process,
+   oldest first, and each living world's place in that list; a rename
+   reaches it through `renames_announced_to`, a register beside the
+   erasure's, wired where the erasure subscription already is. A world
+   installed after a rename joins at the end of the list, so it has
+   nothing to translate, which is what an apply produces and what keeps
+   the freed name safe: the recreated agent is servable only from a
+   world that knows both names. A world's place goes where the world
+   goes, in `dispose`.
+
+   Two smaller decisions inside it. The seed is a thunk the store calls
+   under the lock a publication takes, rather than a list the caller
+   reads first: reading it at the call site leaves a window between the
+   two statements in which a rename can mark every registered session,
+   not yet including this one, and then be missed by a list already
+   read. And the per-session map stays, seeded from the world rather
+   than replaced by it, because the composition a session accumulates
+   after it registers is the same rule folded over the same stream;
+   `_compose` is that one rule, and being idempotent is what lets a
+   rename that arrives through both doors be applied once.
+
+   The plan's own reasoning survives this and its wording does not: it
+   said the publication marks "the sessions live at that instant", and
+   what it marks is the sessions whose WORLD predates it. The
+   counterexample the plan used to refuse a process-wide map, a freed
+   name given to a new agent, is exactly what the world boundary
+   answers.
+
+2. **P1: reusing and renaming a freed source name corrupted older
+   sessions.** Composition assigned the old name as a source
+   unconditionally, so a session holding `sam -> poet` was rewritten to
+   `sam -> bard` by a later rename of a recreated `sam`, and its next
+   turn was filed under a stranger's new name on a thread its own agent
+   owns. The thread guard refuses that and the writer drops the marker's
+   whole batch, which is the loss this milestone exists to prevent.
+
+   *Fixed as prescribed:* the arm that moves an entry whose current
+   value is the old name is unchanged, and the old name is entered as a
+   source of its own only when nothing is filed under it yet. A name
+   that already means something to a session goes on meaning it.
+
 ### Open questions the plan left, and what M2 answers
 
 None left open. The follow-up the plan says this milestone files is
@@ -346,6 +425,21 @@ landing code refers to a decision rather than to a tracker.
     fails.
   - One map for the whole process instead of one per session: the freed
     name pin alone fails.
+  - The freed name entered as a source unconditionally (the review's
+    second finding, put back): the recreate-and-rename pin alone fails,
+    on the older session's acknowledgement coming back false with
+    `MisattributedTurn` in the log, which is the batch drop the finding
+    described.
+  - The world's own renames ignored at the open: both served-session
+    pins fail, each on a thread created under the old name
+    (`assert 'assistant' == 'poet'`), which is the detached live
+    reference the rename set out to remove.
+  - The session not saying which world it bound: the same two fail the
+    same way, which is what says the wiring is load-bearing rather than
+    the seam alone.
+  - A world not stamped when it is installed: the pin that a world
+    installed after a rename has nothing to translate fails, and it is
+    the one that keeps a reused name safe.
 - The generated-document drift checks: clean. M2 touches no generated
   document; the census manifest is regenerated in the last commit of the
   milestone as always.
