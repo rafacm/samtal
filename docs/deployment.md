@@ -17,7 +17,8 @@ page is the bug.
 What is not here: how to configure the server once it runs. Which
 providers, which agents and which devices a deployment has is written
 in over the configuration API, and every key of the file half is on its
-own generated page, `docs/reference/server-config.md`, rendered from
+own generated page,
+[`server-config.md`](reference/server-config.md), rendered from
 the models. Onboarding
 a board is
 [Onboarding a device](../vinga-server/README.md#onboarding-a-device),
@@ -478,7 +479,8 @@ track and a manifest per session. The budget is a setting rather than a
 guess: the capture section names a total budget for the directory, a
 per-session ceiling and a free-space floor beneath which a capture is
 refused, and the keys and their defaults are in the generated
-`docs/reference/server-config.md` rather than repeated here, so a
+[`server-config.md`](reference/server-config.md) rather than
+repeated here, so a
 release that retunes them carries the numbers and this paragraph stays
 true. Size the volume as weights plus voices plus that budget plus the
 free-space floor, and set the floor high enough that the caches and the
