@@ -9,6 +9,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **A write says which boundary it is waiting at, in tokens.** The
+  configuration API's acknowledgement carried the answer only as a
+  sentence, and two of the five sentences it can compose name a command
+  of the CLI's grammar, so an image built before a rename told an
+  operator to run a command the client beside it no longer had. A write
+  now answers with `applies` beside the sentence, the same closed
+  vocabulary the comparison read publishes, so a client can phrase the
+  remedy in its own words. `Applies` gains `store-boot`, the boundary a
+  write to a server serving a handed configuration waits at, and the
+  comparison's own fields narrow to the three it can announce, held
+  together by a pin that the two sets account for the enum and by one
+  that constructs every model of the comparison with the fourth and
+  asserts it is refused. The field is defaulted, which is this API's one
+  exception to nullable-and-required: a server older than the vocabulary
+  sends no key, and this client reads a sequence of closed tokens whole
+  or not at all, so a token from a newer server reads as that same
+  silence rather than turning a write that landed into a refusal.
+  Nothing printed changes; the sentences are byte-identical, and the
+  half that names commands moves in the change after this one.
+
 - **The upstream wire contract is watched.** vinga speaks a protocol
   it does not own, read from upstream sources at pinned commits, and
   until now nothing noticed when upstream moved.
