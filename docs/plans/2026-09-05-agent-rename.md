@@ -1155,8 +1155,9 @@ where it is enforced rather than asserting it.
   between. Design footprint: one publication and one order beside the
   ones they copy, one map inside the writer that already subscribes to
   a store change; no new module.
-- [ ] **M3: the route, the boundary it announces, and the caveat it
-  retires.** `POST /agents/{name}/rename` with its request model and
+- [x] **[M3: the route, the boundary it announces, and the caveat it
+  retires](2026-09-05-agent-rename-implementation.md#m3-the-route-the-boundary-it-announces-and-the-caveat-it-retires)**
+  (PR TBD). `POST /agents/{name}/rename` with its request model and
   `Acknowledgement` answer; the sixth `Notice` and the three-arm choice;
   the acknowledgement's line composed from `Renamed` with the old name
   stripped; the route's cases and the three boundary arms asserted on

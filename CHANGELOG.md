@@ -58,6 +58,38 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   subject is the moment the session opened. Still nothing an operator
   can reach: the protocol lands whole before anything can call it.
 
+- **The rename has a door: `POST /agents/{name}/rename`.** A POST
+  because the act is not idempotent, and a body carrying `to` because
+  the new name is what the request carries rather than part of what it
+  addresses. It answers with the acknowledgement every domain write
+  answers with, composed from what the transaction did rather than from
+  what the request said, and the boundary it announces is chosen the
+  same way: a rename that moved the agents row alone waits at the
+  install like every other write of its kind, one that moved a device
+  binding or the default agent with it waits at two boundaries at once
+  and carries a sixth notice saying so, and a server that reads no store
+  says that the rows are stored. Deliberately not chosen by asking which
+  agents this server is serving, which is where it differs from a device
+  binding: a running server may serve an agent under the new name and it
+  will not be this one. An occupied destination answers 409 and no
+  refusal quotes either name. `vinga agent rename` itself is the next
+  change.
+
+- **Two column comments stop describing the old behavior**, each through
+  a forward migration, because a comment is committed DDL and a database
+  migrated by an earlier build would go on saying something false.
+  `memory.facts.owner` said that renaming an agent orphans its rows, and
+  `record.conversations.agent` said the agent it names is the only one
+  the thread will ever have; the first is now the rule that a rename
+  moves an agent's rows with it, and the second keeps its real subject,
+  that a conversation is a dialogue with exactly one agent, while saying
+  that the name that agent is filed under can be rewritten and that the
+  dated columns beside it keep the name of the moment. The memory chain's
+  head becomes `2003_rename_moves_memory` and the conversation record's
+  `1003_rename_moves_ownership`. The agent descriptor's note, the two
+  memory docstrings, the server README's two orphaning passages and the
+  observability page's half sentence are corrected in the same change.
+
 ## 2026-09-05
 
 ### Added

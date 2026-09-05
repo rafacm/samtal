@@ -487,3 +487,115 @@ landing code refers to a decision rather than to a tracker.
 - The generated-document drift checks: clean. M2 touches no generated
   document; the census manifest is regenerated in the last commit of the
   milestone as always.
+
+## M3: the route, the boundary it announces, and the caveat it retires
+
+PR TBD.
+
+### What landed
+
+In the order the commits tell it: the sentence, the route that chooses
+it, the two column comments, and the pages the rename makes false.
+
+- **`config/entities.py` gains `RENAME_UNSERVED_NOTICE`,** the sixth,
+  for a rename that moved a device binding or the default agent with the
+  agent it renamed. Two boundaries at once, exactly as
+  `BINDING_UNSERVED_NOTICE`, and it cannot borrow that one: that
+  sentence is about one binding, written for the verb that writes one,
+  and a rename may have moved several bindings and the default agent,
+  none of which the operator just wrote. It names no command, per #386.
+  `tests/support/notices.py` gains it too, since that module is where a
+  printed sentence is mapped back to its boundaries.
+- **`config/api.py` gains `POST /agents/{name}/rename`,** with
+  `AgentRename` in `responses.py` as the body the document describes,
+  `_to` as the exact-shape parser beside the other three, `_renamed` as
+  the acknowledgement's line composer and `_rename_notice` as the
+  three-arm choice. The arm is read off `Renamed`'s own fields and never
+  off the loaded agents, which is the one place this differs from
+  `_binding_notice` and the reason it is a function of its own.
+- **`2003_rename_moves_memory` and `1003_rename_moves_ownership`,** one
+  column comment each, with `schema.py` moved in the same commit and the
+  chain heads moved in the four suites and the one CI step that pin
+  them. `docs/reference/conversations-schema.md` regenerates from the
+  second.
+- **The agent descriptor's note becomes three notes,** which moves
+  `docs/reference/domain-config.md`: what a rename moves, what it
+  refuses and why that refusal is what keeps the act reversible, and
+  what it leaves alone, the standing window included. The two
+  `memory/api.py` docstrings, the server README's two orphaning
+  passages and `docs/architecture/observability-surfaces.md`'s half
+  sentence move with it, and `docs/reference/api-openapi.json`
+  regenerates over both the route and those docstrings.
+- **`tests/unit/test_config_api_writes.py` gains the route's section,**
+  eleven cases plus the rename's row in the every-write parametrization
+  and its malformed-body table: the line composed from the rows rather
+  than from the request, two of the three boundary arms, the pin that
+  the arm is not chosen by what the server is serving, the 404, the
+  occupied destination's 409 with neither name in it, the same-name 422,
+  the reachable no-leak case, and the composer's strip over a planted
+  stored name. `tests/unit/test_config_snapshot_mode.py` carries the
+  third arm, because that arm is the mode's rather than the route's.
+
+### Deviations from the plan
+
+Two, one of them forced by a limit the plan could not have known about
+and one a placement.
+
+1. **The record migration is `1003_rename_moves_ownership`, not
+   `1003_rename_moves_thread_ownership`.** Alembic's
+   `alembic_version.version_num` is `varchar(32)` and the plan's
+   spelling is 34 characters, so the migration ran, altered the comment
+   and then failed on the stamp, which is its own last statement:
+   `value too long for type character varying(32)`. The shortened id
+   says what moved, a thread's ownership, and the migration's docstring
+   records the limit where the next author of one will read it. Nothing
+   else about the migration differs from the plan.
+
+2. **The third boundary arm is asserted in the snapshot-mode suite, not
+   beside the other two.** The plan says the three arms are asserted on
+   what the route answers in this milestone, and they are; what it does
+   not say is where. The store-boot arm is not a fact about a rename at
+   all, it is the answer every write in that mode gives, and
+   `test_config_snapshot_mode.py` already holds the case that walks the
+   writes it covers. Putting a second snapshot-mode fixture in the
+   writes suite would have been a second home for one decision. The
+   writes suite's section header names where the third one is.
+
+### Discoveries
+
+- **The contract suite needed a decision recorded for an operation with
+  no verb.** `test_api_contract.py` holds every operation the committed
+  document declares to be either covered by an `Act` or excluded with a
+  reason, and this milestone adds an operation whose verb is the next
+  one. So the exclusion table gains the row and says which milestone
+  takes it away, which is the closure working rather than an escape from
+  it: without the entry the suite fails, and with a stale one the
+  covered set silently widens.
+
+- **A no-echo assertion has to be made about a name that is not a word
+  of English.** The same-name refusal explains that names are compared
+  with the surrounding whitespace taken off, and `sam` is a substring of
+  "the same name", so a case built on the fixture's own agent passed for
+  the wrong reason. It runs on an agent called `gardener` instead.
+
+- **The strip on the line takes the userinfo whole.**
+  `without_url_credential` cuts at the last `@` rather than reassembling
+  the authority, so a planted `https://user:<secret>@host/agent` renders
+  as `https://host/agent` and not as `https://user@host/agent`. The
+  composer's pin asserts the whole line, so it records that rather than
+  only the absence.
+
+### Open questions the plan left, and what M3 answers
+
+None. The route's shape, its body, its answer and its three arms were
+all resolved in the plan; the verb, its `Act` and the end-to-end cases
+through the registered command are M4's.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: TBD.
+- `uv run pytest tests/integration -q`: TBD.
+- `scripts/check_doc_links.py .`: TBD.
+- `uv run mypy`: clean.
+- The generated-document drift checks: TBD.
