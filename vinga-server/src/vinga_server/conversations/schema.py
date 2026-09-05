@@ -285,11 +285,15 @@ conversations = Table(
         Text,
         nullable=False,
         comment=(
-            "The agent this thread belongs to, and the only one it will ever "
-            "have: a conversation is a dialogue with exactly one agent, so a "
-            "handover starts a second thread rather than moving this one. Not "
-            "null, unlike `sessions.agent` and `turns.agent`, because a thread "
-            "with no agent is not a thread."
+            "The agent this thread belongs to, and the only agent it will ever "
+            "belong to: a conversation is a dialogue with exactly one agent, so "
+            "a handover starts a second thread rather than moving this one. The "
+            "name is the one that agent has now rather than the one it had "
+            "then, because renaming an agent rewrites this column and is what "
+            "keeps the thread reachable; the dated columns beside it, "
+            "`sessions.agent` and `turns.agent`, keep the name of the moment "
+            "they record. Not null, unlike those two, because a thread with no "
+            "agent is not a thread."
         ),
     ),
     Column(
