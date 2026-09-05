@@ -342,3 +342,90 @@ module's.
   `vinga-server/README.md`, `config.example.yaml`,
   `CHANGELOG.md`, and the regenerated `domain-config.md`,
   `cli.md` and census manifest.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-05, against commit 3d587012 of this plan; the
+reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
+
+1. **P1: the compatibility pin cannot prove byte-identical bare
+   output.** The plan promises bare `reference` stays byte-identical
+   while the same milestone changes and regenerates its domain
+   preamble; the freshness test compares against the newly committed
+   page, not the pre-reshape output. Sequence explicitly: pin the
+   current bytes, add the selector proving bare output unchanged,
+   then make the preamble update a separate intentional content
+   change.
+
+2. **P2: the proposed child-process isolation test is impossible as
+   written.** Applying the models-only pin to
+   `vinga-server config reference server` cannot pass: importing
+   `config.cli` reaches `store.py` and therefore SQLAlchemy and
+   cryptography, which is recorded in `docgen.py`'s own docstring;
+   the existing isolation test imports `docgen` directly. Test
+   `server_reference.reference()` directly in a fresh interpreter
+   with an import allowlist and heavy-module denylist, and prove the
+   CLI command opens no database, reads no configuration file and
+   needs no key in a separate CLI-level test.
+
+3. **P2: the halves selector is three hand-maintained closed
+   sets.** The accepted names, the routing, the help and error
+   contents and the tests are each specified separately, and
+   "server to the new module and everything else through the
+   existing path" gives the default branch a catch-all. Introduce
+   one ordered mapping from `domain` and `server` to their
+   renderers; dispatch, help text and the fixed unknown-half refusal
+   derive from its keys, with no catch-all branch.
+
+4. **P2: `BOOT_REFUSALS` is checked only in the easy direction.**
+   The tests prove every registry member is rendered and raisable,
+   not that every cross-field validator sentence is registered; a
+   new validator refusal could be omitted from the page while all
+   tests pass. Require a bidirectional assertion: exercise every
+   cross-field validator branch and compare the emitted sentences
+   with the registry, then the registry with the rendered section.
+
+5. **P2: environment-variable facts remain duplicated and can drift
+   together.** The renderer and its test would name six variables
+   and a prefix as literals while the authoritative mapping is
+   `DATABASE_ENV_NAMES` in `loader.py` and `URL_ENV`/`PASSWORD_ENV`
+   in `db/__init__.py`; a loader rename would not fail a test
+   checking the old literals in the page. Move the inert
+   declarations to a safe configuration module and have the loader,
+   the database code, the renderer and the tests derive their
+   inventories from them; the renderer must not import the database
+   package to obtain them.
+
+6. **P2: the constraints test does not establish complete
+   coverage.** Two examples and a qualified sweep do not hold the
+   page to the issue's "every constraint", and nonempty-description
+   coverage cannot detect a description that omits or misstates a
+   validator rule. Require every `FieldInfo.metadata` bound to
+   appear in its field's scoped row, plus one semantic rendering
+   assertion per validator-enforced rule: environment-name shape,
+   onboarding-key shape, log levels, all OTA-path restrictions, and
+   both URL contracts.
+
+7. **P2: the field-coverage test can pass on duplicate leaf
+   names.** The cited domain test checks unscoped row names, and
+   the server models repeat `enabled`, `port` and `max_session_s`,
+   so one rendered row could mask a missing row elsewhere. Parse or
+   delimit each section and assert its exact reflected field
+   sequence there, and assert the reflected model-section inventory
+   so a missing nested section cannot hide behind another's rows.
+
+8. **P2: M1 depends on an interface not made public until M2.** The
+   M1 coverage test must walk the model graph, but the promotion of
+   `_nested_model` is assigned to M2, so the test as planned is an
+   underscore reach-in. Promote the reflection helper in M1, or
+   reuse the existing public walker, or specify another public
+   model-graph interface.
+
+9. **P3: the stated regenerate command uses the wrong constant.**
+   The plan says the header renders `vinga-server config reference
+   server` using `PROGRAM`, but `PROGRAM` is `vinga`; the long
+   spelling is `SERVER_PROGRAM`. Generate the canonical short form
+   with `PROGRAM`, consistent with the existing generated documents,
+   or explicitly use `SERVER_PROGRAM` and say why this page is the
+   exception.
