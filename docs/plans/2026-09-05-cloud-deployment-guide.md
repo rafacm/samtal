@@ -156,12 +156,17 @@ memory.
   tmpfs), `/data` from the PVC, env
   from the Secret and a plain ConfigMap-free env section for the
   `VINGA_DB_*` facts, and a pod security context that makes the PVC
-  writable by the image's non-root user: `runAsNonRoot`,
-  `runAsUser: 1000` and `runAsGroup: 1000` matching the Dockerfile's
-  `vinga` user, `fsGroup: 1000` with
-  `fsGroupChangePolicy: OnRootMismatch` so a freshly provisioned
-  root-owned volume is handed over before the engines try to cache
-  into it), `service.yaml`, `ingress.yaml` (above),
+  writable by the image's non-root user: `runAsNonRoot` and
+  `runAsUser: 1000` matching the Dockerfile's `useradd --uid 1000`,
+  which is the one identity fact the Dockerfile establishes and the
+  only one the agreement test asserts against it; `runAsGroup: 1000`
+  and `fsGroup: 1000` are the manifest's own declared contract, with
+  the comment saying `fsGroup` is the mechanism that makes the
+  volume writable whatever the image's exact group id, since it is
+  applied to the volume and joins the process's supplementary
+  groups, and `fsGroupChangePolicy: OnRootMismatch` hands over a
+  freshly provisioned root-owned volume before the engines try to
+  cache into it), `service.yaml`, `ingress.yaml` (above),
   `pvc.yaml` (RWO), `secret.yaml.example` (the Deployment's Secret:
   the two server secrets plus `VINGA_DB_PASSWORD`; the `.example`
   suffix is load-bearing, since a `.yaml` template rides along on
@@ -572,3 +577,9 @@ new P1 amendments and one P2, all inside the amended territory.
    establish.** The Dockerfile sets only `--uid 1000`; either make
    the group contract explicit in the image or limit the assertion
    to the UID and document the group mechanism separately.
+
+   *Resolution*: accepted, second option. Only the UID is asserted
+   against the Dockerfile; the group and `fsGroup` values are the
+   manifest's own declared contract, with `fsGroup`'s
+   supplementary-group mechanism documented as what makes the
+   volume writable whatever the image's exact group id.
