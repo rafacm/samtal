@@ -107,6 +107,12 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
         # None: an application built without a server around it has no
         # deployment to describe, and the identity read refuses.
         "identity": None,
+        # And whether the server around this application serves a
+        # configuration it was handed rather than one it read. False is
+        # the ordinary deployment and is what every suite here drives; a
+        # test puts True here to reach the answer a write gives when
+        # nothing running reads what was written.
+        "snapshot_only": False,
     }
     # Every client the entry point built, kept so a test can read the
     # timeouts a command chose after it has run.
@@ -153,6 +159,7 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
             reload=runtime["reload"],
             agent_prompt=runtime["agent_prompt"],
             identity=runtime["identity"],
+            snapshot_only=bool(runtime["snapshot_only"]),
         )
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the
