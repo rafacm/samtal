@@ -183,8 +183,10 @@ session's own [world] when the current world has never heard of this
 agent, which is exactly the state an apply that deleted it leaves
 behind" (#191). A rename looks like exactly that to a live session, so
 it lands on a path that exists: the session goes on talking as the old
-name, and its `switch_agent` list keeps working. Two consequences are
-stated rather than fixed, under [the two windows](#the-two-windows).
+name, and its `switch_agent` list keeps working. What that costs, and
+what has to be done about the writers behind such a session, is
+[the order that covers them](#the-sessions-in-flight-and-the-order-that-covers-them)
+and [the window that stays](#the-window-that-stays).
 
 **Nothing else addresses an agent by name.** The simulator addresses a
 board and lets the binding resolve (`grep -rn "agent" src/vinga_server/simulator/*.py`
@@ -756,7 +758,8 @@ hand:**
 state the orphaning as a standing fact, at `:855-857` (the listings
 answer owners nothing is configured under, "renaming an agent orphans
 what it remembered") and at `:3159-3161` (the memory is the one thing an
-apply does not move). Both become false at M2 and are rewritten there.
+apply does not move). Both become false in this milestone and are
+rewritten in it.
 `docs/architecture/observability-surfaces.md:37` carries the same claim
 in half a sentence and moves with them.
 
@@ -965,11 +968,24 @@ Reusing the assets that exist wherever the assertion already has a home.
   compatibility promise is untouched.
 - **The census manifest stales on this plan's own files.** It does,
   every time; regenerate through its module before the unit lane.
-- **The two windows leave orphans nothing sweeps.** The memory sweep
-  takes conversation-state orphans, not agent ones (`memory/store.py:150-155`,
-  `schema.py:217`), so a fact written under the old name in the window
-  stays until an operator deletes it. Stated in the docs the rename
-  rewrites, and the listing is where it shows.
+- **The window that stays leaves orphans nothing sweeps.** The memory
+  sweep takes conversation-state orphans, not agent ones
+  (`memory/store.py:150-155`, `schema.py:217`), so a fact a live session
+  writes under the old name stays until an operator deletes it. Stated
+  in the docs the rename rewrites, and the listing is where it shows.
+- **The in-flight protocol is process-local, and the break-glass door is
+  outside it.** A rename typed through the local door against a database
+  a running server is using is not ordered against that server's writer,
+  because the order and the register are objects in one process, exactly
+  as the erasure's are. Mitigated by what that door is for, a deployment
+  whose server will not start, and stated where the protocol is
+  described rather than left to be discovered by whoever tries it.
+- **The translation is a second place a name is interpreted**, and it
+  earns that by closing a data loss rather than a cosmetic mismatch. The
+  bound is written into the design: one map, in the object that already
+  subscribes to a store change, applied at the one boundary where a name
+  enters the record, and composed on insert so a chain of renames never
+  becomes a walk.
 
 ## The standing lenses, answered
 
@@ -1000,7 +1016,11 @@ where it is enforced rather than asserting it.
   function. No store holds a reference to another, no shared mutable
   object crosses, and the caller owns the transaction. The result type is
   the seam back: what the write did travels as fields rather than being
-  recovered by re-reading the store.
+  recovered by re-reading the store. The second crossing, into the
+  writers this process is holding, is the erasure's published fact
+  carrying a different one: announced after the commit and inside the
+  order, and read by a holder that decides for itself what it means for
+  a row already on its way.
 - **Tooling-backed inventories.** The domain half's references are
   `check_references`'s own walk rather than a list in this plan; the
   tables are read off the three metadata objects; the live-versus-record
@@ -1010,9 +1030,10 @@ where it is enforced rather than asserting it.
   that is worth is bounded and the plan says so: it is a claim about
   values a fixture wrote, not a claim that the schema can name its own
   agent references.
-- **Pin before reshape.** M1 adds behavior behind no reachable surface
-  and pins it whole, including atomicity and reversibility, before M2
-  gives it a door. The documents that describe the old behavior are
+- **Pin before reshape.** M1 and M2 add behavior behind no reachable
+  surface and pin it whole, the transaction and then the protocol,
+  including atomicity, reversibility and the forced interleavings,
+  before M3 gives any of it a door. The documents that describe the old behavior are
   corrected in the milestone that makes them false, and the one
   committed artifact that would otherwise drift silently, the column
   comment, moves through a migration that a merged test already holds.
