@@ -66,9 +66,18 @@ documentation-process artifact: what it pins is what the
 documentation was read against, not anything the server executes.
 
 **The workflow diffs both distances, weekly, and writes one issue.**
-`.github/workflows/upstream-drift.yml`, `schedule` (Mondays 06:17
-UTC, an off-peak minute so the run does not land on the hour) plus
-`workflow_dispatch` for on-demand runs. For each repository in the
+`.github/workflows/upstream-drift.yml`, three triggers: `schedule`
+(Mondays 06:17 UTC, an off-peak minute so the run does not land on
+the hour), `workflow_dispatch` with a `dry_run` input defaulting to
+false, and `pull_request` restricted by a paths filter to the
+workflow file itself, the manifest and the script, always forced
+into dry-run mode. The third trigger exists because GitHub accepts
+`workflow_dispatch` only for a workflow already on the default
+branch, so a new workflow's pre-merge evidence has to come from a
+trigger the PR itself fires; it also means every future PR touching
+the watch gets a free end-to-end dry run. Dry-run mode does
+everything but write: clone, resolve, diff, build the report, and
+print it to the step summary instead of touching the tracker. For each repository in the
 manifest: a blobless clone (`--filter=blob:none`, full history, no
 checkout), resolve `origin/HEAD` and the latest release tag (highest
 `v*` tag by version sort; the firmware repo tags releases, and a
@@ -151,17 +160,18 @@ record that owns the reasoning) rather than a promise change.
   directions locally before the PR: the committed state passes, and
   a mutated SHA in a copied-aside manifest fails naming the
   repository.
-- The drift workflow cannot run on a PR (it is schedule and dispatch
-  only), so M1's PR carries a `workflow_dispatch` run against the
-  branch as evidence: one honest full run, expected to report drift
-  (the pins are from July and upstream has moved), whose issue
-  creation is pointed at a dry-run mode for the evidence run
-  (`--dry-run` input: print the would-be body to the step summary
-  instead of touching the tracker), so the evidence run writes no
-  issue while proving clone, resolve, diff and report end to end.
+- Pre-merge end-to-end evidence is the PR's own dry-run job: the
+  `pull_request` trigger fires on the PR because the diff touches
+  the workflow, the manifest and the script, and its run proves
+  clone, resolve, diff and report construction against live
+  upstream without writing anything. A `workflow_dispatch` before
+  merge is impossible for a new workflow (the file must be on the
+  default branch), which is exactly why the PR trigger exists. What
+  live upstream proves is whichever branch is live that week; the
+  deterministic branches are the synthetic-repository tests below.
   The first real scheduled run after merge is expected to open the
-  drift issue, and that is the feature working, not a surprise;
-  the M1 record says so.
+  drift issue if the watched paths moved since July, and that is
+  the feature working, not a surprise; the M1 record says so.
 - The census sweeps new files for quoted command spellings; the
   manifest regenerates the standard way when stale.
 - Link checker covers the new notes paragraph and the ADR's links.
