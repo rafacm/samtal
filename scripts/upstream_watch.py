@@ -38,6 +38,33 @@ two files side by side. Repository names are themselves held to
 `owner/name` before they are printed, so a mangled manifest cannot
 turn a failure line into an echo of arbitrary text.
 
+Every failure leaves through one door, `Refusal`, whose message is
+always a fixed sentence assembled from literals and already-validated
+identifiers. Three consequences worth stating, because each was a real
+hole:
+
+- The argument parser does not answer a bad invocation in argparse's
+  own words. Argparse repeats what was typed ("unrecognized arguments:
+  ..."), and a secret typed as an argument would land in a public
+  Actions log. `_FixedMessageParser` answers with a usage line of this
+  module's own instead.
+- Bytes are decoded under a stated policy rather than by accident.
+  Files this repository owns (the manifest, the notes, the issues JSON,
+  the report) are decoded strictly, and undecodable input is a refusal,
+  because a document of ours that is not UTF-8 is a fault to fix.
+  Upstream's own bytes (git's stdout) are decoded with
+  `errors="replace"`, because a subject in some other encoding is not a
+  reason to refuse to report drift. That is safe here and only here:
+  U+FFFD is not a backtick, a newline, a tab or a `#`, so a replaced
+  byte can neither close a fence early nor forge a heading, a row or a
+  name-status separator. It can make a subject less legible, which is
+  what "go and read the source" is for.
+- A refusal is raised after its `except` arm, never inside it, which
+  is the discipline `vinga_server.config.cli` states at length: an
+  exception raised while another is being handled carries the handled
+  one on `__context__` for anything walking the chain, and
+  `from None` suppresses the traceback rather than the chain.
+
 Shell discipline: every git and subprocess call goes out as an
 argument list, never through a shell. Upstream commit subjects and
 file paths reach the report as file content, so nothing upstream
@@ -50,6 +77,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 
@@ -78,9 +106,72 @@ TABLE_ROW_RE = re.compile(
     r"^\|\s*\[([^\]]*)\]\([^)]*\)\s*\|\s*`([^`]*)`\s*\|\s*([^|]*?)\s*\|\s*$"
 )
 
+USAGE = (
+    "usage: upstream_watch.py {check|print|report|decide} [options]\n"
+    "the arguments were not understood; see the module docstring"
+)
 
-class ManifestError(Exception):
-    """The manifest is not usable. The message is a fixed sentence."""
+
+class Refusal(Exception):
+    """A refusal. Its message is always a fixed sentence."""
+
+
+class _FixedMessageParser(argparse.ArgumentParser):
+    """An argument parser that never repeats what was typed.
+
+    Argparse's own error path prints the offending arguments verbatim.
+    This workflow's logs are public and its arguments are paths, so the
+    parser answers with its own usage line and nothing else.
+    """
+
+    def error(self, message: str) -> None:
+        print(USAGE, file=sys.stderr)
+        raise SystemExit(2)
+
+
+class GitResult(NamedTuple):
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def decode_upstream(raw: bytes) -> str:
+    """Upstream's bytes, made printable without letting them forge structure.
+
+    See the module docstring for why `replace` is the right policy on
+    this side of the boundary and the wrong one on the other.
+    """
+    return raw.decode("utf-8", errors="replace")
+
+
+def read_ours(path: Path, what: str) -> str:
+    """A document this repository owns, decoded strictly.
+
+    `what` is a noun phrase literal from the call site, never
+    anything read.
+    """
+    problem = None
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        problem = f"{what} could not be read"
+    if problem is not None:
+        raise Refusal(problem)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        problem = f"{what} could not be decoded as UTF-8"
+    raise Refusal(problem)
+
+
+def write_output(path: Path, text: str) -> None:
+    problem = None
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        problem = "the report could not be written to the given output path"
+    if problem is not None:
+        raise Refusal(problem)
 
 
 def safe_name(name: str) -> str:
@@ -102,36 +193,38 @@ def load_manifest(path: Path) -> list:
     Every ordering downstream is this one, so two runs over the same
     manifest produce byte-identical output.
     """
+    text = read_ours(path, "the manifest")
+    problem = None
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except OSError:
-        raise ManifestError("the manifest could not be read") from None
+        raw = yaml.safe_load(text)
     except yaml.YAMLError:
-        raise ManifestError("the manifest is not valid YAML") from None
+        problem = "the manifest is not valid YAML"
+    if problem is not None:
+        raise Refusal(problem)
     if not isinstance(raw, dict) or not isinstance(raw.get("repositories"), list):
-        raise ManifestError("the manifest has no repositories list")
+        raise Refusal("the manifest has no repositories list")
     rows = []
     for entry in raw["repositories"]:
         if not isinstance(entry, dict):
-            raise ManifestError("a manifest entry is not a mapping")
+            raise Refusal("a manifest entry is not a mapping")
         name = entry.get("repository")
         url = entry.get("url")
         pinned = entry.get("pinned")
         read = entry.get("read")
         paths = entry.get("paths")
         if not isinstance(name, str) or not REPO_NAME_RE.match(name):
-            raise ManifestError("a manifest entry has no owner/name repository")
+            raise Refusal("a manifest entry has no owner/name repository")
         if not isinstance(url, str) or not url.startswith("https://"):
-            raise ManifestError(f"{name}: the manifest url is not an https URL")
+            raise Refusal(f"{name}: the manifest url is not an https URL")
         if not isinstance(pinned, str) or not SHA_RE.match(pinned):
-            raise ManifestError(f"{name}: the manifest pin is not a full commit")
+            raise Refusal(f"{name}: the manifest pin is not a full commit")
         if not isinstance(read, str) or not DATE_RE.match(read):
-            raise ManifestError(f"{name}: the manifest read date is not YYYY-MM-DD")
+            raise Refusal(f"{name}: the manifest read date is not YYYY-MM-DD")
         if not isinstance(paths, list) or not paths:
-            raise ManifestError(f"{name}: the manifest entry lists no paths")
+            raise Refusal(f"{name}: the manifest entry lists no paths")
         for p in paths:
             if not isinstance(p, str) or not p or p.startswith("-"):
-                raise ManifestError(f"{name}: a watched path is not usable")
+                raise Refusal(f"{name}: a watched path is not usable")
         rows.append(
             {
                 "repository": name,
@@ -142,7 +235,7 @@ def load_manifest(path: Path) -> list:
             }
         )
     if not rows:
-        raise ManifestError("the manifest lists no repositories")
+        raise Refusal("the manifest lists no repositories")
     return rows
 
 
@@ -153,21 +246,17 @@ def table_rows(path: Path) -> list:
     currency table's, so prose above and below it is not table content
     and a second table on the page is not this one.
     """
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        raise ManifestError("the notes could not be read") from None
-    try:
-        start = lines.index(TABLE_HEADER)
-    except ValueError:
-        raise ManifestError("the notes have no upstream currency table") from None
+    lines = read_ours(path, "the notes").splitlines()
+    if TABLE_HEADER not in lines:
+        raise Refusal("the notes have no upstream currency table")
+    start = lines.index(TABLE_HEADER)
     rows = []
     for line in lines[start + 2 :]:
         if not line.startswith("|"):
             break
         m = TABLE_ROW_RE.match(line)
         if not m:
-            raise ManifestError("a currency table row is not in the expected shape")
+            raise Refusal("a currency table row is not in the expected shape")
         rows.append(
             {
                 "repository": m.group(1).strip(),
@@ -176,7 +265,7 @@ def table_rows(path: Path) -> list:
             }
         )
     if not rows:
-        raise ManifestError("the notes' upstream currency table has no rows")
+        raise Refusal("the notes' upstream currency table has no rows")
     return rows
 
 
@@ -192,12 +281,8 @@ def duplicates(names: list) -> list:
 
 def cmd_check(args) -> int:
     """Manifest and currency table agree, in both directions."""
-    try:
-        manifest = load_manifest(args.manifest)
-        notes = table_rows(args.notes)
-    except ManifestError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+    manifest = load_manifest(args.manifest)
+    notes = table_rows(args.notes)
 
     failures = 0
 
@@ -240,23 +325,30 @@ def cmd_check(args) -> int:
 
 def cmd_print(args) -> int:
     """One `<directory> <url>` row per repository, for the clone loop."""
-    try:
-        manifest = load_manifest(args.manifest)
-    except ManifestError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    for row in manifest:
+    for row in load_manifest(args.manifest):
         print(f"{clone_dir(row['repository'])} {row['url']}")
     return 0
 
 
-def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    """A git call as an argument list. Never a shell, ever."""
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True,
-        text=True,
-        check=False,
+def git(repo: Path, *args: str) -> GitResult:
+    """A git call as an argument list. Never a shell, ever.
+
+    Both streams are captured. git quotes what it was given back at you
+    on failure, and this runs in a public log.
+    """
+    problem = None
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        problem = "git could not be run"
+    if problem is not None:
+        raise Refusal(problem)
+    return GitResult(
+        done.returncode, decode_upstream(done.stdout), decode_upstream(done.stderr)
     )
 
 
@@ -295,11 +387,7 @@ def block(text: str) -> str:
 
 def cmd_report(args) -> int:
     """Build the drift report, or write an empty file when nothing moved."""
-    try:
-        manifest = load_manifest(args.manifest)
-    except ManifestError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+    manifest = load_manifest(args.manifest)
 
     clones = args.clones
     if not clones.is_dir():
@@ -318,8 +406,12 @@ def cmd_report(args) -> int:
             print(f"{name}: no clone was found for this repository", file=sys.stderr)
             invalid += 1
             continue
-        if git(repo, "rev-parse", "--verify", "--quiet", row["pinned"] + "^{commit}").returncode:
-            print(f"{name}: the pinned commit does not resolve in its clone", file=sys.stderr)
+        pin = git(repo, "rev-parse", "--verify", "--quiet", row["pinned"] + "^{commit}")
+        if pin.returncode:
+            print(
+                f"{name}: the pinned commit does not resolve in its clone",
+                file=sys.stderr,
+            )
             invalid += 1
             continue
         head = git(repo, "rev-parse", "--verify", "--quiet", "origin/HEAD")
@@ -336,9 +428,7 @@ def cmd_report(args) -> int:
     for row, repo, head_sha in resolved:
         name = safe_name(row["repository"])
         lines = [f"## {name}", ""]
-        lines.append(
-            f"Pinned at `{row['pinned']}`, read {row['read']}."
-        )
+        lines.append(f"Pinned at `{row['pinned']}`, read {row['read']}.")
         lines.append("")
 
         targets = [("upstream HEAD", "origin/HEAD", head_sha)]
@@ -379,9 +469,7 @@ def cmd_report(args) -> int:
                 continue
 
             span = f"{row['pinned']}..{sha}"
-            names = git(
-                repo, "diff", "--name-status", span, "--", *row["paths"]
-            )
+            names = git(repo, "diff", "--name-status", span, "--", *row["paths"])
             log = git(repo, "log", "--oneline", span, "--", *row["paths"])
             if names.returncode != 0 or log.returncode != 0:
                 print(f"{name}: git could not diff the watched paths", file=sys.stderr)
@@ -405,7 +493,7 @@ def cmd_report(args) -> int:
         sections.append("\n".join(lines).rstrip() + "\n")
 
     if not news:
-        args.output.write_text("", encoding="utf-8")
+        write_output(args.output, "")
         print("no watched upstream path moved")
         return 0
 
@@ -435,28 +523,24 @@ def cmd_report(args) -> int:
             "",
         ]
     )
-    args.output.write_text("\n".join(body), encoding="utf-8")
+    write_output(args.output, "\n".join(body))
     print("wrote a drift report")
     return 0
 
 
 def cmd_decide(args) -> int:
     """create, update <number>, or a refusal naming the ambiguity."""
-    try:
-        report = args.report.read_text(encoding="utf-8")
-    except OSError:
-        print("the report file could not be read", file=sys.stderr)
-        return 2
-    if not report.strip():
+    if not read_ours(args.report, "the report file").strip():
         print("the report is empty, so there is nothing to write", file=sys.stderr)
         return 2
+    text = read_ours(args.issues, "the issues file")
+    problem = None
     try:
-        issues = json.loads(args.issues.read_text(encoding="utf-8"))
-    except OSError:
-        print("the issues file could not be read", file=sys.stderr)
-        return 2
+        issues = json.loads(text)
     except json.JSONDecodeError:
-        print("the issues file is not valid JSON", file=sys.stderr)
+        problem = "the issues file is not valid JSON"
+    if problem is not None:
+        print(problem, file=sys.stderr)
         return 2
     if not isinstance(issues, list):
         print("the issues file is not a list of issues", file=sys.stderr)
@@ -471,7 +555,7 @@ def cmd_decide(args) -> int:
         if not isinstance(issue, dict):
             continue
         number = issue.get("number")
-        if not isinstance(number, int):
+        if not isinstance(number, int) or isinstance(number, bool):
             continue
         if issue.get("title") != ISSUE_TITLE:
             continue
@@ -495,12 +579,14 @@ def cmd_decide(args) -> int:
     return 0
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
+def build_parser() -> argparse.ArgumentParser:
+    parser = _FixedMessageParser(
         prog="upstream_watch.py",
         description="The upstream wire-contract drift watch.",
     )
-    subs = parser.add_subparsers(dest="command", required=True)
+    subs = parser.add_subparsers(
+        dest="command", required=True, parser_class=_FixedMessageParser
+    )
 
     check = subs.add_parser("check", help="manifest and notes agree")
     check.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -522,8 +608,27 @@ def main(argv=None) -> int:
     decide.add_argument("--issues", type=Path, required=True)
     decide.set_defaults(func=cmd_decide)
 
-    args = parser.parse_args(argv)
-    return args.func(args)
+    return parser
+
+
+def main(argv=None) -> int:
+    """The one exception boundary.
+
+    Everything below raises `Refusal` and nothing else escapes as a
+    traceback: a traceback would print the local variables' repr for
+    anything reading the log, and those locals are the very documents
+    this module refuses to echo.
+    """
+    args = build_parser().parse_args(argv)
+    problem = None
+    try:
+        return args.func(args)
+    except Refusal as exc:
+        problem = str(exc)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        problem = "the drift watch failed while reading or running something"
+    print(problem, file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
