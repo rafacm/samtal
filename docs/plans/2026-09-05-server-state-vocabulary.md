@@ -591,7 +591,7 @@ Reusing what exists wherever the assertion already has a home.
   `vinga-server/tests/unit/command-spellings.txt` regenerates through
   its own module; `CHANGELOG.md`, a dated execution record, gains the
   entry.
-- [ ] **M2: the sentence states, the client advises.** `APPLY_NOTICE`
+- [x] **[M2: the sentence states, the client advises](2026-09-05-server-state-vocabulary-implementation.md#m2-the-sentence-states-the-client-advises)** (PR TBD). `APPLY_NOTICE`
   and `BINDING_UNSERVED_NOTICE` lose their command halves and state
   only what is true of the write; `cli.py` gains the table holding this
   client's sentence per boundary set, and `DIFF_INTRO` is rebuilt from
@@ -608,7 +608,8 @@ Reusing what exists wherever the assertion already has a home.
   regenerated for them; the licensed substitution and the amended
   docstring in
   `test_config_cli_respelling.py`; the follow-up issue for class (a)'s
-  five refusals is filed; a CHANGELOG `Changed` entry; the
+  five refusals (number substituted when filed); a CHANGELOG `Changed`
+  entry; the
   implementation-doc section. Behavior changes sit alone in this
   review. Design footprint: no new module; the seam that changes is the
   acknowledgement's, which now crosses as a token rather than as a

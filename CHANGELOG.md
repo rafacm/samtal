@@ -129,6 +129,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A write's acknowledgement states the boundary, and the CLI names
+  the command.** The two sentences that named one no longer do: a write
+  to the domain half now says it is stored and not yet serving, and a
+  binding whose agent this server is not serving yet says the agent
+  arrives with the install that adds it. The commands moved to the side
+  that owns the grammar. The CLI reads the `applies` tokens beside the
+  sentence and prints its own advice under it, from one table keyed by
+  the boundary set, so `vinga apply` and `vinga diff` are spelled where
+  a rename of either fails a test in the same checkout rather than
+  reaching an operator through an image built before it. A boundary
+  this client cannot name, which is what a set from a newer server
+  arrives as, prints the server's sentence alone: an unknown state is
+  quoted, never guessed at. An import deduplicates on the boundary set
+  where there is one and on the sentence where there is not, so nine
+  entities waiting on one apply are advised once while two entries from
+  a server older than the vocabulary keep both their sentences. The
+  served contract follows: `AppliedEntry.notice` describes a reader's
+  sentence and directs a program to `applies`. What no longer changes
+  is what an operator reads: the same two commands are printed, by the
+  half that has them.
+
 - **vinga has a face.** The README header's generated illustration
   gives way to a drawn mark: a white rounded V with dark oval eyes
   and an open smiling mouth with a lilac tongue, on an orchid-purple

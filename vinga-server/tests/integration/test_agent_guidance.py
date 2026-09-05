@@ -30,8 +30,9 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
 from tests.support.mcp_stdio_server import SHIPPED_ENV, SHIPPED_INSTRUCTIONS
+from tests.support.notices import RELOAD, boundaries
 from vinga_server.config import Config
-from vinga_server.config.models import API_MOUNT_PATH, PROGRAM
+from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.memory.store import MemoryScope
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -362,7 +363,11 @@ async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it
             "/prompt-fragments/household", json={"text": REWRITTEN}
         )
         assert written.status_code == 200, written.text
-        assert f"{PROGRAM} apply" in written.json()["notice"]
+        # The write says which boundary it is waiting at, in the token
+        # the comparison below answers with: one closed vocabulary for
+        # both, and no command in either, since which command crosses a
+        # boundary is the client's to say (#386).
+        assert boundaries(written.json()) == {RELOAD}
 
         # Written and not installed: this server is still serving the
         # fragment it started with, and the comparison says so under the
