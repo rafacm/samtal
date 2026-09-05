@@ -246,3 +246,82 @@ rerun so the new annotation is schema-checked (5 valid, plus 1 each for
 the templates); and the extracted compose step body rerun, with a
 `VINGA_DB_URL` planted in the temporary env file confirmed not to reach
 the rendered config with a value.
+
+## M2: the guide and the convention
+
+Delivered as planned: `docs/deployment.md`, the AGENTS.md convention
+narrowing, the `docs/README.md` authority listing and Start here
+pointer, the server README and root README cross-links, M2's CHANGELOG
+entries, and the census manifest regenerated with the new page tracked.
+
+### Deviations from the plan
+
+**One, and it is about a file that is not in this branch's tree yet.**
+Decision 7 says configuration links go to
+`docs/reference/server-config.md`, #396's generated page. That page
+lands with #396 M2, whose PR (#401) was still open when this milestone
+was written, so the file does not exist on this branch. A markdown link
+to it would fail `scripts/check_doc_links.py`, which resolves every
+relative target and is the docs workflow's first step, and this
+milestone's diff runs that workflow.
+
+So the guide names the page as an inline code path,
+`docs/reference/server-config.md`, twice: once in the head, saying
+where "what can be configured" lives, and once in the `/data` sizing
+section, saying that
+the capture budget's keys and defaults are there rather than repeated in
+prose. The decision's substance is kept, which is that the guide points
+at that page instead of restating keys; only the link is deferred.
+
+**The fallback to `config.example.yaml` was deliberately not taken.**
+The plan permits it only if #396 M2 does not land first, and `gh pr view
+401` reported the PR open rather than closed or failed, so the page is
+still expected ahead of this one. Turning the two code paths into
+markdown links is a one-line edit per site once #396 M2 is on `main`.
+
+### Decisions taken inside the plan's latitude
+
+- **The contract is nine rows rather than the seven facts the plan
+  lists.** The plan names port, the two probes, SIGTERM with `drain_s`,
+  the read-only rootfs plus tmpfs, the two env secrets, the five
+  `VINGA_DB_*` variables and migrations on boot. The table splits the
+  probes into two rows, because they are answered by two different
+  README sentences and pointed at two different orchestrator slots, and
+  it adds a row for the proxy wiring (`websocket_url`, `public_url`,
+  `FORWARDED_ALLOW_IPS`), because both lanes are behind TLS termination
+  and getting it wrong is the failure the guide is most likely to be
+  read after.
+- **The apply order is written as explicit paths, not
+  `kubectl apply -f deploy/k8s/`.** A directory apply creates the
+  Deployment and the provisioning Job together, and on a fresh database
+  that boots a server against schemas that do not exist yet. The
+  ordered form applies the PVC, runs the init transaction, then applies
+  deployment, service and ingress; the guide then says the directory
+  form is what a rerun looks like once the deployment exists, and why it
+  is safe (the templates are outside the glob, a completed Job is not
+  rerun by being applied again).
+- **`vinga-server doctor` is run through `kubectl exec` rather than a
+  port forward.** It answers what the OTA endpoint hands a board, which
+  is derived from the server's own configuration, so running it where
+  the server is, is what makes the answer the board's answer. The
+  compose spelling is given beside it.
+- **The verification section ends at the existing onboarding
+  documentation rather than restating it.** Three checks (both probes,
+  the doctor, a board), and the third is a paragraph of links: what a
+  deployment changes about onboarding is only which URL comes out, which
+  is what the second check already covers.
+
+### Verification
+
+- `python3 scripts/check_doc_links.py .`: 197 files, 0 failures. Every
+  anchor the guide links into the server README, the project README and
+  the two ADRs resolves.
+- `uv run ruff check .`: clean, and unchanged, since M2 touches no
+  Python.
+- `uv run pytest tests/unit/test_deploy_manifests.py
+  tests/unit/test_command_spellings.py -q`: green.
+- The census manifest regenerated after the new page was tracked, in
+  the same commit as the last documentation edit.
+- The full unit lane was deliberately not run: M2 is a documentation
+  diff, and the two suites above plus the link checker are what it can
+  actually stale.
