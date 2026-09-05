@@ -3198,10 +3198,19 @@ def defined(what: str, names: Collection[str]) -> str:
     were written by this deployment. One helper because five refusals
     say it and a fifth spelling would be a fifth shape for one fact.
 
+    Written by this deployment is not the same as written under today's
+    rules. A stored name can predate the addressability rule and carry a
+    credential, and this sentence travels out as a CLI line, an HTTP 422
+    body and a boot log, so each name leaves through the door every
+    display of a stored identity leaves through (#381). Sorted on the
+    name as it is STORED and shortened afterwards, for the reason
+    `views._shown_mapping` gives: sorting after the strip would let what
+    a name hides decide where it appears.
     """
-    return (
-        f" (defined: {', '.join(sorted(names))})" if names else f"; no {what} are defined"
-    )
+    if not names:
+        return f"; no {what} are defined"
+    shown = ", ".join(without_url_credential(name) for name in sorted(names))
+    return f" (defined: {shown})"
 
 
 def check_references(snapshot: DomainSnapshot) -> list[str]:
@@ -3251,8 +3260,16 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     # Each layer's own references are checked where they are written,
     # so a wrong default is reported once as agent_defaults.llm rather
     # than once per agent that inherits it.
+    #
+    # The agent's own name is the location here, which is the store's
+    # vocabulary and stays (#382); what a name written before the
+    # addressability rule can carry does not, so it leaves through the
+    # same door a display of an identity leaves through (#381).
     sources: list[tuple[str, AgentDefaults]] = [("agent_defaults", snapshot.agent_defaults)]
-    sources += [(f"agents.{name}", agent) for name, agent in snapshot.agents.items()]
+    sources += [
+        (f"agents.{without_url_credential(name)}", agent)
+        for name, agent in snapshot.agents.items()
+    ]
     for source, layer in sources:
         for stage in PROVIDER_STAGES:
             ref = getattr(layer, stage)
@@ -3310,7 +3327,11 @@ def check_completeness(snapshot: DomainSnapshot) -> list[str]:
     if snapshot.agents and snapshot.default_agent is None and not snapshot.devices:
         problems.append(
             "default_agent is required when agents are defined and no device is "
-            "bound to one; set it to one of: " + ", ".join(sorted(snapshot.agents))
+            "bound to one; set it to one of: "
+            # The names this deployment stored, through the door
+            # `defined` above sends the same list through and for the
+            # same reason.
+            + ", ".join(without_url_credential(name) for name in sorted(snapshot.agents))
         )
 
     return problems

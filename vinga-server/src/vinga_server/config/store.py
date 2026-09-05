@@ -77,6 +77,7 @@ from vinga_server.config.models import (
     safe_location,
     url_credential,
     validation_problems,
+    without_url_credential,
 )
 from vinga_server.config.provider_options import (
     OptionsRefused,
@@ -941,8 +942,20 @@ def _missing(descriptor: EntityDescriptor) -> str:
 def _location(descriptor: EntityDescriptor, *identity: str) -> str:
     """Where an entry is written in the configuration document, which is
     what every refusal about it names: the section it lives in, and the
-    parameters that address one entry under it."""
-    return ".".join((descriptor.moved_key, *identity))
+    parameters that address one entry under it.
+
+    Through the door every display of a stored identity goes through
+    (#381), which costs a write nothing and is what a READ needs. A name
+    reaches this on the write path only after the addressability check
+    has passed it, and a name carrying a URL credential holds a slash,
+    so there is nothing left for the strip to take. A name reaches it on
+    the read path from the database, where a row written before that
+    rule still sits: `agents.<name>: the row cannot be read` is a
+    sentence composed over stored state and printed by a boot, and it
+    was the one identity-speaking refusal with no strip on it (#382).
+    """
+    shown = (without_url_credential(part) for part in identity)
+    return ".".join((descriptor.moved_key, *shown))
 
 
 def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
