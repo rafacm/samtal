@@ -771,10 +771,23 @@ class ServerConfig(BaseModel):
     beats file beats these defaults. The `database` section is the one
     recorded exception, with four short spellings of its own.
 
-    No secret is ever written here. A key that carries one names the
-    environment variable holding it instead, and the two values that are
+    No credential is ever written here. The API's bearer token, the
+    device-auth secret and the database password are named rather than
+    held: a key that carries one holds the name of the environment
+    variable it is read from, and the two values that are
     environment-only, the database password and the whole database URL,
     have no key on any of these models at all.
+
+    Two path fields are the exception to that, and they are worth
+    naming because they do not look like secrets. A stock board can
+    present no credential at its first OTA call, so the token issuer is
+    protected by its own path: `ota_path` carries a long random segment
+    on a publicly exposed deployment, and `onboarding.key` pins the
+    short segment serving the same endpoint. Both are as sensitive as
+    what they stand in front of, which is why neither is ever quoted
+    back in a refusal, and both are better injected as
+    `VINGA_SERVER__OTA_PATH` and `VINGA_SERVER__ONBOARDING__KEY` than
+    committed into a file.
     """
 
     model_config = ConfigDict(extra="forbid")
