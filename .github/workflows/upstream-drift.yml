@@ -194,6 +194,12 @@ jobs:
       # the exact title plus the marker in the body, and more than one
       # match is a refusal that fails the run rather than a guess about
       # which issue to overwrite.
+      #
+      # --limit 1000, because gh issue list returns thirty by default
+      # and the exactly-one-match discipline is a lie if a second match
+      # sits past the window: the run would create a duplicate rather
+      # than refuse. A thousand open issues under this one label would
+      # itself be the emergency.
       - name: Open or update the drift report issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -204,7 +210,7 @@ jobs:
             --color B60205 \
             --description "The upstream wire contract moved under a watched path"
           gh issue list --repo rafacm/vinga \
-            --label upstream-drift --state open \
+            --label upstream-drift --state open --limit 1000 \
             --json number,title,body > "${RUNNER_TEMP}/open-issues.json"
           decision=$(uv run --project vinga-server python scripts/upstream_watch.py decide \
             --report "${RUNNER_TEMP}/report/drift-report.md" \
