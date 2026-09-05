@@ -367,7 +367,7 @@ convention permits.
   footprint: `CHANGELOG.md` and the new files' own headers; the
   guide is deliberately not in this milestone, so no index page
   changes yet.
-- [x] **[M2: the guide and the convention](2026-09-05-cloud-deployment-guide-implementation.md#m2-the-guide-and-the-convention)** (PR TBD). `docs/deployment.md`;
+- [x] **[M2: the guide and the convention](2026-09-05-cloud-deployment-guide-implementation.md#m2-the-guide-and-the-convention)** (PR [#403](https://github.com/rafacm/vinga/pull/403)). `docs/deployment.md`;
   the AGENTS.md convention narrowing; the `docs/README.md`
   authority listing and Start here pointer; the server README and
   root README cross-links; M2's CHANGELOG entry; the census
