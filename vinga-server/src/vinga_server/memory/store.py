@@ -77,7 +77,12 @@ from typing import TypeVar
 from sqlalchemy import Connection, Engine, and_, delete, func, or_, select, union
 from sqlalchemy import update as sql_update
 
-from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
+from vinga_server.config.loader import (
+    AgentRenameConflictError,
+    ConfigError,
+    DatabaseBusyError,
+    StorageError,
+)
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.schema import conversations
 from vinga_server.conversations.store import erasure_order
@@ -238,6 +243,42 @@ PURGE_FAILED = (
 
 PURGE_BUSY = (
     "the memory of those conversations could not be removed: another connection was "
+    "writing to memory for longer than the lock timeout allows, and nothing was "
+    "changed. The same request may simply be made again"
+)
+
+# And what a rename that would merge two memories is refused with, plus
+# the pair every other cross-store write here carries.
+#
+# Neither name is in the sentence, and the two provenances say why the
+# rule is the same for both. The new name arrived in the request, so it
+# is caller text and is echoed nowhere; the old one is a stored identity
+# this deployment wrote, which may be spoken, but a refusal that named
+# one and not the other would read as a claim about which of them was at
+# fault. So this says the rule and the remedy, which is what the caller
+# needs either way.
+#
+# The remedy is the operator door that already exists, in the spelling a
+# server has: this sentence is composed inside the image, where
+# `vinga-server` is what a shell answers to.
+RENAME_OCCUPIED = (
+    "memory: facts are already remembered under the new name, and a rename may not "
+    "merge two memories into one, because nothing could tell them apart afterwards "
+    "and no second rename could separate them. Nothing was changed, and neither "
+    "name is quoted back. Rename to a name nothing holds, or read what is stored "
+    "under this one with `vinga-server config memory list agent` and clear it with "
+    "`vinga-server config memory delete agent <name> --all`"
+)
+
+RENAME_FAILED = (
+    "the remembered facts could not be moved to the new name: the database this "
+    "server keeps memory in refused the write, and nothing was changed. Nothing of "
+    "the failure is repeated here, because a database error quotes the statement it "
+    "ran and the values bound into it"
+)
+
+RENAME_BUSY = (
+    "the remembered facts could not be moved to the new name: another connection was "
     "writing to memory for longer than the lock timeout allows, and nothing was "
     "changed. The same request may simply be made again"
 )
@@ -1276,6 +1317,87 @@ def purge(connection: Connection, threads: Sequence[str]) -> Purged:
     raise problem
 
 
+def rename_owner(
+    connection: Connection, scope: MemoryScope, old: str, new: str
+) -> int:
+    """Move everything one owner holds in one scope onto another name,
+    on a connection the caller already holds, and answer how many rows
+    moved.
+
+    The memory third of a rename, and `purge`'s seam widened by one
+    verb: this module owns the SQL and the caller owns the transaction,
+    so an agent's row, its bindings and its facts move in one commit and
+    there is never a moment when the agent has been renamed and its
+    memory has not. A failure therefore reaches the caller and takes its
+    transaction down with it. The signature is `erase_facts`'s with a
+    destination added, because what it addresses is the same pair.
+
+    The chain's advisory lock is taken before the first statement, for
+    `purge`'s reason: it is what makes the ascending order
+    `db.advisory_key` states a property of this function rather than of
+    a call site somebody has to remember. A rename's caller arrives
+    already holding key 1 and key 2, and this takes key 3 last.
+
+    Check then update, and both under that one lock, because neither
+    half can be expressed any other way. Nothing in this schema stops
+    two owners becoming one, so a constraint cannot refuse the merge;
+    and a count cannot report the difference between a destination that
+    already has rows and a source that has none, since both are
+    ordinary. The check cannot go stale between the two statements
+    because the lock being held is the one every writer of this chain
+    takes at BEGIN, so a competing `add` under the destination name
+    queues behind this transaction rather than landing inside it.
+
+    Held rows move with the active ones. A fact a conversation forgot
+    carries `owner` like any other, so a restore after the rename still
+    finds it, which is what makes the rename reversible in this store as
+    well as in the others.
+
+    The conflict travels untranslated. It is a state the caller can
+    correct rather than a failure of the database, so it is raised past
+    the classifying arm below rather than folded into a storage refusal,
+    and it is a `ConfigError` subclass, which is what carries it through
+    the callers' own handlers.
+
+    Every refusal is built inside the handler and raised outside it, the
+    rule this module keeps everywhere: a SQLAlchemy failure carries the
+    statement it ran and the parameters bound into it, and the
+    parameters here are two agent names.
+    """
+    moved = 0
+    occupied = False
+    problem: Exception | None = None
+    try:
+        take_the_chain_lock(connection, MEMORY_CHAIN)
+        occupied = (
+            connection.execute(
+                select(schema.facts.c.id)
+                .where(schema.facts.c.scope == scope, schema.facts.c.owner == new)
+                .limit(1)
+            ).first()
+            is not None
+        )
+        if not occupied:
+            moved = int(
+                connection.execute(
+                    sql_update(schema.facts)
+                    .where(schema.facts.c.scope == scope, schema.facts.c.owner == old)
+                    .values(owner=new)
+                ).rowcount
+            )
+    except Exception as exc:  # noqa: BLE001 - classified, never quoted
+        # By class and never by message, through the one classifier `db`
+        # owns, exactly as `purge` above answers.
+        problem = (
+            DatabaseBusyError(RENAME_BUSY) if is_busy(exc) else StorageError(RENAME_FAILED)
+        )
+    if problem is not None:
+        raise problem
+    if occupied:
+        raise AgentRenameConflictError(RENAME_OCCUPIED)
+    return moved
+
+
 # The operator's door
 #
 # The same rows, asked a different question. What an agent reaches is
@@ -2028,6 +2150,9 @@ __all__ = [
     "NO_FACT_TO_UPDATE",
     "PURGE_BUSY",
     "PURGE_FAILED",
+    "RENAME_BUSY",
+    "RENAME_FAILED",
+    "RENAME_OCCUPIED",
     "QUIET_TIMEOUT_S",
     "RECALL_BYTES",
     "RECALL_LINES",
@@ -2054,5 +2179,6 @@ __all__ = [
     "open_memory",
     "owners",
     "purge",
+    "rename_owner",
     "storable",
 ]
