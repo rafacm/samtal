@@ -298,10 +298,20 @@ module's.
 - **Names every field**: every field path reachable from
   `ServerConfig` appears in the page (reflection sweep, the
   `test_the_reference_names_every_field_of_every_entity` shape).
-- **Constraints render**: the bounded fields render their bounds
-  (`port` shows `1 to 65535`, `resumption_budget_tokens` shows
-  `>= 512`), asserted from the metadata rather than as literals
-  where the sweep can derive them.
+- **Constraints render, completely**: a reflection sweep asserts
+  that for every field reachable from `ServerConfig`, every
+  `FieldInfo.metadata` bound appears rendered in that field's row
+  inside its own section (scoped, not page-wide), so a bound cannot
+  exist unrendered anywhere; `port` and `resumption_budget_tokens`
+  stand as the readable examples, derived not restated. Beside the
+  sweep, one semantic rendering assertion per validator-enforced
+  rule holds the prose to stating each rule where metadata cannot:
+  the environment-name shape on every `EnvName` field, the base32
+  onboarding-key shape, the five log levels by name, every
+  `ota_path` restriction (the slash shape, the reserved API and
+  onboarding mounts, the probe paths), and both URL contracts
+  (scheme set, no userinfo, and `public_url`'s no query or
+  fragment).
 - **The refusals section**: bidirectional. Forward: the rendered
   section carries exactly the registry's sentences, each verbatim.
   Backward: each row's provoking misconfiguration raises exactly
@@ -496,6 +506,13 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    assertion per validator-enforced rule: environment-name shape,
    onboarding-key shape, log levels, all OTA-path restrictions, and
    both URL contracts.
+
+   *Resolution*: accepted in full. The sweep now asserts every
+   metadata bound of every reachable field renders in its own
+   section's row, and the semantic assertions enumerate the six
+   validator-rule families by name, including the reserved OTA
+   mounts and probe paths, so a description that omits a rule fails
+   a test rather than a reviewer's eye.
 
 7. **P2: the field-coverage test can pass on duplicate leaf
    names.** The cited domain test checks unscoped row names, and
