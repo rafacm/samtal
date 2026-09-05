@@ -690,6 +690,19 @@ RESUMPTION_NEEDS_TEXT = (
     "conversations.resumption off"
 )
 
+# And what a server no device could reach its configuration on is
+# refused with. Beside the two above rather than inline in the validator
+# for the same reason they are here: a boot refusal is a fixed sentence
+# this repository owns, and the page that publishes what a deployment is
+# refused for has to read the sentence the validator raises rather than
+# a second copy of it.
+NOTHING_DISCOVERABLE = (
+    "server.ota_path is null and server.onboarding.enabled is false, so "
+    "no device could fetch its configuration from this server at all. "
+    "Keep one of the two: an ota_path for the boards already provisioned "
+    "with it, or onboarding enabled for the short /x/<key>/ route"
+)
+
 
 def url_problem(url: str, schemes: tuple[str, ...]) -> str | None:
     """What makes this URL unusable as an address a device is given, or
@@ -1161,12 +1174,7 @@ class ServerConfig(BaseModel):
         is how a deployment moves to the short one, so unmounting it with
         the short one off leaves nothing serving."""
         if self.ota_path is None and not self.onboarding.enabled:
-            raise ValueError(
-                "server.ota_path is null and server.onboarding.enabled is false, so "
-                "no device could fetch its configuration from this server at all. "
-                "Keep one of the two: an ota_path for the boards already provisioned "
-                "with it, or onboarding enabled for the short /x/<key>/ route"
-            )
+            raise ValueError(NOTHING_DISCOVERABLE)
         return self
 
 
