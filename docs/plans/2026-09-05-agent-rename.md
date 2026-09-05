@@ -323,6 +323,20 @@ Notes on four of them.
   make it a no-op. Renaming to a name that differs only in trailing
   whitespace is the same-name refusal, because everything strips first.
 
+**The three conflicts need a class of their own, and it is why they can
+answer 409.** `REFUSAL_STATUS` maps the listed `ConfigError` subclasses
+and sends everything else to 422 (`config/api.py:307-342`), so a plain
+`ConfigError` would make a destination collision look like a malformed
+request. `config/loader.py` gains `AgentRenameConflictError` beside
+`DeviceAlreadyBoundError`, which is the same kind of fact about the
+world rather than about the request, and `REFUSAL_STATUS` gains the row
+mapping it to 409. Both land in the milestone that raises it rather than
+in the one that adds the route, so the type and its status never exist
+apart, and a test asserts the mapping rather than trusting it. The three
+states share one class and differ by sentence, because what a caller
+does about them is the same: choose another name, or clear what is under
+this one.
+
 **And the sentences quote nothing the caller typed.** The converged
 location policy says a stored entity's name is repository vocabulary a
 refusal may speak, stripped through `without_url_credential`, while a
@@ -684,6 +698,11 @@ beside the decision it belongs to.
 - **`config/entities.py` gains one `Notice`**, the sixth, in the file
   that already owns the pairing of a sentence with the boundaries it
   announces.
+- **`config/loader.py` gains one exception**, `AgentRenameConflictError`,
+  beside the other refusals that are facts about the world, and
+  `config/api.py`'s `REFUSAL_STATUS` gains its row. One class for the
+  three destination states, since the correction is the same for all
+  three.
 - **`config/api.py` gains one route**, which makes one repository call
   and answers with what it did, per the handler contract already stated
   there.
@@ -952,7 +971,8 @@ where it is enforced rather than asserting it.
   running the four phases and returning `Renamed`; the seven refusals as
   fixed sentences, each destination check run under its own store's lock
   in the transaction that would write and raising the typed conflict
-  through each store's classifier; the sentinel sweep, the inventory
+  through each store's classifier; `AgentRenameConflictError` with its
+  409 row and the pin on the mapping; the sentinel sweep, the inventory
   pin, the three collision cases, the atomicity
   pin, the reversibility pin with a stranger present, and the third path added to the
   lock-order walk. No route and no CLI, so nothing an operator can reach
@@ -1141,6 +1161,20 @@ Backend codex, model `gpt-5.6-sol`, 2026-09-05, against commit
    names one. Add a dedicated rename conflict exception in
    `config/loader.py`, map it to 409 in `config/api.py`, and keep it
    intact across the sanitizing boundaries of all three stores.
+
+   *Resolution*: accepted in full, and the mapping checked: only the
+   listed subclasses reach 409 and the fallback row is 422, so the plan
+   was promising a status the code would not have produced. One class,
+   `AgentRenameConflictError`, lands beside `DeviceAlreadyBoundError`,
+   which is the same kind of fact about the world rather than about the
+   request, with its `REFUSAL_STATUS` row in the same milestone that
+   raises it and a test asserting the mapping. One class for the three
+   destination states rather than three, because the correction is the
+   same for all three and the sentence is what differs. Keeping it
+   intact across the boundaries is the amendment to finding 4: it is a
+   `ConfigError` subclass, so `_transaction`'s re-raise and the memory
+   store's refusal arm already pass it, and the plan says so where the
+   two functions are described.
 
 6. **P2: the record schema's own contract goes stale.**
    `conversations.agent`'s column comment says the thread has one agent
