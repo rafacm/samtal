@@ -209,3 +209,69 @@ record that owns the reasoning) rather than a promise change.
   footprint: none in code. Documentation footprint:
   `docs/adr/` (new record), `docs/architecture/product-promises.md`
   (citation only), `CHANGELOG.md`.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-05, against commit b98267f0 of this plan; the
+reviewer ran about 6 minutes. Verdict: not ready, on two P1
+mechanics; the review raised no objection to the ADR riding as M2,
+so it rides, per the queue decision's condition.
+
+1. **P1: the required pre-merge dispatch run cannot be triggered
+   for a new workflow.** GitHub accepts `workflow_dispatch` only for
+   a workflow already on the default branch. Give the workflow a
+   `pull_request` dry-run path or defer end-to-end verification to
+   after merge and say so.
+
+2. **P1: the issue-writing commands have no authentication path.**
+   `permissions:` authorizes the token; it does not make `gh`
+   consume it. Set `GH_TOKEN` on the issue-management step alone,
+   pass `--repo rafacm/vinga` on every `gh` call, and forbid
+   printing the environment.
+
+3. **P2: "no third-party action" conflicts with the declared parser
+   runtime.** The vinga-server environment arrives via
+   `actions/checkout` and the pinned `astral-sh/setup-uv` plus
+   `uv sync --frozen`. Name those steps and narrow the claim to no
+   additional unpinned or drift-analysis action.
+
+4. **P2: the server-side watched paths remain unresolved.** The
+   plan repeats descriptive candidates instead of
+   repository-relative paths, and the vendor clones are absent.
+   List the exact paths or make confirming and recording them an
+   explicit M1 prerequisite.
+
+5. **P2: the manifest and notes are two manually maintained
+   structures whose dates can silently disagree.** Only the SHA was
+   checked. Render the table from the manifest, or check repository
+   identity, full SHA and read date in both directions, including
+   missing and duplicate rows.
+
+6. **P2: highest `v*` tag is not a reliable latest release.** It
+   can select prereleases or unrelated tags, and nothing defines
+   behavior when the pin is ahead of or divergent from the tag.
+   Define tag syntax and prerelease policy, validate ancestry, and
+   report or skip targets behind the pin rather than diffing
+   backward.
+
+7. **P2: open-or-update can overwrite the wrong issue and race into
+   duplicates.** A label alone is not an identity, and concurrent
+   runs can both create. Use a stable identity (exact title plus a
+   machine marker), refuse ambiguous matches, and serialize with
+   workflow concurrency, cancellation disabled.
+
+8. **P2: the rename-behavior claim is false.** `git diff` never
+   reports untracked files and an out-of-scope destination is
+   invisible; only the deletion side is dependable. Say so, and
+   leave locating the replacement to triage.
+
+9. **P2: the verification is nondeterministic and does not exercise
+   issue management.** A dry run against live upstream proves one
+   branch at best. Add deterministic tests over synthetic local git
+   repositories (no change, changed, deleted, tag behind pin,
+   missing pin, no tags), test the issue-selection and
+   create-or-update decision separately from the network, and build
+   the report through files and quoted arguments so
+   upstream-controlled paths and subjects are never evaluated as
+   shell.
