@@ -38,11 +38,13 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy import insert
 
-from tests.support.config_cli import document, runner
+from tests.support.config_cli import chain, document, runner
+from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs
 from vinga_server.config import entities, views
 from vinga_server.config.api import build_api
+from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import (
     DatabaseConfig,
     McpServerConfig,
@@ -60,6 +62,22 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 # match by accident.
 SENTINEL = "sk-test-1c9f24ab-never-a-real-credential"
 
+# The one a KEY carries, which cannot be the one above.
+#
+# A key is read by the inline-secret rule as well, and the value
+# sentinel ends in the fragment `credential`, so a key built from it
+# would be refused for looking like a secret before the URL rule was
+# ever asked, and a case about the URL rule would be passing on the
+# other one. This holds no fragment of either tuple: not `secret`,
+# `token`, `password`, `api_key`, `apikey` or `credential`, and not the
+# `auth` the wider set adds.
+KEY_SENTINEL = "sk-test-6b0e73da-not-a-real-one"
+
+# Both, since every surface case looks for the absence of each: the
+# rows are planted into one store, so a rendering of the whole of it
+# carries every shape at once.
+SENTINELS = (SENTINEL, KEY_SENTINEL)
+
 # One host for every planted address, so what tells the cases apart is
 # the shape the credential is hidden in rather than where it points.
 HOST = "legacy.invalid"
@@ -75,15 +93,22 @@ class Legacy(NamedTuple):
     shown: tuple[str, ...]
 
 
-# The four shapes, across both kinds and two depths.
+# The shapes, across both kinds, both halves of a pair and two depths.
 #
 # `userinfo` and the credential-shaped query parameter are the two
 # answers `url_credential` gives, and `auth` and `authorization` are the
 # two spellings #279 added to it, so each of them is planted once. The
-# nested one is a provider option holding a structure, which is a shape
-# a provider entry may hold because its options are passed through to
-# the implementation, and it is the depth a per-field rule would have
-# missed.
+# nested ones are a provider option holding a structure, which is a
+# shape a provider entry may hold because its options are passed
+# through to the implementation, and they are the depth a per-field rule
+# would have missed.
+#
+# The last three carry the credential in a KEY rather than in a value
+# (#408). A mapping keyed by whatever the caller wrote is the one place
+# a rule about values never looks, and there are three such groups: a
+# provider's options at the top, the structures they pass through, and
+# an MCP server's `env` and `headers`. All three were stored and shown
+# verbatim, so all three are planted.
 LEGACY = (
     Legacy(
         kind="provider",
@@ -123,6 +148,46 @@ LEGACY = (
             transport="streamable_http", url=f"https://{HOST}/mcp?authorization={SENTINEL}"
         ),
         shown=(f"https://{HOST}/mcp",),
+    ),
+    Legacy(
+        kind="provider",
+        identity=("llm", "top-key"),
+        entry=ProviderConfig.model_validate(
+            {
+                "type": "openai_compatible",
+                "base_url": f"https://{HOST}/v1",
+                "model": "qwen3:8b",
+                "egress": False,
+                f"https://{HOST}/top?auth={KEY_SENTINEL}": "ordinary",
+            }
+        ),
+        shown=(f"https://{HOST}/top",),
+    ),
+    Legacy(
+        kind="provider",
+        identity=("llm", "nested-key"),
+        entry=ProviderConfig.model_validate(
+            {
+                "type": "openai_compatible",
+                "base_url": f"https://{HOST}/v1",
+                "model": "qwen3:8b",
+                "egress": False,
+                "connection": {f"https://user:{KEY_SENTINEL}@{HOST}/option": "ordinary"},
+            }
+        ),
+        shown=(f"https://{HOST}/option",),
+    ),
+    Legacy(
+        kind="mcp-server",
+        identity=("env-key",),
+        entry=McpServerConfig.model_validate(
+            {
+                "transport": "stdio",
+                "command": "uvx",
+                "env": {f"https://user:{KEY_SENTINEL}@{HOST}/spawn": "ordinary"},
+            }
+        ),
+        shown=(f"https://{HOST}/spawn",),
     ),
 )
 
@@ -202,7 +267,8 @@ def _rendered(value: object) -> str:
 def _shows_the_address_without_the_credential(rendered: str, addresses: tuple[str, ...]) -> None:
     for address in addresses:
         assert address in rendered
-    assert SENTINEL not in rendered
+    for sentinel in SENTINELS:
+        assert sentinel not in rendered
 
 
 # The planted rows themselves, before any display
@@ -215,7 +281,14 @@ def test_the_planted_row_really_holds_a_credential_a_write_would_refuse(
     """The guard on every case below. These rows are constructed rather
     than written, so nothing but this says they hold what the display is
     being asked to strip, and a typo in a planted address would leave the
-    whole file green over a store holding nothing interesting."""
+    whole file green over a store holding nothing interesting.
+
+    Keys as well as values, which is what this walk missed when the
+    suite was written: three of the rows carry their credential in the
+    name a value was written under, and a guard that walked
+    `dict.values()` would have vouched for a row holding nothing at all
+    (#408).
+    """
     held = [
         value
         for value in _strings(row.entry.model_dump())
@@ -224,13 +297,15 @@ def test_the_planted_row_really_holds_a_credential_a_write_would_refuse(
 
     assert held, row.identity
     for value in held:
-        assert SENTINEL in value
+        assert any(sentinel in value for sentinel in SENTINELS)
         assert without_url_credential(value) in row.shown
 
 
 def _strings(value: object) -> Iterator[str]:
+    """Every string an entry holds, on both halves of every pair."""
     if isinstance(value, dict):
-        for nested in value.values():
+        for key, nested in value.items():
+            yield from _strings(key)
             yield from _strings(nested)
     elif isinstance(value, (list, tuple)):
         for item in value:
@@ -382,7 +457,8 @@ def test_an_export_of_a_legacy_store_imports_onto_a_store_of_its_own(
     assert first("export") == 0
     exported = capsys.readouterr().out
 
-    assert SENTINEL not in exported
+    for sentinel in SENTINELS:
+        assert sentinel not in exported
     for address in EVERY_ADDRESS:
         assert address in exported
 
@@ -436,14 +512,237 @@ def test_a_string_that_is_not_a_credential_bearing_url_is_shown_as_written(
         "model": "qwen3:8b",
         "note": f"see https://{HOST}/docs?model=small&page=2 for the options",
         "connection": {"endpoint": f"https://{HOST}/hook?model=small", "retries": 2},
+        # A key that is a URL and carries nothing, which is the control
+        # the key rule needs of its own: what is stripped is a
+        # credential, never a key that merely looks like an address.
+        f"https://{HOST}/plain?model=small": "ordinary",
     }
     _plant(
         store,
         "provider",
         ("llm", "plain"),
-        ProviderConfig(type="openai_compatible", egress=False, **untouched),
+        ProviderConfig.model_validate({"type": "openai_compatible", "egress": False, **untouched}),
     )
 
     entity = client.get("/providers/llm/plain").json()["entity"]
 
     assert {key: entity[key] for key in untouched} == untouched
+
+
+# The keys two of them sanitize alike
+#
+# Nothing about a stored row stops two keys from reaching one spelling
+# once the credential is out of them, and a mapping comprehension would
+# have answered with the last of them. A read is a fragment a write of
+# it accepts back, so a pair silently missing from one is a pair an
+# operator deletes by re-importing what they were shown.
+
+
+def test_two_keys_that_sanitize_alike_are_both_kept_and_told_apart(
+    store: ConfigStore, client: TestClient
+) -> None:
+    """The rule `views._shown_mapping` documents, at both of its call
+    sites: the first claimant keeps the spelling and the next takes
+    `#2`, in the order the row holds its keys, and no pair is dropped.
+
+    Both sites, because they are two different builders over one helper:
+    a provider's top-level options are merged into a body that already
+    holds the declared fields, and a nested structure is a mapping built
+    from nothing.
+    """
+    _plant(
+        store,
+        "provider",
+        ("llm", "collide"),
+        ProviderConfig.model_validate(
+            {
+                "type": "openai_compatible",
+                "base_url": f"https://{HOST}/v1",
+                "model": "qwen3:8b",
+                "egress": False,
+                f"https://user:{KEY_SENTINEL}@{HOST}/same": "first",
+                f"https://other:{KEY_SENTINEL}@{HOST}/same": "second",
+                "connection": {
+                    f"https://user:{KEY_SENTINEL}@{HOST}/deep": "one",
+                    f"https://other:{KEY_SENTINEL}@{HOST}/deep": "two",
+                },
+            }
+        ),
+    )
+
+    response = client.get("/providers/llm/collide")
+    entity = response.json()["entity"]
+
+    assert entity[f"https://{HOST}/same"] == "first"
+    assert entity[f"https://{HOST}/same#2"] == "second"
+    assert entity["connection"] == {
+        f"https://{HOST}/deep": "one",
+        f"https://{HOST}/deep#2": "two",
+    }
+    # Nothing dropped, which is the half a deterministic rule exists for.
+    assert len(entity["connection"]) == 2
+    for sentinel in SENTINELS:
+        assert sentinel not in response.text
+
+
+# The record path, which asks the same question and keeps its answer
+
+
+def test_a_record_of_such_a_provider_carries_no_credential_in_a_key() -> None:
+    """A manifest is written beside a capture and into a conversation's
+    session row and outlives the conversation, so it is held to the
+    rule the display is held to and by the same helper. The value half
+    has been stripped since #279; the key half was not, and a record
+    keyed by what the caller wrote carried the credential the value no
+    longer had (#408).
+    """
+    entry = ProviderConfig.model_validate(
+        {
+            "type": "openai_compatible",
+            "base_url": f"https://{HOST}/v1",
+            "model": "qwen3:8b",
+            f"https://user:{KEY_SENTINEL}@{HOST}/top": "ordinary",
+            "connection": {f"https://{HOST}/deep?auth={KEY_SENTINEL}": "ordinary"},
+        }
+    )
+
+    record = views.provider_record(entry)
+
+    assert record[f"https://{HOST}/top"] == "ordinary"
+    assert record["connection"] == {f"https://{HOST}/deep": "ordinary"}
+    assert KEY_SENTINEL not in _rendered(record)
+
+
+# The write, which no longer lets one in
+
+
+# One case per door a caller can write a mapping key through: a
+# provider's options at the top, a structure passed through below them,
+# and an MCP server's two keyed groups. The refusal names the entry, or
+# the declared group inside it, and never the key: the key IS the
+# credential here, so quoting it back would be the leak the check exists
+# to prevent.
+REFUSED_KEYS = (
+    (
+        "/providers/llm/fresh",
+        {
+            "type": "openai_compatible",
+            "base_url": f"https://{HOST}/v1",
+            "model": "m",
+            f"https://user:{KEY_SENTINEL}@{HOST}/top": "ordinary",
+        },
+        'an option key of "providers.llm.fresh"',
+    ),
+    (
+        "/providers/llm/fresh",
+        {
+            "type": "openai_compatible",
+            "base_url": f"https://{HOST}/v1",
+            "model": "m",
+            "connection": {f"https://{HOST}/deep?auth={KEY_SENTINEL}": "ordinary"},
+        },
+        'an option key of "providers.llm.fresh"',
+    ),
+    (
+        "/mcp-servers/fresh",
+        {
+            "transport": "stdio",
+            "command": "uvx",
+            "env": {f"https://user:{KEY_SENTINEL}@{HOST}/spawn": "ordinary"},
+        },
+        'a key in "mcp_servers.fresh.env"',
+    ),
+    (
+        "/mcp-servers/fresh",
+        {
+            "transport": "streamable_http",
+            "url": f"https://{HOST}/mcp",
+            # Userinfo rather than a parameter, because a header key
+            # spelled `?auth=` is secret-shaped by the wider fragment
+            # set and the inline-secret rule would answer first.
+            "headers": {f"https://user:{KEY_SENTINEL}@{HOST}/h": "ordinary"},
+        },
+        'a key in "mcp_servers.fresh.headers"',
+    ),
+)
+
+REFUSED_IDS = ["provider-top", "provider-nested", "mcp-env", "mcp-headers"]
+
+
+@pytest.mark.parametrize(("path", "written", "where"), REFUSED_KEYS, ids=REFUSED_IDS)
+def test_a_url_credential_in_a_key_is_refused_and_never_quoted_back(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    written: dict[str, object],
+    where: str,
+) -> None:
+    """What used to be accepted at every one of these doors.
+
+    The sentinel is the key's, not the value's, and it holds no fragment
+    of the inline-secret tuples on purpose: with the other sentinel the
+    key would be refused for looking like a secret and this rule would
+    never be reached, so the case would be green over an unguarded door.
+    """
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(path, json=written)
+
+    assert response.status_code == 422
+    detail = refusal_body(response.json(), 422)
+    assert detail.startswith(where)
+    assert "a key is a name and not an address" in detail
+    assert KEY_SENTINEL not in response.text
+    assert KEY_SENTINEL not in str(dict(response.headers))
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    for record in caplog.records:
+        assert KEY_SENTINEL not in logs.JsonFormatter().format(record)
+        assert KEY_SENTINEL not in text.format(record)
+    # And nothing of the refused write landed.
+    assert client.get(path).status_code == 404
+
+
+def test_the_refusal_carries_the_key_on_nothing_it_raises(store: ConfigStore) -> None:
+    """The exception the response is one rendering of, walked the way
+    this repository walks one: the message, the arguments, what the
+    attributes hold and the same again behind every cause."""
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider(
+            "llm",
+            "fresh",
+            {
+                "type": "openai_compatible",
+                "base_url": f"https://{HOST}/v1",
+                "model": "m",
+                f"https://user:{KEY_SENTINEL}@{HOST}/top": "ordinary",
+            },
+        )
+
+    assert KEY_SENTINEL not in chain(caught.value)
+    assert KEY_SENTINEL not in str(caught.value.problems)
+
+
+def test_the_cli_refuses_such_a_key_on_both_streams(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The same refusal where an operator meets it, held to the two
+    streams the process writes and the two formats the log has."""
+    carrying = (
+        "mcp_servers:\n"
+        "  fresh:\n"
+        "    transport: stdio\n"
+        "    command: uvx\n"
+        "    env:\n"
+        f"      https://user:{KEY_SENTINEL}@{HOST}/spawn: ordinary\n"
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("import", "-f", "-", stdin=carrying) == 1
+
+    printed = capsys.readouterr()
+    assert 'a key in "mcp_servers.fresh.env"' in printed.err
+    assert KEY_SENTINEL not in printed.out
+    assert KEY_SENTINEL not in printed.err
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    for record in caplog.records:
+        assert KEY_SENTINEL not in logs.JsonFormatter().format(record)
+        assert KEY_SENTINEL not in text.format(record)
