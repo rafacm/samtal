@@ -235,9 +235,14 @@ database code and the tests cannot come to disagree about a name.
 **The page's committed home and header.** Committed at
 `docs/reference/server-config.md`, opening with the same
 do-not-edit header the domain page carries, naming its regenerate
-command (`vinga-server config reference server`, written with the
-canonical `PROGRAM` constant plus the selector word) and where the
-descriptions live. The preamble states the split in one paragraph
+command in the canonical short spelling the generated documents
+all use: `vinga reference server`, rendered from `PROGRAM` (which
+is `vinga`; `SERVER_PROGRAM` is the long spelling and stays out of
+generated pages) plus the selector word from the `HALVES` registry.
+The CI step's error message keeps the long
+`uv run vinga-server config reference server` spelling the way the
+existing steps do, since that message is a command to paste into a
+checkout, not a rendered page. The preamble states the split in one paragraph
 and links both neighbours: `domain-config.md` for the stored half,
 `config.example.yaml` as the annotated starting point. Prose wraps
 at `docgen.PROSE_WIDTH`; everything is deterministic (declaration
@@ -559,3 +564,9 @@ reviewer ran 5m03s. Verdict: ready after the P1/P2 amendments.
    with `PROGRAM`, consistent with the existing generated documents,
    or explicitly use `SERVER_PROGRAM` and say why this page is the
    exception.
+
+   *Resolution*: accepted, first option. The header renders the
+   canonical short spelling from `PROGRAM` (`vinga reference
+   server`), consistent with every generated document; the CI error
+   message keeps the long paste-into-a-checkout spelling the
+   existing steps use.
