@@ -2109,12 +2109,21 @@ def _check_no_mcp_url_credential(
     store a credential belongs in, where it could be entered, rotated
     and kept out of an export. So it is refused where it is chosen.
 
-    One declared scalar and no further, deliberately: `headers` and
+    One declared scalar for the value half, deliberately: `headers` and
     `env` carry their own rules about what a secret-bearing key may
     hold, and this one has nothing to add to them. An entry with no
     `url` at all, which is every stdio server, is not a URL and so is
     not this rule's business; `url_credential` answers that on its own
     and needs no case here.
+
+    Their KEYS are another matter, and the reason those rules do not
+    cover them is that they are about names that admit to being secrets.
+    A key spelled `https://user:password@host/x` admits to nothing, and
+    both groups are keyed by whatever the caller wrote, so a credential
+    pasted there was stored and shown exactly as one in `url` was. The
+    same refusal is asked of both groups (#408), which is the whole of
+    what a URL-shaped key needs from this side; what those keys hold
+    goes on being the other rules' business.
 
     Write time only, exactly like the provider's rule and for the same
     reason: a row written before this rule still boots, still reads and
@@ -2127,8 +2136,11 @@ def _check_no_mcp_url_credential(
 
     The refusal names the field and the rule and never the value: what
     fails this check is a credential. Naming the field is safe here in a
-    way it is not for a provider option, because `url` is a name this
-    repository declared rather than one the caller invented.
+    way it is not for a provider option, because `url`, `env` and
+    `headers` are names this repository declared rather than ones the
+    caller invented. What it may not name is a key inside those two
+    groups, which is the caller's, so a refusal about one addresses the
+    group and stops there.
     """
     carried = url_credential(entry.url)
     if carried == "userinfo":
@@ -2151,6 +2163,9 @@ def _check_no_mcp_url_credential(
             f"the server's own environment at startup instead, for example "
             f"headers.Authorization: $MY_MCP_TOKEN. The value is not quoted back"
         )
+    for group in ("env", "headers"):
+        for key in getattr(entry, group):
+            _refuse_url_credential_key(f'a key in "{location}.{group}"', key)
 
 
 def _checked_provider(
@@ -2250,6 +2265,10 @@ def _check_no_url_credentials(
     declared = options_model(identity[0], entry.type)
     printable = frozenset(declared.model_fields) if declared is not None else frozenset()
     for key, value in entry.options.items():
+        # The key before the path, and that order is the rule rather
+        # than a tidiness: a key that fails this check is a credential,
+        # so nothing may be built out of it, a printable path included.
+        _refuse_url_credential_key(f'an option key of "{location}"', key)
         named = key in printable
         _refuse_url_credentials(f"{location}.{key}" if named else location, value, named=named)
 
@@ -2286,6 +2305,11 @@ def _refuse_url_credentials(path: str, value: object, *, named: bool) -> None:
     everything under it is addressed relative to a key that cannot be
     printed, so the honest answer is the nearest parent this repository
     can name.
+
+    Both halves of a pair, since #408: descending into a mapping asks
+    the question of the key as well, which is where the walk used to
+    stop. `_refuse_url_credential_key` beside this says what a refusal
+    about a key may carry.
     """
     where = f'"{path}"' if named else f'an option of "{path}"'
     carried = url_credential(value)
@@ -2308,11 +2332,52 @@ def _refuse_url_credentials(path: str, value: object, *, named: bool) -> None:
             f"MY_PROVIDER_KEY. The value is not quoted back"
         )
     if isinstance(value, Mapping):
-        for nested in value.values():
+        for key, nested in value.items():
+            _refuse_url_credential_key(f'an option key of "{path}"', key)
             _refuse_url_credentials(path, nested, named=False)
     elif isinstance(value, (list, tuple)):
         for item in value:
             _refuse_url_credentials(path, item, named=False)
+
+
+def _refuse_url_credential_key(where: str, key: object) -> None:
+    """The same question of the name a value was written under, for
+    every group keyed by whatever the caller wrote.
+
+    A provider entry is `extra="allow"` at the top and passes structures
+    through below it, and an MCP server's `env` and `headers` are keyed
+    by names somebody else chose, so all three are groups where the key
+    is the caller's. The rules that already look at those keys look for
+    a name that ADMITS to being a secret; a key spelled
+    `https://user:password@host/x` admits to nothing, exactly as the
+    value form does, and was stored and displayed verbatim until this
+    (#408).
+
+    One remedy for both kinds, because a URL-shaped key has the same one
+    everywhere: a key is a name and not an address, so what belongs
+    there is a name. Where the credential should go instead is the
+    value rules' business and is said by their own refusals.
+
+    `where` is the nearest place this repository may name, and for a key
+    that is never the key itself: a declared field could be named, and a
+    key that fails this check cannot be one, since no declared field is
+    a URL, and it is a credential besides. Nothing is built out of it,
+    which is why the caller passes the location already rendered.
+    """
+    carried = url_credential(key)
+    if carried is None:
+        return
+    how = (
+        "carrying a user and password before its host"
+        if carried == "userinfo"
+        else "carrying a credential as a query parameter"
+    )
+    raise ConfigError(
+        f"{where} is a URL {how}, which is not allowed: a key is a name and not "
+        f"an address, and this one is stored as written, in the configuration "
+        f"rather than in the encrypted store a credential belongs in. Write a "
+        f"name there instead. The key is not quoted back"
+    )
 
 
 def _check_addressable(location: str, what: str, value: str) -> None:
