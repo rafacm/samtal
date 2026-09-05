@@ -87,7 +87,10 @@ the watch gets a free end-to-end dry run. Dry-run mode does
 everything but write: clone, resolve, diff, build the report, and
 print it to the step summary instead of touching the tracker. For each repository in the
 manifest: a blobless clone (`--filter=blob:none`, full history, no
-checkout), resolve `origin/HEAD` and the latest release tag under a
+checkout) followed by an explicit all-tags fetch
+(`git fetch --tags --filter=blob:none`, since a clone only brings
+tags reachable from fetched history), resolve `origin/HEAD` and the
+latest release tag under a
 stated policy: tags matching `v<digits>.<digits>[.<digits>]`
 exactly, no prerelease or suffix forms, highest by version sort; a
 repository with no qualifying tag skips that half with a line
@@ -99,7 +102,13 @@ relationship and is never diffed backward. Then
 `git diff --name-status <pinned>..<target> -- <paths>` and
 `git log --oneline <pinned>..<target> -- <paths>` for each
 validated target.
-When every diff is empty, the run ends green and writes nothing.
+Validation comes first: an unparseable manifest or a pin that does
+not resolve in its clone fails the run before any diffing. Past
+validation, when every diff is empty and every target is a
+descendant of its pin, the run ends green and writes nothing; a
+behind or divergent target is drift-adjacent news, so its line
+makes the report non-empty and an issue is written while the run
+itself still succeeds.
 When any is not, the report (changed files and commit subjects per
 repository and target, plus the manifest's pinned SHAs and the
 resolution loop's three steps) becomes the body of one issue with
@@ -396,3 +405,35 @@ so it rides, per the queue decision's condition.
    over fixture issue JSON including the ambiguous case, and the
    workflow's shell is reduced to clone, list and three script
    calls.
+
+### Delta re-review
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-terra`, sandbox
+read-only, 2026-09-05, against commit 088ef320; a few minutes.
+Verdict: all nine resolutions verified as delivered; ready after two
+P2 amendments and one P3, all inside the amended territory.
+
+1. **P2: the latest-release lookup may not see all tags.** A clone
+   fetches tags reachable from fetched history, not necessarily a
+   release branch's. Require an explicit all-tags fetch before tag
+   selection, keeping the blob filter.
+
+   *Resolution*: accepted; the clone step adds
+   `git fetch --tags --filter=blob:none` before selection.
+
+2. **P2: the no-diff success rule conflicts with the missing-pin
+   refusal.** Define precedence: manifest and pin-resolution
+   failures exit nonzero before the no-diff rule, and say whether
+   behind or divergent targets appear in a successful report or
+   fail the run.
+
+   *Resolution*: accepted; precedence is now stated in the body:
+   validation failures (unparseable manifest, a pin that does not
+   resolve in its clone) fail the run before any diffing; a behind
+   or divergent target is drift-adjacent news, so its line makes
+   the report non-empty and an issue is written, and the run still
+   succeeds.
+
+3. **P3: `print` versus `--print` is inconsistent.**
+
+   *Resolution*: accepted; `print` the subcommand, everywhere.
