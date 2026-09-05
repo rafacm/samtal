@@ -186,9 +186,11 @@ verb or a flag.
   (`## YYYY-MM-DD`) as section headers instead of version numbers. Group
   entries under `### Added`, `### Changed`, `### Deprecated`, `### Removed`,
   `### Fixed`, `### Security`. Update it with every notable change.
-- Describe deployment generically (a container image, your own
-  infrastructure). Do not name specific hosting providers or platforms in
-  documentation.
+- Name open-source orchestrators and tooling where naming them is what
+  makes a procedure runnable: Kubernetes, Docker Compose, an ingress
+  controller. Do not name specific hosting providers in documentation;
+  describe where a deployment runs generically (a container image, your
+  own infrastructure).
 - README style follows clew.nvim conventions: centered header with logo and
   etymology, early-development warning, 🚧 marks for unimplemented features,
   honest status reporting.
