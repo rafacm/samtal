@@ -15,6 +15,15 @@ run, and it says what that costs on the board.
 on it. `uvx` runs it without installing anything, the same way the
 CLI's own one-off spelling works.
 
+## On this page
+
+- [First, what is on the board already](#first-what-is-on-the-board-already): how to ask the board, before deciding whether to write anything.
+- [Get the image](#get-the-image) and [Back up what is there](#back-up-what-is-there): where a prebuilt comes from, and the copy worth taking because a vendor image exists nowhere else.
+- [Write it](#write-it): the command, and confirming what is running afterwards.
+- [What flashing costs](#what-flashing-costs): the NVS it erases, and the partition layout it replaces.
+- [Two traps](#two-traps): the baud rate that abandons a long transfer, and the port name that moves.
+- [Putting a board back](#putting-a-board-back): restoring the backup.
+
 ## First, what is on the board already
 
 A board that already runs xiaozhi needs no new firmware to reach your

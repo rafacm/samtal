@@ -117,6 +117,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `Board guides`, since everything in one is true of every unit of that
   model; the directory keeps its path, which 71 links point at.
 
+- **The long pages say what is on them.** `vinga-server/README.md`
+  ran to twenty-one sections with no way to see them short of
+  scrolling, and the common board page and the flashing page had the
+  same problem at smaller scale. All three carry the `On this page`
+  section the other long documents here already use, each line saying
+  what a section owns rather than repeating its title. The three board
+  guides are deliberately without one: they share one six-section
+  shape, so a reader who has seen one knows where to look in the next.
+
 - **A page on flashing a board, `docs/devices/flashing.md`.** The
   walkthrough has always told a reader to flash the prebuilt firmware
   and no page in this repository said how, or where an image comes

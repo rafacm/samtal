@@ -15,6 +15,15 @@ The rest of this page is the behavior every board running the upstream
 firmware shares, so that each guide can stay short and cover only what
 is specific to its own board.
 
+## On this page
+
+- [What the device listens to, and when](#what-the-device-listens-to-and-when): the three listening modes, which boards use which, and what the microphone is doing between conversations.
+- [Networks](#networks): the WiFi rules every board shares, including the 5 GHz trap that catches most provisioning.
+- [Getting a board onto your server](#getting-a-board-onto-your-server): the one URL that ties a board to a backend, and the two ways it gets there.
+- [Driving a board from a terminal session](#driving-a-board-from-a-terminal-session): resetting, reading the boot log and reading NVS back, with the reset behavior that is not what the usual advice says.
+- [Talking to the device itself](#talking-to-the-device-itself): the controls a board publishes as tools, so an agent can turn it down.
+- [What the wake word does, and does not, do](#what-the-wake-word-does-and-does-not-do): what waking is, what it is not, and why it never picks an agent.
+
 ## What the device listens to, and when
 
 **While idle.** An idle device holds no connection to the server at
