@@ -44,7 +44,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
 from vinga_server.config import entities
-from vinga_server.config.entities import EntityDescriptor, addressed
+from vinga_server.config.entities import EntityDescriptor, addressed, entity_location
 from vinga_server.config.loader import (
     AgentRenameConflictError,
     ConfigError,
@@ -78,7 +78,6 @@ from vinga_server.config.models import (
     safe_location,
     url_credential,
     validation_problems,
-    without_url_credential,
 )
 from vinga_server.config.provider_options import (
     OptionsRefused,
@@ -573,7 +572,7 @@ class ConfigStore:
         # the store and the new one is a name being written, which is
         # the whole of why they are treated differently here.
         source = old.strip()
-        destination = _identifier(_location(_AGENT), new)
+        destination = _identifier(entity_location(_AGENT), new)
         if source == destination:
             raise ConfigError(SAME_NAME)
         # Outside the transaction and outside every chain lock, which is
@@ -1125,25 +1124,6 @@ def _missing(descriptor: EntityDescriptor) -> str:
     return descriptor.missing
 
 
-def _location(descriptor: EntityDescriptor, *identity: str) -> str:
-    """Where an entry is written in the configuration document, which is
-    what every refusal about it names: the section it lives in, and the
-    parameters that address one entry under it.
-
-    Through the door every display of a stored identity goes through
-    (#381), which costs a write nothing and is what a READ needs. A name
-    reaches this on the write path only after the addressability check
-    has passed it, and a name carrying a URL credential holds a slash,
-    so there is nothing left for the strip to take. A name reaches it on
-    the read path from the database, where a row written before that
-    rule still sits: `agents.<name>: the row cannot be read` is a
-    sentence composed over stored state and printed by a boot, and it
-    was the one identity-speaking refusal with no strip on it (#382).
-    """
-    shown = (without_url_credential(part) for part in identity)
-    return ".".join((descriptor.moved_key, *shown))
-
-
 def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
     """One stored row as its model: the body validated through the model
     the kind's descriptor names, at the location the row's own key
@@ -1165,11 +1145,11 @@ def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
     have to parse one back out of it.
     """
     identity = tuple(getattr(row, part) for part in descriptor.addressing)
-    location = _location(descriptor, *identity)
-    entry = _body(descriptor.model, location, row.body)
+    written_at = entity_location(descriptor, *identity)
+    entry = _body(descriptor.model, written_at, row.body)
     check = _STORAGE[descriptor.name].inside_read
     if check is not None:
-        check(location, identity, entry)
+        check(written_at, identity, entry)
     return entry
 
 
@@ -1395,21 +1375,21 @@ def _prepare(
     caller got wrong is refused before any lock is asked for.
     """
     if descriptor.addressing:
-        name = _identifier(_location(descriptor, *identity[:-1]), identity[-1])
+        name = _identifier(entity_location(descriptor, *identity[:-1]), identity[-1])
         identity = (*identity[:-1], name)
-    location = _location(descriptor, *identity)
+    written_at = entity_location(descriptor, *identity)
     check = _STORAGE[descriptor.name].before_parse
     if check is not None:
         check(identity[-1])
-    data = _readable(location, descriptor.moved_key, fragment)
+    data = _readable(written_at, descriptor.moved_key, fragment)
     marks = tuple(_masked_paths(data, descriptor.secret_key))
     return _Prepared(
         descriptor=descriptor,
         identity=identity,
-        location=location,
+        location=written_at,
         data=data,
         marks=marks,
-        entry=None if marks else _parsed(descriptor, identity, location, data),
+        entry=None if marks else _parsed(descriptor, identity, written_at, data),
     )
 
 
@@ -2056,14 +2036,14 @@ def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretSto
     # every one of them has been checked by the time it runs: `load`
     # reads the domain half first, which refuses a stage that is not one
     # and a MAC that is not one, so a row surviving to here is filed
-    # under an identity the reader above accepted. `_location` strips
-    # what such a name may still carry (#381). Reordering those two
-    # reads would put an unchecked column back into a location.
+    # under an identity the reader above accepted. `entity_location`
+    # strips what such a name may still carry (#381). Reordering those
+    # two reads would put an unchecked column back into a location.
     for descriptor in _SECRET_HOLDERS:
         for row in connection.execute(select(_table(descriptor))):
             identity = tuple(getattr(row, part) for part in descriptor.addressing)
             for slot, envelope in _mapping(
-                _location(descriptor, *identity), "secrets", row.secrets
+                entity_location(descriptor, *identity), "secrets", row.secrets
             ).items():
                 where = SecretLocation(
                     kind=descriptor.secret_slots, identity=".".join(identity), slot=slot

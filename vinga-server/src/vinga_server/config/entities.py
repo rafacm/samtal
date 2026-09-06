@@ -65,6 +65,7 @@ from vinga_server.config.models import (
     ProviderConfig,
     is_mcp_secret_key,
     is_secret_option,
+    without_url_credential,
 )
 from vinga_server.config.provider_options import declared_options
 from vinga_server.config.responses import Applies
@@ -787,12 +788,14 @@ def setting(name: str) -> Setting:
 
 # How an entity is addressed
 #
-# Both directions of one fact, and they live here because this module is
-# where the addressing itself is declared: a kind's `addressing` tuple
-# says which parameters name one of its entries, and these two are that
-# tuple read forwards and backwards. Everything that has to agree about
-# an address (the store, the API, the display, the CLI's export) reaches
-# one of them rather than spelling a join of its own.
+# One fact read every way anything needs it, and it lives here because
+# this module is where the addressing itself is declared: a kind's
+# `addressing` tuple says which parameters name one of its entries, and
+# these are that tuple joined, joined under its section, and read back
+# apart again. Everything that has to agree about an address (the store,
+# the API, the display, the CLI's export, and the build that names an
+# entry it could not make) reaches one of them rather than spelling a
+# join of its own.
 #
 # Here rather than beside the secrets, which is where `provider_identity`
 # used to sit on the strength of its many readers. That is a reason to
@@ -812,6 +815,52 @@ def provider_identity(stage: str, name: str) -> str:
     answer that comes back looks exactly like nothing stored.
     """
     return f"{stage}.{name}"
+
+
+def entity_location(descriptor: EntityDescriptor, *identity: str) -> str:
+    """Where an entry is written in the configuration document, which is
+    what every refusal about it names: the section it lives in, and the
+    parameters that address one entry under it.
+
+    Through the door every display of a stored identity goes through
+    (#381), which costs a write nothing and is what a READ needs. A name
+    reaches this on the write path only after the addressability check
+    has passed it, and a name carrying a URL credential holds a slash,
+    so there is nothing left for the strip to take. A name reaches it on
+    the read path from the database, where a row written before that
+    rule still sits: `agents.<name>: the row cannot be read` is a
+    sentence composed over stored state and printed by a boot, and it
+    was the one identity-speaking refusal with no strip on it (#382).
+
+    Here rather than in the store, which is where it was written and
+    where its only callers were, because the build names the same
+    entries again after the composition has finished with them
+    (`provider_label` below) and two spellings of one location is how a
+    boot comes to say `providers.llm.x` about a row it refused and
+    something else about the entry it could not build (#413).
+    """
+    shown = (without_url_credential(part) for part in identity)
+    return ".".join((descriptor.moved_key, *shown))
+
+
+def provider_label(stage: str, name: str) -> str:
+    """What every refusal about one provider entry names it, and what
+    the entry is called in the one event a build emits about it.
+
+    The build's own name for a row the store already has a name for, so
+    it is that name: `entity_location` above, given the kind, which is
+    what keeps the sentence a boot prints about an unreadable provider
+    row and the sentence it prints about an unbuildable one in one
+    vocabulary.
+
+    One home because the two halves of a build have to agree about it.
+    The constructor composes it for its own refusals and for every
+    factory and option reader below it, and the owner composes it again
+    for the checks that only run once an object exists, since refusing
+    one of those means closing what it refused. An entry refused by
+    either half is the same entry (#413).
+    """
+    return entity_location(descriptor("provider"), stage, name)
 
 
 def addressed(descriptor: EntityDescriptor, identity: str) -> tuple[str, ...]:
@@ -861,6 +910,8 @@ __all__ = [
     "Setting",
     "addressed",
     "descriptor",
+    "entity_location",
     "provider_identity",
+    "provider_label",
     "setting",
 ]
