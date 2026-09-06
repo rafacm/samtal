@@ -14,6 +14,7 @@ this endpoint's own channel. That is the whole of what this module knows
 about the ceremony.
 """
 
+import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -41,16 +42,20 @@ from vinga_server.events.catalog import (
     ActivationNotOfferedUnreadable,
     OtaCheckActivating,
     OtaCheckAgentNotLoaded,
+    OtaCheckBodyReported,
     OtaCheckNoAgent,
     OtaCheckResolved,
     OtaRequestRejected,
 )
 from vinga_server.events.values import (
+    CHECK_IN_BODY_LIMIT,
+    CHECK_IN_BODY_TRUNCATED,
     ActivationCode,
     AgentList,
     AgentNames,
     AlsoBoundTo,
     BoardName,
+    CheckInBody,
     ClientId,
     DeviceId,
     FirmwareVersion,
@@ -181,6 +186,46 @@ def reported_board(payload: dict[str, Any]) -> str:
     return "unknown"
 
 
+# The encoder the check-in body is serialized with, built once because
+# it is stateless and per-request construction would be the only cost
+# this path added that is not bounded by the body's size.
+#
+# Both settings are load-bearing rather than stylistic, and the reasons
+# are stated beside `CHECK_IN_BODY_LIMIT`: `ensure_ascii=True` is the
+# printability mechanism, and the compact separators are what keeps the
+# bound spent on facts rather than on whitespace.
+_BODY_ENCODER = json.JSONEncoder(ensure_ascii=True, separators=(",", ":"))
+
+
+def bounded_body(payload: dict[str, Any]) -> str:
+    """The parsed check-in object, compactly serialized and never longer
+    than `CHECK_IN_BODY_LIMIT` characters.
+
+    `iterencode` rather than `encode`, and the loop stops the moment the
+    accumulation passes the bound: this endpoint is unauthenticated, so
+    what arrives is a stranger's JSON of a size they chose, and the
+    value this builds, copies and dispatches has to be bounded by the
+    limit rather than by the request. Parsing the request is the one
+    cost that is the body's size, and it exists today.
+
+    A value that had more to say is cut at
+    `CHECK_IN_BODY_LIMIT - len(CHECK_IN_BODY_TRUNCATED)` and ends with
+    that marker, so it is visibly truncated, never longer than the
+    bound, and carries nothing from past the cut. The break is on
+    strictly more than the bound so that a body ending exactly on it is
+    whole rather than marked.
+    """
+    accumulated: list[str] = []
+    length = 0
+    for chunk in _BODY_ENCODER.iterencode(payload):
+        accumulated.append(chunk)
+        length += len(chunk)
+        if length > CHECK_IN_BODY_LIMIT:
+            room = CHECK_IN_BODY_LIMIT - len(CHECK_IN_BODY_TRUNCATED)
+            return "".join(accumulated)[:room] + CHECK_IN_BODY_TRUNCATED
+    return "".join(accumulated)
+
+
 async def check_version(request: Request) -> Response:
     comp: Composition = request.app.state.composition
     server: ServerConfig = comp.server
@@ -212,7 +257,16 @@ async def check_version(request: Request) -> Response:
     resolution = bound.against(comp.generations.current().config.agents)
     agents = list(resolution.agents)
 
-    payload = await _read_json_object(request)
+    # Read once, and the two readings of that one answer derived here
+    # rather than by asking twice. `_json_object` keeps None and the
+    # empty object apart, which is the distinction the body event needs:
+    # a request that carried no readable object is a real state of an
+    # unfamiliar board and says so with a null body. Everything below it
+    # wants the empty mapping instead, which is exactly what
+    # `_read_json_object` would have answered.
+    read = await _json_object(request)
+    said_body = None if read is None else bounded_body(read)
+    payload = {} if read is None else read
     version = reported_version(payload)
     board = reported_board(payload)
     # This is the only moment a device ever states its firmware version:
@@ -251,20 +305,28 @@ async def check_version(request: Request) -> Response:
     said_client = bounded_descriptor(client_id, CLIENT_ID_LIMIT) or None
     # No session exists yet, so the structured record carries the device
     # rather than a session id; the websocket events pick the device up
-    # from here. These four are what every one of the four shapes below
-    # carries, whatever else it says: built once, and once each, because
-    # a value type refuses where it is constructed.
-    said = {
+    # from here. These are what the board said about itself, which every
+    # record this handler emits carries, whatever else it says: built
+    # once, and once each, because a value type refuses where it is
+    # constructed.
+    described = {
         "device": DeviceId(mac),
         "client": None if said_client is None else ClientId(said_client),
         "board": BoardName(said_board),
         "firmware": FirmwareVersion(said_version),
+        "said_device": ReportedMac(device_id),
+    }
+    # And what this server resolved it to, which the four outcome shapes
+    # below add to the above. Derived from it rather than restated: two
+    # structures that have to agree are one structure with a bug
+    # pending, and the body event carries the first half alone.
+    said = {
+        **described,
         "agents": AgentNames(tuple(agents)),
         # Named in every record rather than only in the one that
         # complains about it, so a query for devices waiting on a
         # reload is one field rather than a log-message search.
         "unloaded": AgentNames(tuple(resolution.unloaded)),
-        "said_device": ReportedMac(device_id),
     }
 
     activation = await _activation(comp, server, resolution, mac, client_id, board, version)
@@ -293,6 +355,24 @@ async def check_version(request: Request) -> Response:
                 **said,
             )
         )
+
+    # And, beside whichever of those four fired, the whole of what the
+    # board reported. Unconditional, because the boards this exists for
+    # are exactly the ones whose outcome is unpredictable, and cheap
+    # enough to be unconditional because every piece of the added work
+    # is bounded by `CHECK_IN_BODY_LIMIT` rather than by the request:
+    # `emit` invokes the thunk and deep-copies the payload for every
+    # attached tap before the live stream can reject it by level, so
+    # this is built and copied per check-in whether or not anybody is
+    # listening. An emitter-level interest gate would be a new mechanism
+    # on the events seam for one caller, and the bounded cost does not
+    # buy it.
+    events.emit(
+        lambda: OtaCheckBodyReported(
+            body=None if said_body is None else CheckInBody(said_body),
+            **described,
+        )
+    )
 
     admission = token_for(comp.device_auth, client_id, mac, agents)
 
