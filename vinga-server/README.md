@@ -1118,32 +1118,37 @@ running server, and `vinga diff` to list everything pending.
 $ vinga-server config agent set house -f house.yaml
 $ vinga-server config apply
 mcp:
-  started: weather
-  restarted: (none)
-  stopped: (none)
-  unchanged: home
+  connection started: weather
+  connection kept: home
 prompts:
   changed: house
 fillers:
-  resynthesized: (none)
-  reused: house, kids
-  disabled: (none)
+  filled pause kept: house, kids
 providers:
-  built: (none)
-  reused: asr.ears, llm.local, tts.voice, vad.gate
-  retired: (none)
+  engine kept: asr.ears, llm.local, tts.voice, vad.gate
 agents:
   added: house
-  removed: (none)
-  defaults_changed: no
 
 home: connected since 2026-08-13T09:12:03.104213+00:00
   tools: home__turn_on_light, home__turn_off_light
-  agents: kids, house
+  agents: house, kids
 weather: connected since 2026-08-13T11:02:44.118902+00:00
   tools: weather__forecast
   agents: house
+the stored configuration is installed and serving.
 ```
+
+What it prints is what it did: an outcome with no name under it and a
+kind with no outcome are absent rather than listed as empty, and the
+words are the ones an operator uses rather than the field names of the
+layer that did the work. An apply that moved nothing says so in one
+sentence instead. The last line is on stderr, where a fact about this
+invocation belongs, and it is the full stop: the command that changes
+what the server is serving says that it did. The MCP status block above
+it is printed only where there are entries to say something about; how
+to configure one is what `mcp-server status` answers. The answer's own
+field names are the API's and do not move: `POST
+/api/runtime/config/reload` is the same document it was.
 
 `config import` is the other half of the pair rather than a shortcut
 past it: it writes a whole deployment to the store in one transaction
@@ -1172,9 +1177,11 @@ connection it had, untouched. The MCP outcomes come back with the status
 document, so one command both applies and verifies, and the sections for
 the kinds a later release will apply are named rather than missing.
 
-An entry whose `instructions` is all that changed is `unchanged`, and
-that word is about the connection: nothing was reconnected, and the new
-guidance is what the next activation reads. That is deliberate. The
+An entry whose `instructions` is all that changed keeps the connection
+it had (`unchanged` in the answer, a connection kept in the listing),
+and that is a statement about the connection: nothing was reconnected,
+and the new guidance is what the next activation reads. That is
+deliberate. The
 text configures a prompt and not a connection, so dropping a live one
 to apply it (mid-call tools, a respawned stdio child) would be churn
 without a cause.
