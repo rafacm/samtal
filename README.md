@@ -257,9 +257,9 @@ Importing is additive and never deletes, so the same document twice changes noth
 
 **Step 4. Set up the board**
 
-A board needs three things: firmware that speaks this protocol, your server's address, and your WiFi. This step was walked on a Waveshare ESP32-S3-Touch-LCD-1.54 running the xiaozhi app it shipped with, version 1.0.0.
+A board needs three things before it can reach your server: the xiaozhi firmware, your WiFi, and this server's URL. The firmware is upstream's, published as one archive per board on [78/xiaozhi-esp32's releases](https://github.com/78/xiaozhi-esp32/releases); this was walked with `v2.4.0_waveshare-esp32-s3-touch-lcd-1.54.zip`, which unpacks to the `merged-binary.bin` below.
 
-**Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. A board already running the xiaozhi app can skip this, stock firmware included, which is what vinga has been tested against: a server's address is one key in the board's NVS rather than a property of its firmware. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
+**Flash** that merged binary at offset `0x0`. A board already running xiaozhi can skip this, since a server's address is one key in the board's NVS rather than a property of its firmware. Do not assume a new board is one of them: the Waveshare ESP32-S3-Touch-LCD-1.54 here arrived running the vendor's own demo, which speaks nothing a vinga server understands. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
 **Get the address to give it.** The server derives it and answers it over the API, so this runs from the directory step 1 made like everything else:
 

@@ -117,10 +117,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `Talk` is step 5. The flash carries the reason it never had, and
   says who can skip it: a server's address is one NVS key rather than
   a firmware property, so a board already running the xiaozhi app
-  needs no new firmware, stock included, which is what vinga has been
-  tested against. The step says which board and which app version it
-  was walked on, the way the page says which operating system and
-  shell it was walked on. Gone with the merge: a paragraph deriving the onboarding
+  needs no new firmware. Where that firmware comes from is now on the
+  page as well, upstream's per-board release archive, which no page
+  carried before: the walkthrough said to flash a prebuilt and named
+  nowhere to get one. What a new board runs is not assumed either,
+  since the board this was walked on arrived running the vendor's own
+  demo rather than xiaozhi. Gone with the merge: a paragraph deriving the onboarding
   URL's key from the device-auth secret, which included a sentence
   about a trial that turned device authentication off, something step
   1 has never done.
