@@ -2219,7 +2219,7 @@ def _entity_writes(api: FastAPI) -> None:
         next reload, and the conversations that open after that speak
         through the new one."""
         store.set_provider(stage, name, body)
-        return _acknowledge(f"provider {stage}.{name}", _PROVIDER.notice)
+        return _acknowledge(f"provider {stage}.{spoken_identity(name)}", _PROVIDER.notice)
 
     @api.delete(
         "/providers/{stage}/{name}",
@@ -2231,7 +2231,8 @@ def _entity_writes(api: FastAPI) -> None:
         while an agent or the agent defaults still name it."""
         store.delete_provider(stage, name)
         return _acknowledge(
-            f"provider {stage}.{name} deleted, with its stored secrets", _PROVIDER.notice
+            f"provider {stage}.{spoken_identity(name)} deleted, with its stored secrets",
+            _PROVIDER.notice,
         )
 
     @api.put(
@@ -2275,7 +2276,7 @@ def _entity_writes(api: FastAPI) -> None:
         """Create or replace one MCP server. The running server applies
         it at the next reload, with no restart."""
         store.set_mcp_server(name, body)
-        return _acknowledge(f"mcp-server {name}", _MCP_SERVER.notice)
+        return _acknowledge(f"mcp-server {spoken_identity(name)}", _MCP_SERVER.notice)
 
     @api.delete(
         "/mcp-servers/{name}",
@@ -2287,7 +2288,8 @@ def _entity_writes(api: FastAPI) -> None:
         running server stops it at the next reload."""
         store.delete_mcp_server(name)
         return _acknowledge(
-            f"mcp-server {name} deleted, with its stored secrets", _MCP_SERVER.notice
+            f"mcp-server {spoken_identity(name)} deleted, with its stored secrets",
+            _MCP_SERVER.notice,
         )
 
     @api.put(
@@ -2342,7 +2344,9 @@ def _entity_writes(api: FastAPI) -> None:
         `prompt_includes`, and the `agent_defaults.prompt_includes` that
         every agent naming no list of its own inherits."""
         store.set_prompt_fragment(name, body)
-        return _acknowledge(f"prompt-fragment {name}", _PROMPT_FRAGMENT.notice)
+        return _acknowledge(
+            f"prompt-fragment {spoken_identity(name)}", _PROMPT_FRAGMENT.notice
+        )
 
     @api.delete(
         "/prompt-fragments/{name}",
@@ -2353,7 +2357,9 @@ def _entity_writes(api: FastAPI) -> None:
         """Delete one shared prompt fragment. Refused while any layer
         still includes it."""
         store.delete_prompt_fragment(name)
-        return _acknowledge(f"prompt-fragment {name} deleted", _PROMPT_FRAGMENT.notice)
+        return _acknowledge(
+            f"prompt-fragment {spoken_identity(name)} deleted", _PROMPT_FRAGMENT.notice
+        )
 
     @api.put(
         "/agents/{name}",
@@ -2366,7 +2372,7 @@ def _entity_writes(api: FastAPI) -> None:
         names has to exist already, which is what the natural creation
         order is about."""
         store.set_agent(name, body)
-        return _acknowledge(f"agent {name}", _AGENT.notice)
+        return _acknowledge(f"agent {spoken_identity(name)}", _AGENT.notice)
 
     @api.delete(
         "/agents/{name}",
@@ -2377,7 +2383,7 @@ def _entity_writes(api: FastAPI) -> None:
         """Delete one agent. Refused while a device binding or the
         default agent still names it."""
         store.delete_agent(name)
-        return _acknowledge(f"agent {name} deleted", _AGENT.notice)
+        return _acknowledge(f"agent {spoken_identity(name)} deleted", _AGENT.notice)
 
     @api.post(
         "/agents/{name}/rename",
@@ -2562,7 +2568,7 @@ def _writes(api: FastAPI) -> None:
         # sent the operator to restart a server that is already serving
         # it.
         return _acknowledge(
-            f"device {bound.mac} bound to {', '.join(bound.agents)}",
+            f"device {bound.mac} bound to {_bound_agents(bound.agents)}",
             _binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
         )
 
@@ -2602,7 +2608,7 @@ def _writes(api: FastAPI) -> None:
         # that agent unloaded and sent the operator to restart a server
         # that is already serving it.
         return _acknowledge(
-            f"device {bound.mac} bound to {', '.join(bound.agents)}",
+            f"device {bound.mac} bound to {_bound_agents(bound.agents)}",
             _binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
         )
 
@@ -2647,7 +2653,7 @@ def _writes(api: FastAPI) -> None:
         # reason the device write above says.
         pending.retire_all()
         return _acknowledge(
-            f"default agent {name}",
+            f"default agent {spoken_identity(name)}",
             _binding_notice(_unloaded([name], loaded), snapshot_only),
         )
 
@@ -2809,8 +2815,38 @@ def _acknowledge(what: str, notice: entities.Notice = RESTART_NOTICE) -> dict[st
     The start notice is the default because it promises nothing: no kind
     this API writes carries it any more, so a new write route that
     forgot to name its own boundary reads as conservative rather than as
-    a promise the server cannot keep."""
+    a promise the server cannot keep.
+
+    `what` is a SENTENCE, and every identity in one leaves through
+    `spoken_identity` at the site that composes it (#381, #382, #414).
+    It is a sentence rather than an address in the strong sense: the one
+    consumer is `cli._acknowledged`, which prints it and reads nothing
+    out of it, so nothing anywhere parses a name back out of this line.
+    Two of these routes reach it holding a name a write of that name
+    would refuse today, which is what makes the rule a fix rather than
+    belt and braces. A delete goes by membership, so a legacy row is
+    deletable and says its own name on the way out; and a device binding
+    and the default agent REFERENCE an agent rather than creating one,
+    in a JSON body, where a slash is no obstacle at all.
+
+    Composed here rather than stripped inside this function, because
+    what arrives is already a sentence: `url_credential` would read one
+    holding an address as prose and leave it exactly as it is.
+    """
     return {"wrote": what, "notice": notice.sentence, "applies": notice.applies}
+
+
+def _bound_agents(agents: Sequence[str]) -> str:
+    """The agents one device is bound to, as its acknowledgement says
+    them.
+
+    A function rather than a join spelled at both call sites, which is
+    the same reason `views._bound` exists beside `device_body`: the
+    claim and the write by MAC answer with one sentence, and two
+    spellings of it is how one of them comes to say a stored name the
+    other does not.
+    """
+    return ", ".join(spoken_identity(agent) for agent in agents)
 
 
 def _binding_notice(
