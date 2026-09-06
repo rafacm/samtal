@@ -830,6 +830,50 @@ Two, and neither changes what the milestone ships.
   here so a reviewer can overrule it deliberately rather than wonder
   whether it was considered.
 
+### The review round
+
+Backend codex, model `gpt-5.6-sol`, against PR #419: 2 P2 and 1 P3,
+mergeable after the fixes. All three are fixed on the branch, in one
+commit each.
+
+1. **P2: the raw payload was not pinned by the case that claimed it.**
+   The recorded-request case said the new name is sent exactly as typed
+   and then sent `poet` and `skáld`, which a trim leaves alone, so a
+   `strip()` in the body builder would have kept it green. The finding
+   is right about the shape of the evidence rather than about the
+   behavior: the builder does not edit, and nothing said so. The case
+   now types the name with whitespace around it and asserts the body
+   carries it whole, and its docstring says where the other half of the
+   question is answered, which is the route's own suite: the server
+   strips like every path that stores a name, answers 200, and files the
+   row under the trimmed one, which is why the acknowledgement names the
+   trimmed one here. Verified to bite by putting `strip()` in the
+   builder: that case fails and nothing else in the file does, and the
+   mutation was reverted.
+
+2. **P2: the verb's no-leak case read a record two ways where the
+   route's read it three.** Both cases make one claim about one pasted
+   credential from opposite sides of the wire, and the client's was the
+   weaker reading, which is the copy nobody notices. The walk moved to
+   `tests/support/leaks.py` and both suites call it, so the claim is now
+   made to the same depth from either side. What the third reading adds
+   was measured rather than restated while moving it, and it is
+   narrower than "a formatter prints only the message": this server's
+   JSON formatter already serializes every non-standard `extra` and
+   formats an attached exception, so neither of those shapes was ever
+   the gap. The two it does catch are an argument no placeholder
+   consumed and a value written onto one of logging's own attributes,
+   which the JSON formatter skips by name and the text format never
+   prints. Both are in the module's own words where the next reader of
+   it will be.
+
+3. **P3: the discovery spelled the arguments backwards.** The census
+   note quoted the invocation as `agent rename <new> <old>`, which is
+   the shape the row's comment uses for undoing a rename and reads as
+   the grammar itself once lifted out of that sentence. It says
+   `<old> <new>`; what the matcher counts is two positionals either way,
+   so the claim around it is unchanged.
+
 ### Open questions the plan left, and what M4 answers
 
 None, and none are left for anything after it: M4 is the last
@@ -842,21 +886,31 @@ half of it.
 
 ### Verification
 
+Re-run after the review round's fixes, which is where the first two
+numbers are from.
+
 - `uv run ruff check .`: clean.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5804 passed,
-  19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5811 passed,
+  19 skipped. The count is seven above the run this milestone first
+  recorded because the branch was rebased onto a main that had moved;
+  the round itself adds no case.
 - `uv run pytest tests/integration -q`: 245 passed, which is the lane's
-  243 and this milestone's two.
+  243 and this milestone's two. Not re-run for the round, and the
+  reason is what the round moved: three test files and this document,
+  with `src/` byte-identical to the run above. The new support module
+  is imported by two unit suites and by nothing either lane loads.
 - `scripts/check_doc_links.py .`: 206 files, 0 failures.
 - `uv run mypy`: clean.
 - **All seven generated-document drift checks: current.** `cli.md` and
   the recipes inside it were regenerated in the commit that registered
   the verb; the other five are untouched by this milestone and were
   diffed anyway.
-- **The verb's own suite verified to bite, by mutation:** sending the
-  new name under a body key the route does not read fails eight of the
-  ten cases, and the two that survive are the refusals, which are
-  refused either way. The mutation was reverted.
+- **The verb's own suite verified to bite, by mutation, twice:** sending
+  the new name under a body key the route does not read fails eight of
+  the ten cases, and the two that survive are the refusals, which are
+  refused either way; trimming the name in the body builder fails the
+  recorded-request case alone, which is the round's first finding
+  answered. Both mutations were reverted.
 - **A note on the numbers.** Two lanes were running against this
   machine's one Postgres for part of this milestone, which is what a
   worktree stack costs: a run made while the other one was up answered
