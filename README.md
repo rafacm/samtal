@@ -47,6 +47,9 @@ One premise makes all of this possible, a [**thin device and a smart server**](d
 
 Here is a path to get a [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) talking to a vinga server and nothing you say leaves your computer: the transcription, the model and the voice all run locally.
 
+> [!NOTE]
+> This path has been walked on macOS, in zsh, and nowhere else. Where Linux is known to differ, the step that differs says so, as step 3 does about reaching Ollama from inside a container. The shell is named because it matters: a block zsh accepts is not always one bash accepts.
+
 ### Prerequisites
 
 - **[Ollama](https://ollama.com)**, which serves the LLM model.
@@ -54,8 +57,6 @@ Here is a path to get a [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshar
 - **[uv](https://docs.astral.sh/uv/)**, for the CLI.
 - **A Waveshare board** from the Supported Hardware table (see below) and a USB cable to connect the board to your computer.
 - **`curl`, `openssl` and `git`**, which steps 0, 1 and 2 invoke directly. macOS ships all three, which is why they went unnoticed while this was being walked rather than read; a stripped-down Linux may not have them.
-
-The following steps have been tested on macOS.
 
 **Step 0. Setup Ollama** 
 

@@ -109,6 +109,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Getting Started says which platform it was walked on before the
+  reader spends anything.** The sentence sat under the prerequisite
+  list, which is the part a reader skims. It is a callout above the
+  prerequisites now, and it names the shell as well as the operating
+  system, since the walk that produced these entries found a block
+  that only zsh accepts.
+
 - **Step 1 writes its comments into `.env`, instead of dropping
   them.** The block explained each variable in shell comments around
   the `echo` lines that produced the file, so the explanations lived
