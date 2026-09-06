@@ -109,6 +109,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Step 2's in-image CLI is two commands with two explanations.**
+  Defining the shell function and running `vinga list` shared one
+  fence and were explained by a paragraph underneath, so a reader met
+  two unfamiliar lines at once and learned afterwards what either was
+  for. Each has its own block now, with its sentence in front of it,
+  and the `list` sentence says what the output looks like before step
+  3 fills it in.
+
 - **Getting Started says which platform it was walked on before the
   reader spends anything.** The sentence sat under the prerequisite
   list, which is the part a reader skims. It is a callout above the

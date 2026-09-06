@@ -159,15 +159,19 @@ uv tool install "git+https://github.com/rafacm/vinga#subdirectory=vinga-server"
 
 If your shell then reports `vinga` as not found, `uv` installed it into a directory that is not on your `PATH`; `uv tool update-shell` fixes that for new shells.
 
-**Or install nothing.** The image from step 1 already carries the same CLI, built together with the server it talks to, so the pair cannot disagree about the grammar. From the same directory, a shell function makes it the same word:
+**Or install nothing.** The image from step 1 already carries the same CLI, built together with the server it talks to, so the pair cannot disagree about the grammar. From the same directory, a shell function makes it the same word, shadowing an installed `vinga` for as long as the shell defining it lives:
 
 ```bash
 vinga() { docker compose exec -T vinga vinga "$@"; }
+```
 
+Every command below then reads the same as it would from an installed CLI, with one difference: a file on this machine is piped in rather than named, because a path is resolved inside the container. `list` asks the server what it holds, which is the harmless way to see the wiring work. Nothing is configured yet, so it prints the empty shape of step 3, `(none)` against every slot:
+
+```bash
 vinga list
 ```
 
-The function shadows an installed `vinga` for as long as the shell defining it lives, and a file on this machine is piped in rather than named, because a path is resolved inside the container; the image door in the CLI's own page has both details and how to put the binary back.
+The image door in the CLI's own page has both details and how to put the binary back.
 
 Check the vinga server status with:
 
