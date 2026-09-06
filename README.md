@@ -139,7 +139,7 @@ VINGA_SERVER__PUBLIC_URL=http://$LAN_IP:8003
 EOF
 ```
 
-Those comments are written into the file, so `.env` still says what each line is for the next time you open it. The `EOF` is deliberately unquoted, which is what lets the shell resolve `openssl` and `$LAN_IP` while writing: the file holds finished values rather than expressions, because two parsers read it later and they disagree about expressions. Keep any comment you add on its own line for the same reason. A `#` after a value is a comment to the CLI and part of the value to Docker, which is how a board ends up dialing an address with an explanation glued onto the end of it.
+Keep any comment you add on its own line: a `#` after a value is a comment to the CLI and part of the value to Docker.
 
 Start the server with:
 
