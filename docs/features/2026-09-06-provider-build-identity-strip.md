@@ -37,6 +37,12 @@ every provider, which is what every provider event calls the entry, and
 the loopback warning the build emits itself, which names the entry in
 its sentence and in a structured field.
 
+The sol round on PR #422 then found three more, recorded below: the
+model that rides beside the name in that same stamp, the rejected type
+the unknown-type refusal quoted back, and an option name beside it. All
+of them are the same rule, and none of them is the entry's NAME, which
+is why the first pass over the label did not close them.
+
 ## Changes
 
 ### One home for where an entry is written
@@ -80,6 +86,53 @@ catches that, which is how the collision was found.
   rather than the columns it was made from. The four fields the warning
   carries are exactly the four that identity holds, so this removes the
   second reading rather than adding a second strip.
+
+### What the sol round added
+
+**The sol round on PR #422, 2 P1s and 1 P2, all three adopted**, and one
+neighbouring leak found while reproducing the second.
+
+- **The stamped identity leaked through `model` (P1).** The stamp put
+  the name through the strip and copied `provider.model` beside it. A
+  model is free text a vendor names, written as an option, so a row
+  stored before the URL rule can hold one carrying a credential and put
+  it in the `gen_ai.request.model` field of every round the entry
+  answers. The identity now carries it stripped; `provider.model`, which
+  is what goes into the request, is untouched and pinned that way. The
+  other three fields of the stamp cannot need it and now say so: the
+  stage is one of four words, the type is one of the table's own keys
+  because a type that is not is refused before anything is built, and
+  the host is `urlsplit().hostname`.
+- **The unknown-type refusal quoted the rejected type (P1).** The
+  sharper half of that sentence: the label beside it was stripped and
+  the type was not, so a planted `type:
+  https://user:password@host/x` published a credential anyway. The type
+  is no longer quoted. What comes back is the entry, the rule it broke
+  and the closed set it should have been in, which is what a stage
+  column holding what no stage is already gets (`store._NOT_A_STAGE`),
+  worded as `check_references` words the same shape. One pin in
+  `test_providers.py` moved deliberately, with the reason in its
+  docstring.
+- **The stderr claim never touched stderr (P2).** The boot case entered
+  the lifespan through `TestClient` and read the sentence off
+  `startup_failure`, which passes with the print gone, with the print
+  unsafe, or with uvicorn's traceback beside it. It now boots from
+  planted rows through `serving.run(None)` and asserts the sanitized
+  location on stderr with no sentinel and no traceback on either stream
+  or in either log format. That covers what TestClient skips: uvicorn's
+  `sys.exit(3)` on a refused lifespan, the swallow in `serve`, and the
+  log filter that drops uvicorn's own rendering. Measured while writing
+  it: the run binds no port, because uvicorn's `startup` awaits the
+  lifespan and leaves before it creates a socket.
+- **An unknown option's name, found while reproducing the type.**
+  `OptionsReader.finish` lists the keys a type never asked about, and
+  those are the caller's. Answered by shortening rather than by
+  withholding, which is the line between the two: a refusal that can
+  list the closed set the value should have been in names the set and
+  not the value; one that cannot names what was written, through the
+  strip, as a display of the same key does. The typed half needs
+  nothing, since a model forbidding extras refuses through
+  `validation_problems`, which names only declared keys.
 
 ## Key parameters
 

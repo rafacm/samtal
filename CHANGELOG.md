@@ -133,6 +133,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   about a provider row it could not read and the sentence it prints
   about one it could not build cannot come to disagree.
 
+  Three more of the build's own words were closed with them, because a
+  name is not the only stored string it speaks. The model an entry runs
+  is free text a vendor names, and the identity every provider event
+  carries reported it verbatim, so it now reports it without the
+  credential while the entry goes on running the string exactly as
+  configured. The type a row is filed under is no longer quoted back
+  when it is not one of the four stages' known types: what comes back is
+  the entry, the rule the type broke and the closed set it should have
+  been in, which is the answer a stage column holding what no stage is
+  already gets. And the names of options a type never asked about come
+  back shortened, since there is no closed set to list in their place
+  and an operator with a typo has to be able to see it.
+
 ## 2026-09-05
 
 ### Added
