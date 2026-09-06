@@ -16,9 +16,11 @@ means repointing `ota_url` at a listener and back, two NVS writes and
 a reset to learn what the server was already told.
 
 The fix is the issue's obvious shape: a `DEBUG`-level structured
-event carrying the body as the device sent it, emitted beside the
-existing check-in event, so `vinga events tail` shows it when
-somebody asks and nothing changes when they do not.
+event carrying a compact serialization of the parsed check-in
+object, emitted beside the existing check-in event, so
+`vinga events tail` shows it when somebody asks and nothing a
+default-configured deployment retains or shows changes when they do
+not.
 
 ## The issue's decisions, restated
 
@@ -37,17 +39,31 @@ somebody asks and nothing changes when they do not.
 
 ## Open questions, resolved
 
-### How "off unless asked for" is mechanized: the DEBUG level is the switch
+### How "off unless asked for" is mechanized: the DEBUG level, on two filters
 
-The surface already has exactly this mechanism, and no new switch is
-built. The event is declared at `logging.DEBUG` on the OTA channel,
-the precedent being `ActivationPending`. The live stream's default
-filter is `INFO`, chosen there so the tail never shows more than the
-retained log carries, so the event reaches nobody until an operator
-runs `vinga events tail --level DEBUG`; the retained log at the
-default threshold does not carry it either. Asking is one flag on the
-command an operator already has, which is what the issue's "the
-asking is documented" needs documenting.
+The event is declared at `logging.DEBUG` on the OTA channel, the
+precedent being `ActivationPending`, and no new switch is built. Two
+filters then decide who sees it, and they are separate facts:
+
+- **The live stream** filters per subscription, after dispatch, at a
+  default of `INFO`, so a tail shows the event only when an operator
+  runs `vinga events tail --level DEBUG`. This is the asking the
+  issue wants documented, and it changes nothing about retention.
+- **The retained log** filters at `server.log_level` through the
+  root logger. A deployment at the default level never retains the
+  event. A deployment already configured at DEBUG starts retaining
+  every check-in body, bounded, at the upgrade that ships this,
+  which is priced deliberately: DEBUG retention is an explicit
+  operator choice whose meaning is "keep what the emitters say at
+  debug volume", the value is bounded to `CHECK_IN_BODY_LIMIT`, and
+  the CHANGELOG entry names the new event so that choice is made
+  with the fact in hand. Attached server taps likewise receive every
+  emission before their own filtering, which is the bounded
+  per-request cost the emission section prices.
+
+The claim is therefore not that the event reaches nobody; it is that
+no default-configured surface retains or shows it, and every
+non-default surface that does was asked to.
 
 ### What the event carries: its own declaration, the said facts, and the body
 
@@ -129,10 +145,13 @@ A body that could not be read as a JSON object is a real state of an
 unfamiliar board and must not vanish: the variant's body field is
 nullable, null meaning "the request carried no readable object",
 which is the same honest-null shape `said_client` uses. The handler
-learns the distinction by reading `_json_object` once and deriving
-the empty mapping where it does today, so no request is parsed twice
-and `_read_json_object`'s collapsing moves into the one caller that
-wanted it.
+learns the distinction by calling `_json_object` once and deriving
+the empty mapping itself, so no request is parsed twice.
+`_read_json_object` stays exactly as it is: the OTA package
+re-exports it as part of the import surface preserved across the
+package split, and an unrelated removal does not ride this feature.
+It keeps its one behavior and simply stops being `check_version`'s
+door.
 
 ### Where it emits: unconditionally, with the work bounded at the site
 
@@ -160,10 +179,13 @@ one, and this paragraph is where that trade is recorded.
 ### What the docs say, and where
 
 `docs/devices/README.md`, the "Driving a board from a terminal
-session" section, gains the procedure: point the board at the server
-(or reset it), run `vinga events tail --level DEBUG`, and read the
-check-in event, with one sentence saying this is how to see the whole
-of what a board reports without repointing it. The generated
+session" section, gains the procedure, in the order that cannot miss
+the event, because the live stream retains nothing and a boot
+check-in can finish before a tail connects: start
+`vinga events tail --level DEBUG` first and wait for it to be
+connected, then reset the board (or point it here), and read the
+check-in event, with one sentence saying this is how to see the
+whole of what a board reports without repointing it. The generated
 `docs/reference/events.md` regenerates through its generator, which
 is where the event's fields are documented.
 
@@ -190,11 +212,12 @@ closing it is the capture's job, not this plan's.
   chains included. The template interpolates only the
   bounded `said` arguments the sibling events already interpolate,
   never the body: the body is a field, not a sentence.
-- **Pin before reshaping.** The `_read_json_object` fold-in is the
-  one behavior-preserving move; the existing malformed-body cases in
-  the OTA suites pin it (a malformed body still answered, activation
-  checks still telling None from empty), and they stay green
-  unchanged.
+- **Pin before reshaping.** No behavior-preserving move remains:
+  `check_version` switches to calling `_json_object` directly, and
+  the existing malformed-body cases (a malformed body still
+  answered, activation checks still telling None from empty) stay
+  green unchanged, which is what pins that the switch changed
+  nothing.
 - **Closed sets.** No new token, no new reason. The variant joins the
   catalog, whose own checks (declared levels, channel, args) hold it.
 - **Honest seams.** No new injectable. The variant's nullable body
@@ -340,6 +363,10 @@ ready, pending the P1 amendments.
    be missed.** The live stream retains nothing; the tail must be
    started and connected before the board is reset.
 
+   *Resolution*: accepted in full; the documented order is tail
+   first, then reset, with the retains-nothing reason stated where
+   the procedure is.
+
 7. **P2: DEBUG is not one off-switch across surfaces.** Live
    filtering is per subscription after dispatch; retained-log
    filtering is `server.log_level`. A deployment already running at
@@ -348,13 +375,30 @@ ready, pending the P1 amendments.
    plan must distinguish the two filters, price the upgrade behavior,
    and stop claiming the event "reaches nobody".
 
+   *Resolution*: accepted in full; the section now states the two
+   filters as separate facts, prices the already-at-DEBUG upgrade
+   behavior with the reasoning, notes what taps receive, and claims
+   only that no default-configured surface retains or shows the
+   event.
+
 8. **P2: folding away `_read_json_object` changes a deliberately
    preserved import surface.** The OTA package re-exports it as part
    of what stayed importable across the package split; a silent
    removal must not ride this feature.
+
+   *Resolution*: accepted in full; the fold-in is withdrawn.
+   `check_version` calls `_json_object` directly and
+   `_read_json_object` stays untouched on the export surface. The
+   pin-before-reshaping lens entry is corrected to match: there is
+   no behavior-preserving move left in the plan.
 
 9. **P3: "the body as sent" overstates parse-and-reserialize.**
    Escapes and numbers normalize, `ensure_ascii` applies, duplicate
    keys collapse to the last. Call it a compact serialization of the
    parsed object preserving surviving key insertion order, and state
    the `ensure_ascii` and non-finite-number policy.
+
+   *Resolution*: accepted; the goal and the value section now say
+   "a compact serialization of the parsed check-in object", and the
+   `ensure_ascii` and non-finite policies are stated where the
+   transformation is specified.
