@@ -1433,14 +1433,14 @@ def safe_location(
     refusal saying less about a stored world than the write that stored
     it is the incoherence this parameter removes.
 
-    Every segment goes out through `without_url_credential`, which is
-    the same door every DISPLAY of a stored identity passes (#381,
-    `views._shown_identity`): a name written before the addressability
-    rule can carry a credential, and a refusal is printed, logged and
-    kept. It is applied to every segment rather than to the ones
-    believed to need it, because that is the shape that stays right when
-    a new kind of segment is admitted; on a name this repository
-    declared it is the identity function.
+    Every segment goes out through `spoken_identity`, the one door for
+    an identity a refusal says (#381, #382, #414): a name written before
+    the addressability rule can carry a credential and a control
+    character, and a refusal is printed, logged and kept. It is applied
+    to every segment rather than to the ones believed to need it,
+    because that is the shape that stays right when a new kind of
+    segment is admitted; on a name this repository declared it is the
+    identity function.
     """
     safe: list[object] = []
     reached: object = model
@@ -1448,7 +1448,7 @@ def safe_location(
         reached = _declared(reached, part, stored=stored)
         if reached is None:
             return tuple(safe), True
-        safe.append(without_url_credential(part) if isinstance(part, str) else part)
+        safe.append(spoken_identity(part) if isinstance(part, str) else part)
     return tuple(safe), False
 
 
@@ -1765,6 +1765,89 @@ def without_url_credential(value: str) -> str:
             parts.fragment,
         )
     )
+
+
+# What no identity may carry: the C0 and C1 control characters and DEL.
+# A slash is refused separately, because a slash is the one character
+# whose presence changes what a path means rather than what it looks
+# like.
+#
+# One home for the character class, with two readers that have to agree
+# about it: `store._check_addressable` refuses one at a write, and
+# `spoken_identity` below escapes one that a write never saw. A write
+# that refused a set a refusal did not escape would be the rule and its
+# defence disagreeing about which characters the rule is about (#414).
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def holds_control_character(value: str) -> bool:
+    """Whether a name or a slot carries what the addressability rule
+    refuses, which is the question the write path asks of it."""
+    return _CONTROL_RE.search(value) is not None
+
+
+def spoken_identity(value: str) -> str:
+    """One stored identity as a sentence about it may say it: without
+    what a URL of it carries, and with every control character escaped.
+
+    The door for an identity that is SAID rather than shown. A refusal,
+    a warning and a log message reach an operator as themselves, on a
+    server's stderr as it fails to start and in a text-format log line,
+    and nothing between the composition and that stream escapes
+    anything. `store._check_addressable` refuses a control character in
+    a name for exactly that reason, that it "does not survive a header
+    or a log line intact", and it refuses it at WRITE time only, so a
+    row written before the rule still boots and still names itself in
+    every one of those sentences (#414).
+
+    Escaped rather than replaced or withheld, because of what the
+    operator holding the sentence has to do next. Such a row is
+    reachable: a control character percent-encodes losslessly, unlike
+    the slash a credential-bearing name holds, so `%1b` in a path
+    fetches, renames and deletes it. `\\x1b` is the byte, so the
+    sentence is a recipe for addressing the row; a fixed mark is not,
+    and it would print two different broken names alike. Withholding
+    the name leaves an operator who cannot see which row is broken.
+
+    Only the control characters are escaped, which is what keeps every
+    lawful name byte-identical: this is the identity function on
+    anything a write would accept today, exactly as the credential strip
+    is. The backslash is deliberately NOT escaped beside them, so a
+    lawful name holding the six characters `\\x1b` renders like a name
+    holding the one character. That ambiguity is a reading of two names
+    rather than an addressing of either, and closing it would change how
+    every lawful name holding a backslash is printed, which is the
+    property the whole chain exists to keep.
+
+    Stripped first and escaped second, and the order is the rule rather
+    than a preference. `url_credential` reads the value exactly as the
+    write path read it; escaping first would put backslashes into a
+    value that is about to be parsed as a URL, and `urlsplit` deletes a
+    tab, a carriage return and a newline before it looks for the `@`, so
+    `https:/<CR>/user:password@host/x` is a credential to the strip and
+    is not one once the carriage return has been spelled out. The cost
+    of this order is measured and small: a control character INSIDE a
+    credential-bearing name can be swallowed by that same deletion, and
+    such a name is being rewritten anyway.
+
+    Not on the DISPLAY surfaces, which is the line this rule stops at
+    and the one thing measured before it was drawn. A view hands an
+    identity back as a document key, and what writes that document
+    escapes a control character already and losslessly: JSON as
+    `\\u001b`, YAML as `\\e`, and the CLI's terminal door as `?`
+    (`printing.printable`). Escaping there would mangle rather than
+    render, because a read is a fragment a write of it accepts back: an
+    export naming `bad\\x1bname` imports as a lawful eleven-character
+    agent that nothing meant, where today the same export is refused by
+    the rule that says what a name may hold.
+    """
+    return _CONTROL_RE.sub(_escaped, without_url_credential(value))
+
+
+def _escaped(character: re.Match[str]) -> str:
+    """One control character as two hex digits behind `\\x`, which is
+    the spelling Python's own `repr` uses for the same set."""
+    return f"\\x{ord(character.group()):02x}"
 
 
 def is_env_name(value: object) -> bool:
@@ -3200,16 +3283,16 @@ def defined(what: str, names: Collection[str]) -> str:
 
     Written by this deployment is not the same as written under today's
     rules. A stored name can predate the addressability rule and carry a
-    credential, and this sentence travels out as a CLI line, an HTTP 422
-    body and a boot log, so each name leaves through the door every
-    display of a stored identity leaves through (#381). Sorted on the
-    name as it is STORED and shortened afterwards, for the reason
-    `views._shown_mapping` gives: sorting after the strip would let what
-    a name hides decide where it appears.
+    credential or a control character, and this sentence travels out as
+    a CLI line, an HTTP 422 body and a boot log, so each name leaves
+    through the door every spoken identity leaves through (#381, #414).
+    Sorted on the name as it is STORED and shortened afterwards, for the
+    reason `views._shown_mapping` gives: sorting after the strip would
+    let what a name hides decide where it appears.
     """
     if not names:
         return f"; no {what} are defined"
-    shown = ", ".join(without_url_credential(name) for name in sorted(names))
+    shown = ", ".join(spoken_identity(name) for name in sorted(names))
     return f" (defined: {shown})"
 
 
@@ -3264,11 +3347,10 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     # The agent's own name is the location here, which is the store's
     # vocabulary and stays (#382); what a name written before the
     # addressability rule can carry does not, so it leaves through the
-    # same door a display of an identity leaves through (#381).
+    # one door a spoken identity leaves through (#381, #414).
     sources: list[tuple[str, AgentDefaults]] = [("agent_defaults", snapshot.agent_defaults)]
     sources += [
-        (f"agents.{without_url_credential(name)}", agent)
-        for name, agent in snapshot.agents.items()
+        (f"agents.{spoken_identity(name)}", agent) for name, agent in snapshot.agents.items()
     ]
     for source, layer in sources:
         for stage in PROVIDER_STAGES:
@@ -3331,7 +3413,7 @@ def check_completeness(snapshot: DomainSnapshot) -> list[str]:
             # The names this deployment stored, through the door
             # `defined` above sends the same list through and for the
             # same reason.
-            + ", ".join(without_url_credential(name) for name in sorted(snapshot.agents))
+            + ", ".join(spoken_identity(name) for name in sorted(snapshot.agents))
         )
 
     return problems
@@ -3451,15 +3533,15 @@ class Config(DomainConfig):
         so a mistake points at the layer that holds it.
 
         Which makes the location a place an identity leaves this model
-        by, so the agent's name goes through the door every displayed and
-        every spoken identity goes through (#381, #382). The provider
-        name beside it does not: that half is an address, read straight
-        back out of `providers.<stage>` by everything this answers, and
-        stripping it would be a lookup of a row nothing wrote.
+        by, so the agent's name goes through the one door every spoken
+        identity goes through (#381, #382, #414). The provider name
+        beside it does not: that half is an address, read straight back
+        out of `providers.<stage>` by everything this answers, and
+        rewriting it would be a lookup of a row nothing wrote.
         """
         own = getattr(self.agents[agent], stage)
         if own is not None:
-            return own, f"agents.{without_url_credential(agent)}.{stage}"
+            return own, f"agents.{spoken_identity(agent)}.{stage}"
         return getattr(self.agent_defaults, stage), f"agent_defaults.{stage}"
 
     def prompt_for_agent(self, agent: str) -> str:
