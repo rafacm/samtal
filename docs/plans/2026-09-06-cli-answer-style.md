@@ -162,6 +162,19 @@ sentence alone, unchanged: the server's words for those are pure
 state, already right, and a client line would restate them for no
 gain.
 
+And the fallback arm gets the door it is missing today:
+`_acknowledged` passes `str(acknowledgement["notice"])` straight to
+`_announced` (`cli.py:4585`), while `_imported_entries` wraps its
+sentence in `printable(..., UNBOUNDED)`. Every path that can print a
+server sentence prints it through `printable` with the unbounded
+length, for the reason the import path records: a boundary sentence
+cut at a bound loses the state it ends with, and nothing an answer
+carries steers a terminal. The single-write surface gains the
+hostile-notice cases the import surface already has, driven through
+`Act.read()`: a notice carrying an escape sequence and one carrying
+a lone surrogate each arrive neutralized on stderr, with nothing of
+either retained on an exception chain.
+
 ### `The binding` said about a document that binds nothing: a new notice
 
 `write_default_agent` reuses `BINDING_UNSERVED_NOTICE`, whose "The
@@ -321,13 +334,17 @@ question, not a rendering one.
 
 ## The standing review lenses
 
-- **No-leak.** No new value crosses any door it does not cross today.
-  Every name printed by the new renderings goes through the same
-  `printable`/`_names` calls the old ones used; the new sentences
-  (success, group heads, the LiveKind line, `nothing yet`) are fixed
-  text; the import's count is arithmetic over the answer; labels are
-  this module's own strings. The unknown-token arm still never echoes
-  the token (pinned already by the #386 cases, which stay).
+- **No-leak.** One door is added, and no value loses one: the plan
+  closes the pre-existing gap where `_acknowledged` printed a
+  server's notice without `printable`, so after M1 every server
+  sentence any rendering quotes goes through
+  `printable(..., UNBOUNDED)`. Every name printed by the new
+  renderings goes through the same `printable`/`_names` calls the
+  old ones used; the new sentences (success, group heads, the
+  LiveKind line, `nothing yet`) are fixed text; the import's count
+  is arithmetic over the answer; labels are this module's own
+  strings. The unknown-token arm still never echoes the token
+  (pinned already by the #386 cases, which stay).
 - **Pin before reshaping.** This plan changes rendered bytes
   deliberately, so the pins move with the behavior in the same
   commits rather than being preserved: `test_config_cli_rendering.py`,
@@ -447,7 +464,9 @@ added where the other five live.
   notice in `entities.py`, both `api.py` producers picking it
   (`write_default_agent` and `_applied_notice`), both pinned through
   the real API paths, `tests/support/notices.py` carrying it as the
-  seventh `_COMPOSED` member; the licensed substitution;
+  seventh `_COMPOSED` member; the `printable(..., UNBOUNDED)` door
+  in `_acknowledged` with the single-write hostile-notice cases
+  through `Act.read()`; the licensed substitution;
   `vinga-server/README.md`'s write transcript re-captured (the
   1116-area notice block and the mcp-server transcript);
   `cli-guide.md`'s "The sentence states and the client advises"
@@ -553,6 +572,15 @@ ready, pending the P1 amendments.
    sentence in `printable(..., UNBOUNDED)`. The hostile-notice tests
    cover imports only, so an old or newer server can put an escape
    sequence or a lone surrogate on stderr through a single write.
+
+   *Resolution*: accepted in full. The gap predates this plan, and
+   the plan's no-leak paragraph overclaimed by not seeing it; both
+   are corrected. `_acknowledged` gains the
+   `printable(..., UNBOUNDED)` door in M1, the no-leak lens
+   paragraph now states the door as added rather than inherited, and
+   the single-write hostile cases (escape sequence, lone surrogate,
+   driven through `Act.read()`, nothing retained on a chain) join
+   M1's deliverables beside the import cases they mirror.
 
 4. **P2: the apply success line needs a stream-aware renderer and the
    flush discipline.** `_apply_listing` returns one stdout string and
