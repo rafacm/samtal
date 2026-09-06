@@ -1566,6 +1566,19 @@ def drive_ota_check_resolved(directory: Path) -> None:
         post_system_info(client)
 
 
+def drive_ota_check_body_reported(directory: Path) -> None:
+    """The fifth path through `check_version`, which every check-in
+    takes: the outcome above it is emitted first and this one beside it,
+    whatever that outcome was."""
+    config = Config(
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        default_agent="assistant",
+    )
+    with ota_client(apart(config, directory)) as client:
+        post_system_info(client)
+
+
 def drive_activation_not_offered_unreadable(_: Path) -> None:
     """An unbound device whose bindings answer is a fallback rather than
     an answer, so minting would offer a ticket for a bound board.
@@ -1923,6 +1936,9 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     Driver((REPLY, "check_version", 2), drive_ota_check_agent_not_loaded, "ota_check"),
     Driver((REPLY, "check_version", 3), drive_ota_check_no_agent, "ota_check"),
     Driver((REPLY, "check_version", 4), drive_ota_check_resolved, "ota_check"),
+    Driver(
+        (REPLY, "check_version", 5), drive_ota_check_body_reported, "ota_check_body"
+    ),
     Driver(
         (REPLY, "_activation", 1),
         drive_activation_not_offered_unreadable,
