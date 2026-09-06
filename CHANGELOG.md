@@ -154,6 +154,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **An apply says what it did, in the operator's words, and that it
+  worked.** `vinga apply` printed every field of every section whether
+  or not the field had anything to say, in the field names of the layer
+  that did the work, and then advice about configuring an MCP server to
+  a deployment that has none. It prints what has something to say now: a
+  kind with nothing to report is absent, an empty list and a false flag
+  are absent within a kind, and a kind this build does not apply without
+  a restart keeps its line, because that is content rather than
+  emptiness. The names are the ones an operator uses rather than the
+  reload layer's, so `fallback_resynthesized: kids` is the failure
+  phrase spoken again for the agent it belongs to; a table beside the
+  sections carries them, and a field added to the answer without one
+  fails a test rather than reaching an operator as a field name. An
+  apply that moved nothing says so in one sentence rather than printing
+  a page of empty lists. The MCP status block prints where there are
+  entries to report on, and how to configure one stays what
+  `mcp-server status` answers. And the command ends by saying it
+  worked, in one fixed sentence on stderr, with no duration in it: the
+  elapsed seconds stay the progress line's, drawn at a terminal and
+  written nowhere else. The answer's own field names are the API's and
+  have not moved.
+
 - **A comparison says what is pending, grouped by the boundary it waits
   at.** `vinga diff` printed twenty-four lines to say three things: a
   four-line preamble defining the API's boundary tokens, then all seven
