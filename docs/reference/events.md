@@ -1437,7 +1437,7 @@ device %s (%s, firmware %s) described itself; the body rides this event
 | `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable |  |
 | `board` | `DESCRIPTOR` | yes | no | at most 64 characters, every one printable |  |
 | `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable |  |
-| `body` | `DESCRIPTOR` | yes | yes | at most 8192 characters, every one printable | What the board sent, as a compact serialization of the parsed object: duplicate keys collapse to the last, escapes and numbers normalize, and everything outside printable ASCII leaves as an escape. Null for a request that carried no readable JSON object, which is a real state of an unfamiliar board rather than nothing to say. |
+| `body` | `DESCRIPTOR` | yes | yes | at most 8192 characters, every one printable | What the board sent, as a compact serialization of the parsed object: duplicate keys collapse to the last, escapes and numbers normalize, and everything outside printable ASCII leaves as an escape. Null where this server has no representation of what the board sent, which is a real state of an unfamiliar board rather than nothing to say: a request carrying no readable JSON object, or the vanishingly rare one the serializer could not walk. |
 
 ### `activation_not_offered`
 

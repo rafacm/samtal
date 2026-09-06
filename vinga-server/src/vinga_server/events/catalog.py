@@ -2346,9 +2346,11 @@ class OtaCheckBodyReported(Variant):
             "What the board sent, as a compact serialization of the "
             "parsed object: duplicate keys collapse to the last, escapes "
             "and numbers normalize, and everything outside printable "
-            "ASCII leaves as an escape. Null for a request that carried "
-            "no readable JSON object, which is a real state of an "
-            "unfamiliar board rather than nothing to say."
+            "ASCII leaves as an escape. Null where this server has no "
+            "representation of what the board sent, which is a real "
+            "state of an unfamiliar board rather than nothing to say: a "
+            "request carrying no readable JSON object, or the "
+            "vanishingly rare one the serializer could not walk."
         )
     )
     # The header as the firmware spelled it, rendered beside the

@@ -16,7 +16,7 @@ about the ceremony.
 
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -186,44 +186,185 @@ def reported_board(payload: dict[str, Any]) -> str:
     return "unknown"
 
 
-# The encoder the check-in body is serialized with, built once because
-# it is stateless and per-request construction would be the only cost
-# this path added that is not bounded by the body's size.
-#
-# Both settings are load-bearing rather than stylistic, and the reasons
-# are stated beside `CHECK_IN_BODY_LIMIT`: `ensure_ascii=True` is the
-# printability mechanism, and the compact separators are what keeps the
-# bound spent on facts rather than on whitespace.
-_BODY_ENCODER = json.JSONEncoder(ensure_ascii=True, separators=(",", ":"))
+# The compact JSON punctuation, named because the walk below emits it a
+# token at a time rather than handing a structure to an encoder. No
+# space after either separator: the bound is there to be spent on what
+# the board said, not on whitespace.
+_ITEM_SEPARATOR = ","
+_KEY_SEPARATOR = ":"
+_OBJECT_END = "}"
+_ARRAY_END = "]"
+
+# What a frame's iterator answers when its container is spent. A
+# sentinel of its own because `None` is a value a body may hold.
+_NO_MORE = object()
+
+_INFINITY = float("inf")
 
 
-def bounded_body(payload: dict[str, Any]) -> str:
-    """The parsed check-in object, compactly serialized and never longer
-    than `CHECK_IN_BODY_LIMIT` characters.
+@dataclass
+class _Frame:
+    """One container the walk is inside: what closes it, what is left of
+    it, and whether it has written a member yet.
 
-    `iterencode` rather than `encode`, and the loop stops the moment the
-    accumulation passes the bound: this endpoint is unauthenticated, so
-    what arrives is a stranger's JSON of a size they chose, and the
-    value this builds, copies and dispatches has to be bounded by the
-    limit rather than by the request. Parsing the request is the one
-    cost that is the body's size, and it exists today.
+    The walk's own stack, and the reason it has one. A frame here costs
+    a list entry; the same nesting through a recursive encoder costs an
+    interpreter frame, and a body nests as deep as a stranger typed
+    brackets.
+    """
 
-    A value that had more to say is cut at
+    closer: str
+    members: Iterator[Any]
+    started: bool = False
+
+
+def bounded_body(payload: dict[str, Any]) -> str | None:
+    """What the board reported, compactly serialized, never longer than
+    `CHECK_IN_BODY_LIMIT` characters, and never an exception.
+
+    Null where this server could not represent what it read, which is
+    the same answer an unreadable request gets and for the same reason:
+    a diagnostic may not cost a device its check-in.
+
+    The `except` is a belt and not the mechanism. `_serialized` walks
+    exactly what a JSON parse can produce and carries its own stack, so
+    nothing should reach here; what would, if anything ever did, is a
+    null body rather than a 500 and a library traceback on an
+    unauthenticated path. Nothing of the failure is retained, on the
+    exception chain or anywhere else: the value is precisely what may
+    not reach a log.
+    """
+    try:
+        return _serialized(payload)
+    except Exception:
+        return None
+
+
+def _serialized(payload: dict[str, Any]) -> str:
+    """The bounded walk itself: compact JSON, `ensure_ascii` escaped,
+    cut at the bound with the marker fitted inside it.
+
+    An explicit stack walk rather than `json.dumps` or `iterencode`, and
+    the endpoint is why. It is unauthenticated, so the object was
+    chosen, in size and in shape, by a stranger, and two properties have
+    to hold whatever they chose:
+
+    - **Nothing allocated is the body's size.** Every step emits one
+      token bounded by what is left of the budget, and the walk stops
+      the step after the accumulation passes the bound. `iterencode`
+      cannot do this and the first review round did not catch it: it
+      yields a scalar string as ONE chunk, so a ten-megabyte field is
+      ten megabytes built and appended before any bound can bite.
+    - **It cannot run out of stack.** Depth costs a `_Frame` in a list,
+      so a body nested past any recursion limit is a truncated value.
+      `iterencode` recurses once per level, so a body the parser
+      accepted could still break the encoder, which is a 500 on the one
+      endpoint every board must reach.
+
+    A string is escaped in a slice of at most the remaining budget plus
+    one character. Escaping never shortens, so one character past the
+    budget already proves the value overflows it, and taking more would
+    be work the bound has made pointless.
+
+    A value with more to say is cut at
     `CHECK_IN_BODY_LIMIT - len(CHECK_IN_BODY_TRUNCATED)` and ends with
     that marker, so it is visibly truncated, never longer than the
-    bound, and carries nothing from past the cut. The break is on
-    strictly more than the bound so that a body ending exactly on it is
+    bound, and carries nothing from past the cut. The cut is decided on
+    strictly more than the bound, so a body ending exactly on it is
     whole rather than marked.
     """
-    accumulated: list[str] = []
+    room = CHECK_IN_BODY_LIMIT - len(CHECK_IN_BODY_TRUNCATED)
+    written: list[str] = []
     length = 0
-    for chunk in _BODY_ENCODER.iterencode(payload):
-        accumulated.append(chunk)
-        length += len(chunk)
+    frames: list[_Frame] = []
+    value: Any = payload
+    # Whether `value` is a value still to be written, as opposed to the
+    # walk being between members and owing the innermost frame a step.
+    pending = True
+
+    while True:
+        if pending:
+            pending = False
+            if isinstance(value, dict):
+                frames.append(_Frame(_OBJECT_END, iter(value.items())))
+                written.append("{")
+                length += 1
+            elif isinstance(value, list):
+                frames.append(_Frame(_ARRAY_END, iter(value)))
+                written.append("[")
+                length += 1
+            else:
+                piece = _scalar(value, CHECK_IN_BODY_LIMIT - length)
+                written.append(piece)
+                length += len(piece)
+        elif frames:
+            frame = frames[-1]
+            member = next(frame.members, _NO_MORE)
+            if member is _NO_MORE:
+                frames.pop()
+                written.append(frame.closer)
+                length += 1
+            else:
+                if frame.started:
+                    written.append(_ITEM_SEPARATOR)
+                    length += 1
+                frame.started = True
+                if frame.closer == _OBJECT_END:
+                    key, value = member
+                    piece = _escaped(key, CHECK_IN_BODY_LIMIT - length)
+                    written.append(piece)
+                    written.append(_KEY_SEPARATOR)
+                    length += len(piece) + 1
+                else:
+                    value = member
+                pending = True
+        else:
+            return "".join(written)
+        # Once per step, so the budget every step above reads is never
+        # negative and the walk never takes a step it has no room for:
+        # this is what bounds the depth as well as the length.
         if length > CHECK_IN_BODY_LIMIT:
-            room = CHECK_IN_BODY_LIMIT - len(CHECK_IN_BODY_TRUNCATED)
-            return "".join(accumulated)[:room] + CHECK_IN_BODY_TRUNCATED
-    return "".join(accumulated)
+            return "".join(written)[:room] + CHECK_IN_BODY_TRUNCATED
+
+
+def _scalar(value: Any, budget: int) -> str:
+    """One JSON scalar, spelled the way an encoder spells it."""
+    if value is None:
+        return "null"
+    # `bool` before `int`, because `True` is an `int` to `isinstance` and
+    # `1` is a different fact from `true`.
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return _escaped(value, budget)
+    if isinstance(value, int):
+        return repr(value)
+    if isinstance(value, float):
+        # The three a JSON parse accepts and `repr` words differently.
+        # Printable ASCII either way, and stated in the constant's
+        # comment: this is a diagnostic representation of what the
+        # parser took, not a document anything re-parses.
+        if value != value:
+            return "NaN"
+        if value == _INFINITY:
+            return "Infinity"
+        if value == -_INFINITY:
+            return "-Infinity"
+        return repr(value)
+    raise TypeError("a check-in body holds what a JSON parse produces")
+
+
+def _escaped(text: str, budget: int) -> str:
+    """One JSON string, `ensure_ascii` escaped, built from at most the
+    budget's worth of source plus one character.
+
+    The one character is what makes the slice safe to decide on:
+    escaping never shortens a string, so a source slice one longer than
+    the budget necessarily overflows it, and a string that fits is
+    inside the slice whole. `json.dumps` of a `str` is
+    `encode_basestring_ascii` and recurses into nothing.
+    """
+    return json.dumps(text[: max(budget, 0) + 1])
 
 
 async def check_version(request: Request) -> Response:
@@ -264,6 +405,11 @@ async def check_version(request: Request) -> Response:
     # unfamiliar board and says so with a null body. Everything below it
     # wants the empty mapping instead, which is exactly what
     # `_read_json_object` would have answered.
+    #
+    # `bounded_body` answers null for the same field on its own account,
+    # and both nulls mean the one thing the field says: this server has
+    # no representation of what this board sent. Neither costs the
+    # device its reply.
     read = await _json_object(request)
     said_body = None if read is None else bounded_body(read)
     payload = {} if read is None else read
