@@ -73,6 +73,7 @@ from vinga_server.db import open_database, schema
 from vinga_server.events import assembly
 from vinga_server.providers import ProviderError, build_entry, build_world
 from vinga_server.tools.mcp import McpConfigError, McpServers
+from vinga_server.tools.mcp import manager as mcp_manager
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -1610,10 +1611,15 @@ async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
 # something an operator can meet, exactly as the location
 # `provider_for_agent` answers with is.
 #
-# The three cases are that reasoning, in the order it has to hold: the
+# The four cases are that reasoning, in the order it has to hold: the
 # composition really does refuse such a name, a boot over such a row
-# really does say nothing of it, and the two sentences really are
-# composed where every other location over an entry identity is.
+# really does say nothing of it, the two sentences really are composed
+# where every other location over an entry identity is, and they really
+# are composed by READING that helper rather than by spelling what it
+# happens to return. The last of those exists because the first three
+# cannot say it: the charset that makes this defence also makes the
+# helper's answer identical to the hand-built string it replaced, so
+# nothing about a lawful name can tell the two spellings apart.
 
 # A lawful MCP entry name, which is what the charset leaves.
 MCP_LAWFUL = "home"
@@ -1747,6 +1753,10 @@ def test_both_mcp_build_refusals_name_the_entry_where_every_location_is(
     about that row would name it. The strip inside that helper is the
     identity function on every name this charset allows, so both
     sentences are byte-identical to what they were.
+
+    Which is exactly why this case cannot be the whole claim: byte
+    identity means it passes against the hand-built spelling too. The
+    case below is the half that tells them apart.
     """
     monkeypatch.delenv(MCP_UNSET_VARIABLE, raising=False)
     written_at = entities.entity_location(entities.descriptor("mcp-server"), MCP_LAWFUL)
@@ -1771,4 +1781,69 @@ def test_both_mcp_build_refusals_name_the_entry_where_every_location_is(
     assert str(egress.value).startswith(f"{written_at}: server.local_only is on, and whether")
     assert str(broken.value).startswith(
         f"{written_at}: {written_at}.env.API_TOKEN: references ${MCP_UNSET_VARIABLE}"
+    )
+
+
+# What the spy below answers instead of a location: a string no
+# composition in this repository can produce, so an assertion that finds
+# it in a sentence has found the helper's answer and nothing else.
+SPIED_LOCATION = "<the location the helper answered>"
+
+
+def test_both_mcp_build_refusals_read_the_location_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Which composition the two sentences are built FROM, which the case
+    above cannot say.
+
+    For a lawful name `entity_location` returns exactly the string the
+    hand-built f-string used to, byte for byte, so every assertion above
+    passes just as well against the spelling this change removed, and the
+    single home could be undone without a case noticing. The one thing
+    that tells them apart is substituting the helper's ANSWER, which is
+    what licenses reaching into the module under test here: what is
+    pinned is the seam this change exists to create, that both refusals
+    about one entry go through one named composition, rather than a
+    detail of how either sentence is worded.
+
+    The spy checks what it is ASKED as well as what it answers, since a
+    call that reached the helper with some other kind or some other
+    identity would satisfy a sentinel and mean nothing.
+
+    The inner location the construction refusal quotes is deliberately
+    left real: it is composed by `resolve_mcp_values`, in a different
+    module, which has read the helper since #414, so one sentence shows
+    both halves at once.
+    """
+    monkeypatch.delenv(MCP_UNSET_VARIABLE, raising=False)
+    asked: list[tuple[entities.EntityDescriptor, tuple[str, ...]]] = []
+
+    def spying(kind: entities.EntityDescriptor, *identity: str) -> str:
+        asked.append((kind, identity))
+        return SPIED_LOCATION
+
+    monkeypatch.setattr(mcp_manager, "entity_location", spying)
+    declared = mcp_world_named(
+        MCP_LAWFUL, {"transport": "stdio", "command": "uvx"}, local_only=True
+    )
+    unreadable = mcp_world_named(
+        MCP_LAWFUL,
+        {
+            "transport": "stdio",
+            "command": "uvx",
+            "env": {"API_TOKEN": f"${MCP_UNSET_VARIABLE}"},
+        },
+    )
+
+    with pytest.raises(McpConfigError) as egress:
+        McpServers.build(declared)
+    with pytest.raises(McpConfigError) as broken:
+        McpServers.build(unreadable)
+
+    assert [identity for _, identity in asked] == [(MCP_LAWFUL,), (MCP_LAWFUL,)]
+    assert all(kind is entities.descriptor("mcp-server") for kind, _ in asked)
+    assert str(egress.value).startswith(f"{SPIED_LOCATION}: server.local_only is on")
+    assert str(broken.value).startswith(
+        f"{SPIED_LOCATION}: mcp_servers.{MCP_LAWFUL}.env.API_TOKEN: "
+        f"references ${MCP_UNSET_VARIABLE}"
     )
