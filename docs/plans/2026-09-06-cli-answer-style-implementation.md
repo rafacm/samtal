@@ -818,7 +818,9 @@ merged pin uses for the state Getting Started's step 3 leaves behind. So
 it is this repository's own output for that state rather than a
 paraphrase, which is what **historical** claims, and the sentence under
 it counts what the block itself shows rather than repeating the issue's
-count.
+count. The review round below turned this from a deviation into the
+plan's own wording: the preamble licenses a reconstruction that says it
+is one, and the guide's block says it.
 
 ### What building it turned up
 
@@ -863,3 +865,54 @@ the tree as it stands apart from this section and the two documentation
 edits recorded above it, all three of which are Markdown; the only unit
 test that reads any of them is the census drift check, which was re-run
 after the manifest was regenerated and passes.
+
+### The review round
+
+Backend codex at the terra tier, against PR #433. Three P2s, all
+accepted.
+
+**The boundary practice was stated over one boundary.** It opened by
+saying every kind pending in a comparison is waiting on the same apply,
+which is true of what this server sends today and not of the model:
+`Applies` carries `restart`, `HEADS` has a line for it, and
+`_diff_listing` prints a group per boundary present. A practice written
+that way reads as a rule against grouping by anything but the install,
+which is the opposite of the rendering it is describing. It says once
+per group now, with a paragraph drawing the line: what is forbidden is
+one boundary said twice in one answer, not two boundaries each said
+once. The example follows `HEADS` rather than the one command, since
+only the reload head names a verb and the restart head says what crosses
+it. The section keeps its name, which is the plan's, and the body is
+where the line is drawn.
+
+**The step number was wrong in two places.** The diff counterexample and
+the deviation note beside it said the pending state is what Getting
+Started's step 2 leaves behind; step 2 installs the CLI and reads `info`
+off an empty store, and the document that writes the providers, the
+defaults and the agent is step 3. Both say step 3.
+
+**The reconstructed counterexample, and a post-acceptance plan
+amendment.** The plan's "The five practices, decided" required the
+counterexamples to be "quoted from the issues", and the diff block is
+the retired renderer run over `DIFF_PENDING`, which the deviation note
+recorded. The finding is real, and the resolution taken is to amend the
+plan rather than to weaken the guide: a specimen anyone can re-derive by
+running a named renderer over a committed fixture is better evidence
+than a paste out of an issue nobody reading the guide can check. So the
+plan's preamble now licenses either, on the condition that the guide
+says which it is, and the guide's diff block says it. This is an
+amendment to an accepted plan made during a milestone's review round
+rather than before implementation, which is worth naming: the plan is
+the authority, and what changed it is a finding against the milestone
+that implemented it, recorded here and in the plan's own text.
+
+Verification after the round, from the repository root and
+`vinga-server/`. No file under `vinga-server/src` and no test moved, so
+the unit and integration lanes were not re-run; what these four commits
+touch is Markdown and the manifest generated from it.
+
+- `python scripts/check_doc_links.py .`: 211 files, 0 failures.
+- `uv run python -m tests.unit.test_command_spellings`: regenerated
+  after the last edit; the manifest's diff is line positions only, with
+  no spelling gained or lost.
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 48 passed.
