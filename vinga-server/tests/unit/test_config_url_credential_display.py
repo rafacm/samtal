@@ -1254,6 +1254,35 @@ async def test_the_build_of_a_stored_entry_names_it_without_its_credential(
     _carries_no_sentinel(chain(caught.value), *_logged(caplog))
 
 
+async def test_an_option_a_type_never_asked_about_is_named_without_its_credential(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other caller-written word this refusal reports, and the one
+    that is answered by shortening rather than by withholding.
+
+    A provider entry passes every key beyond the declared ones through
+    to its implementation, so a key spelled as a URL is a lawful stored
+    key that a write refuses now and a planted row still holds (#408).
+    A type that declares no option model reads its options to the end
+    and refuses whatever is left over by name, and by name is right
+    here: there is no closed set to list instead, so a refusal naming
+    nothing would leave an operator with a typo they cannot see. The
+    name comes back through the strip, which is what a display of the
+    same key does.
+    """
+    entry = ProviderConfig.model_validate(
+        {"type": "mock", f"https://user:{KEY_SENTINEL}@{HOST}/opt": "ordinary"}
+    )
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as caught:
+        await build_entry("llm", HISTORIC, entry)
+
+    assert str(caught.value) == (
+        f"providers.llm.{HISTORIC_SHOWN}: unknown option(s): https://{HOST}/opt"
+    )
+    _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
 async def test_the_owner_refusing_after_construction_names_it_the_same_way(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from vinga_server.config import ConfigError
 from vinga_server.config.entities import provider_label
-from vinga_server.config.models import ProviderConfig
+from vinga_server.config.models import ProviderConfig, without_url_credential
 from vinga_server.config.provider_options import (
     PROVIDER_TYPES,
     OptionsRefused,
@@ -133,9 +133,18 @@ class OptionsReader:
         option refused after a model had loaded would be a refusal with
         an object to let go of, on a path whose whole promise is that it
         touched nothing (#191).
+
+        The names come back, unlike the rejected type above, and through
+        the strip rather than withheld. There is no closed set to list
+        instead here, so a refusal that named nothing would leave an
+        operator with a typo they cannot see; and a key spelled as a URL
+        carrying a credential is a stored key like any other, so it gets
+        what a display of one gets (#408, #413). Sorted as they are
+        STORED and shortened afterwards, for the reason
+        `views._shown_mapping` gives.
         """
         if self._pending:
-            unknown = ", ".join(sorted(self._pending))
+            unknown = ", ".join(without_url_credential(key) for key in sorted(self._pending))
             raise ProviderError(f"{self._label}: unknown option(s): {unknown}")
 
 
