@@ -551,7 +551,7 @@ added where the other five live.
   CHANGELOG, census manifest.
 - [x] **[M5: the practices, written where reviewers
   look](2026-09-06-cli-answer-style-implementation.md#m5-the-practices-written-where-reviewers-look)**
-  (#426, PR TBD). The
+  (#426, PR #433). The
   five practices join `cli-guide.md` in its house shape (each with a
   merged example from M1-M4 and a historical counterexample quoted
   from the issues), the reviewer checklist at the top gains the
