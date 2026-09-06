@@ -26,12 +26,15 @@ outcome rather than a rendering, so it has cases of its own: a document
 exported from a store holding such a row used to be one its own import
 path refused whole.
 
-Two later sections carry the rule past the displays, because the same
+Three later sections carry the rule past the displays, because the same
 row is spoken as well as shown. A refusal says a stored identity on a
 server's stderr as it fails to start (#382), and the build that runs
 after the composition says one again in a vocabulary of its own: the
 label every provider refusal names an entry by, and the identity every
-event about that provider carries (#413).
+event about that provider carries (#413). The last section is where the
+same rule under the build's other noun, the MCP entries an agent
+references, turns out to be defence rather than a leak, and says why
+(#420).
 """
 
 import json
@@ -69,6 +72,7 @@ from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
 from vinga_server.events import assembly
 from vinga_server.providers import ProviderError, build_entry, build_world
+from vinga_server.tools.mcp import McpConfigError, McpServers
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -1578,4 +1582,193 @@ async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
     assert world_named(LAWFUL, llm=LAWFUL).provider_for_agent(LAWFUL, "llm") == (
         LAWFUL,
         f"agents.{LAWFUL}.llm",
+    )
+
+
+# The MCP build, which now names its entry where every other location is
+#
+# The provider half of the build is above. The other half builds the MCP
+# entries some agent references, and it composed its two boot refusals
+# by joining `mcp_servers.` to a stored name by hand: the egress rule
+# `server.local_only` applies to every referenced entry, and whatever an
+# entry that will not construct is reported as. #413's sweep named both
+# and left them out of its own change rather than widening into it, on
+# the reading that they were the same hole under a different noun
+# (#420).
+#
+# They are not. What follows is measured rather than assumed, and it is
+# the one place the two nouns come apart. A provider name is held to one
+# URL path segment at WRITE time only, so a row stored before that rule
+# composes and reaches the build carrying whatever it holds. An MCP
+# entry name is held again at COMPOSITION time, by
+# `models.check_mcp_entry_names` on the domain model, because the name
+# becomes a tool-name prefix: a stored name outside `[A-Za-z0-9_-]+`
+# refuses the whole snapshot before a `Config` exists, and no credential
+# can be spelled inside that charset. So these two refusals cannot be
+# reached with such a name at all, and reading the location through
+# `entity_location` is defence and one home rather than a fix of
+# something an operator can meet, exactly as the location
+# `provider_for_agent` answers with is.
+#
+# The three cases are that reasoning, in the order it has to hold: the
+# composition really does refuse such a name, a boot over such a row
+# really does say nothing of it, and the two sentences really are
+# composed where every other location over an entry identity is.
+
+# A lawful MCP entry name, which is what the charset leaves.
+MCP_LAWFUL = "home"
+
+# An environment variable nothing sets, named so that nothing else can
+# have set it either. What makes a referenced entry one that will not
+# construct: `_resolve` runs at construction exactly so an unset
+# reference fails the boot rather than the first conversation.
+MCP_UNSET_VARIABLE = "VINGA_MCP_CREDENTIAL_TEST_TOKEN"
+
+
+def mcp_world_named(name: str, entry: dict[str, object], local_only: bool = False) -> Config:
+    """A one-agent configuration whose MCP entry is `name` and whose
+    agent references it, composed the way a stored snapshot is.
+
+    The reference is what puts the entry in front of the build at all,
+    since only a referenced entry is managed. The domain half goes
+    through `compose_config` like `world_named` above, which is the
+    route a boot takes from the database to a `Config`; the file half
+    carries `server.local_only`, which is where a deployment writes it.
+    """
+    return compose_config(
+        FileConfig(server={"local_only": local_only}),
+        {
+            "providers": {
+                stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
+            },
+            "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+            "mcp_servers": {name: entry},
+            "agents": {"assistant": {"prompt": "hi", "mcp": [name]}},
+            "default_agent": "assistant",
+        },
+        "the test's database",
+    )
+
+
+def test_such_an_mcp_entry_name_never_reaches_the_build_at_all() -> None:
+    """The measured fact the two cases after it rest on, and the reason
+    this section is defence where the provider one was a leak.
+
+    An entry name becomes a tool-name prefix, so the domain model checks
+    the charset on every composition rather than only on a write, and a
+    stored name holding a credential fails it: `://` is not in
+    `[A-Za-z0-9_-]+`, and neither is anything else a credential needs.
+    The refusal quotes nothing back, which is the same rule read from
+    the other end, so this surface publishes nothing either.
+    """
+    with pytest.raises(ConfigError) as caught:
+        compose_config(
+            FileConfig(),
+            {"mcp_servers": {HISTORIC: {"transport": "stdio", "command": "uvx"}}},
+            "the test's database",
+        )
+
+    message = str(caught.value)
+    assert "an entry name becomes a tool-name prefix" in message
+    assert HISTORIC_SHOWN not in message
+    _carries_no_sentinel(chain(caught.value))
+
+
+@pytest.fixture
+def unbuildable_mcp(store: ConfigStore) -> ConfigStore:
+    """A deployment holding an MCP entry named the way no write would
+    allow, referenced by the one agent so that a build would reach it.
+
+    The four provider entries are ordinary mock ones under lawful names,
+    so the only thing wrong with this deployment is the MCP name.
+    """
+    for stage, name in (("llm", "brain"), ("asr", "ears"), ("tts", "voice"), ("vad", "gate")):
+        _plant(store, "provider", (stage, name), ProviderConfig(type="mock"))
+    _plant(
+        store,
+        "mcp-server",
+        (HISTORIC,),
+        McpServerConfig(transport="stdio", command="uvx"),
+    )
+    _plant(
+        store,
+        "agent",
+        ("assistant",),
+        AgentConfig(
+            prompt="hi", llm="brain", asr="ears", tts="voice", vad="gate", mcp=[HISTORIC]
+        ),
+    )
+    planted(
+        store,
+        insert(schema.domain_settings).values(key=schema.DEFAULT_AGENT_KEY, value="assistant"),
+    )
+    return store
+
+
+def test_a_boot_over_such_a_stored_mcp_entry_names_nothing_verbatim(
+    unbuildable_mcp: ConfigStore,
+    restore_root_logger: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The whole way an operator meets such a row, through the entry
+    point rather than through the lifespan alone, which is the shape the
+    provider build's boot case has and for the same reasons.
+
+    What refuses is the composition rather than the MCP build, which is
+    the claim the case above makes from the inside and this one makes
+    from the surface: the sentence on stderr is the charset rule, and
+    neither the name nor what it carries is anywhere on either stream or
+    in either log format.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+
+    with caplog.at_level(logging.DEBUG):
+        assert serving.run(None) == 1
+
+    printed = capsys.readouterr()
+    assert "an entry name becomes a tool-name prefix" in printed.err
+    assert HISTORIC_SHOWN not in printed.out + printed.err
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
+
+
+def test_both_mcp_build_refusals_name_the_entry_where_every_location_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two sentences themselves, for the only kind of name that can
+    reach them.
+
+    Asserted against `entity_location` rather than against a literal,
+    which is the whole of what changed: the location is composed where
+    the store composes it and where the provider build composes its
+    label, so an entry the egress rule refuses and an entry that will
+    not construct are named alike and are named as any other refusal
+    about that row would name it. The strip inside that helper is the
+    identity function on every name this charset allows, so both
+    sentences are byte-identical to what they were.
+    """
+    monkeypatch.delenv(MCP_UNSET_VARIABLE, raising=False)
+    written_at = entities.entity_location(entities.descriptor("mcp-server"), MCP_LAWFUL)
+    declared = mcp_world_named(
+        MCP_LAWFUL, {"transport": "stdio", "command": "uvx"}, local_only=True
+    )
+    unreadable = mcp_world_named(
+        MCP_LAWFUL,
+        {
+            "transport": "stdio",
+            "command": "uvx",
+            "env": {"API_TOKEN": f"${MCP_UNSET_VARIABLE}"},
+        },
+    )
+
+    with pytest.raises(McpConfigError) as egress:
+        McpServers.build(declared)
+    with pytest.raises(McpConfigError) as broken:
+        McpServers.build(unreadable)
+
+    assert written_at == f"mcp_servers.{MCP_LAWFUL}"
+    assert str(egress.value).startswith(f"{written_at}: server.local_only is on, and whether")
+    assert str(broken.value).startswith(
+        f"{written_at}: {written_at}.env.API_TOKEN: references ${MCP_UNSET_VARIABLE}"
     )

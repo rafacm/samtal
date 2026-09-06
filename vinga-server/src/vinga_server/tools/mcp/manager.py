@@ -23,6 +23,7 @@ import mcp.types
 from mcp import ClientSession
 
 from vinga_server.config import Config, McpServerConfig
+from vinga_server.config.entities import descriptor, entity_location
 from vinga_server.config.secrets import SecretStore
 from vinga_server.egress import EgressRefusal, check_mcp_server
 from vinga_server.events.catalog import (  # noqa: E402
@@ -757,12 +758,32 @@ def _managers_for(
     managers: dict[str, McpServerManager] = {}
     for name in sorted(config.referenced_mcp_servers()):
         entry = config.mcp_servers[name]
+        # What both refusals below name this entry: composed once, and
+        # through `entity_location`, the one home for where an entry is
+        # written, rather than joined to `mcp_servers.` by hand in each
+        # of them. The duplication was visible inside a single sentence,
+        # since an entry that will not construct is reported as this
+        # location wrapped around the one `resolve_mcp_values` composes
+        # for the group underneath it, and that half has read the helper
+        # since #414. The provider build composes its own label once for
+        # its two halves and for the same reason (#413).
+        #
+        # The strip that helper carries is defence here rather than a
+        # leak closed, which is the one place this differs from that
+        # label. A provider name is held to one URL path segment at write
+        # time only, so a row stored before that rule still composes and
+        # reaches the build; an MCP entry name becomes a tool-name
+        # prefix, so `models.check_mcp_entry_names` holds it to
+        # `[A-Za-z0-9_-]+` on every composition as well, and a name that
+        # could carry a credential refuses the whole snapshot before
+        # anything here runs (#420).
+        written_at = entity_location(descriptor("mcp-server"), name)
         if config.server.local_only:
             # One module holds the rule for entries and providers alike
             # (#30, #136); what stays here is this surface's own
             # exception around the sentence it composed.
             try:
-                check_mcp_server(name, entry)
+                check_mcp_server(written_at, entry)
             except EgressRefusal as exc:
                 raise McpConfigError(str(exc)) from exc
         try:
@@ -770,7 +791,7 @@ def _managers_for(
                 name, entry, secrets, configured.allowed_names(name)
             )
         except ValueError as exc:
-            raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
+            raise McpConfigError(f"{written_at}: {exc}") from exc
     return managers
 
 
