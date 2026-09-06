@@ -1092,10 +1092,12 @@ _KEYED_BY_NAME = tuple(
 # statement of the two members `secrets.EntityKind` admits: a kind that
 # names no slot has no secrets column to read, no row for one to be
 # written to, and no way for a location to address it.
-_SECRET_HOLDERS = tuple(
-    descriptor for descriptor in entities.ENTITIES if descriptor.secret_slots is not None
-)
-_HOLDER_OF = {descriptor.secret_slots: descriptor for descriptor in _SECRET_HOLDERS}
+#
+# Read off `entities.SECRET_HOLDERS` rather than derived again here.
+# Three modules asked this question and each answered it from the
+# registry itself, which is one mapping with two pending bugs in it.
+_HOLDER_OF = entities.SECRET_HOLDERS
+_SECRET_HOLDERS = tuple(_HOLDER_OF.values())
 
 
 def _table(descriptor: EntityDescriptor) -> Table:

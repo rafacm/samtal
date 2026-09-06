@@ -768,6 +768,22 @@ _BY_NAME: dict[str, EntityDescriptor] = {entry.name: entry for entry in ENTITIES
 
 _SETTINGS_BY_NAME: dict[str, Setting] = {entry.name: entry for entry in SETTINGS}
 
+# Which kind holds a stored secret of each kind a stored location may
+# name, read off the registry: `secret_slots` IS the word a location's
+# `kind` carries, so the two vocabularies cannot come apart.
+#
+# Here rather than derived where it is needed, because it was derived
+# three times: the store resolves a location to the row it hangs on, the
+# CLI renders a location back into the command that fills it and reads
+# the keys as the closed set a stored answer's `kind` is checked
+# against, and a location now says itself through the addressing this
+# module owns. Three derivations of one mapping are two pending bugs,
+# and the shape of the bug is silent: a kind that gained secret slots
+# would be admitted by whichever of them was updated.
+SECRET_HOLDERS: dict[str, EntityDescriptor] = {
+    entry.secret_slots: entry for entry in ENTITIES if entry.secret_slots is not None
+}
+
 
 def descriptor(name: str) -> EntityDescriptor:
     """One commanded kind, by the name its command, its route and its
@@ -902,6 +918,7 @@ __all__ = [
     "APPLY_NOTICE",
     "RESTART_NOTICE",
     "PROGRAM",
+    "SECRET_HOLDERS",
     "SETTINGS",
     "SNAPSHOT_NOTICE",
     "DocumentedShape",

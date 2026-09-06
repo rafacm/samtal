@@ -2498,11 +2498,9 @@ EXPORT_SLOTS_HEADING = (
 # the registry: the noun a secret command sits under and the parameters
 # that address one entry of it are the descriptor's, so the command an
 # annotation names cannot come to disagree with the command that exists.
-_SECRET_HOLDER: dict[str, entities.EntityDescriptor] = {
-    kind.secret_slots: kind
-    for kind in entities.ENTITIES
-    if kind.secret_slots is not None
-}
+# Read from `entities` rather than derived again, since the store and a
+# location's own description ask the same question.
+_SECRET_HOLDER = entities.SECRET_HOLDERS
 
 # And the closed set of kinds a stored location may name, as a shape the
 # gate can read a location's `kind` against. Built from the mapping

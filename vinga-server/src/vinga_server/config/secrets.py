@@ -46,9 +46,15 @@ from typing import Literal
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
-from vinga_server.config.entities import descriptor, entity_location, provider_identity
+from vinga_server.config.entities import (
+    SECRET_HOLDERS,
+    addressed,
+    descriptor,
+    entity_location,
+    provider_identity,
+)
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import MASK, resolve_env_references
+from vinga_server.config.models import MASK, resolve_env_references, spoken_identity
 
 # `MASK` and `provider_identity` are re-exported rather than defined
 # here. Both are facts about how an entity is named and displayed rather
@@ -102,8 +108,33 @@ class SecretLocation:
         """How the location reads in a sentence an operator sees: the
         kind, the entity, and the slot. A refusal names it this way, and
         so does the acknowledgement a secret write answers with, which is
-        why it is one string rather than a format each caller picks."""
-        return f"{self.kind} {self.identity} {self.slot}"
+        why it is one string rather than a format each caller picks.
+
+        A sentence rather than an address, so both halves leave through
+        the door every spoken identity leaves through, and the fields
+        keep what they are: `identity` and `slot` are what a lookup is
+        made from and they are untouched, which is the same line
+        `entity_location` draws (#381, #382, #414).
+
+        Reachable rather than belt and braces, on thirteen refusals and
+        four acknowledgements. `verify_secrets` opens every stored
+        envelope at startup, so an entity or a slot named before the
+        addressability rule reaches a boot's stderr through whichever of
+        those sentences the envelope earns; and a slot is held to that
+        rule at write time only, exactly as a name is.
+
+        Split into the parameters that address the entity before each is
+        said, which is what keeps the rule off the separator: an
+        identity is a dotted join this repository owns, and asking the
+        URL rule of the join rather than of its parts would let
+        `llm.https://user:password@host/x` be read as a scheme of its
+        own.
+        """
+        holder = SECRET_HOLDERS[self.kind]
+        said = ".".join(
+            spoken_identity(part) for part in addressed(holder, self.identity)
+        )
+        return f"{self.kind} {said} {spoken_identity(self.slot)}"
 
 
 def load_keys(environ: Mapping[str, str] | None = None) -> MultiFernet | None:
