@@ -173,7 +173,7 @@ Check the vinga server status with:
 vinga info
 ```
 
-Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do, including how to put the binary back, is on [its own page](docs/reference/cli.md).
+Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
 
 **Step 3. Configure an agent**
 
