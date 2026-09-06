@@ -3345,29 +3345,50 @@ DIFF_SECTIONS: dict[str, type[BaseModel]] = {
 # cannot come to spell it differently: that command is `vinga apply`.
 INSTALLS = f"{PROGRAM} apply"
 
-# What this client has to say about each set of boundaries a write can
-# be waiting at, printed under the server's own sentence.
+# What this client says about each set of boundaries a write can be
+# waiting at, printed INSTEAD of the server's own sentence.
 #
-# Keyed by the whole set rather than by a token, because what to do
-# about `reload` and `check-in` together is one thing to say rather
-# than two sentences in a row: the install crosses the first and the
-# device crosses the second by itself.
+# Instead rather than under it (#426). The token is what travels, so
+# whichever side can state the boundary states it once, and this side
+# can: it knows what the set means and it knows the command that crosses
+# it, while the server knows the first half only. Two lines said one
+# thing twice, and the half an operator acts on was the second of them.
+# So each line here stands alone, which is what it has to be able to do:
+# it names the state first, because that is the half no compaction may
+# cut, and the remedy after it.
+#
+# Keyed by the whole set rather than by a token, because what to say
+# about `reload` and `check-in` together is one thing rather than two
+# sentences in a row: the install crosses the first and the device
+# crosses the second by itself.
 #
 # The keys are the sets there is something to run about, which is the
 # whole of what a table like this may claim. A write waiting only at
 # `check-in`, `restart` or `store-boot` is answered by the server's
 # sentence and nothing else, because no command of this grammar crosses
-# those; so is a set this client cannot name at all, which is what a
-# boundary from a server newer than this one arrives as, the empty
-# tuple `_declared` reads it down to. The rule either way is the same
-# one: an unknown state is quoted, never guessed at.
-REMEDIES: dict[frozenset[Applies], str] = {
+# those and the server's words for them are already the whole answer; so
+# is a set this client cannot name at all, which is what a boundary from
+# a server newer than this one arrives as, the empty tuple `_declared`
+# reads it down to. The rule either way is the same one: an unknown
+# state is quoted, never guessed at.
+SPOKEN: dict[frozenset[Applies], str] = {
     frozenset({Applies.RELOAD}): (
-        f"`{INSTALLS}` installs the stored configuration on the running server, and "
-        f"`{PROGRAM} diff` lists everything pending."
+        f"stored, not serving yet: run `{INSTALLS}` to install it on the running "
+        f"server, and `{PROGRAM} diff` to list everything pending."
     ),
-    frozenset({Applies.RELOAD, Applies.CHECK_IN}): f"`{INSTALLS}` installs the stored agents.",
+    frozenset({Applies.RELOAD, Applies.CHECK_IN}): (
+        f"stored, and the agent it names is not serving yet: run `{INSTALLS}`, and a "
+        f"device reaches the agent at its next check-in after that."
+    ),
 }
+
+# The one clause a whole document is answered with, which is the same
+# clause for both sets above: they are waiting on the one install this
+# grammar has, and a count line that named the pair twice would say less
+# than saying it once. What the per-set lines add over this one is the
+# check-in half, which is detail a single write's own answer carries and
+# a document's does not: nothing is run about it either way.
+NOT_SERVING_YET = f"not serving yet: run `{INSTALLS}`"
 
 
 def _boundaries(applies: object) -> frozenset[Applies]:
@@ -3384,18 +3405,19 @@ def _boundaries(applies: object) -> frozenset[Applies]:
 
 
 def _announced(sentence: str, applies: frozenset[Applies]) -> str:
-    """What one write is waiting at, as an operator reads it: the
-    server's sentence, and this client's advice under it where there is
-    any.
+    """What one write is waiting at, as an operator reads it: this
+    client's own line where it knows the set, and the server's sentence
+    where it does not.
 
-    Two lines rather than one, and in that order, because they are two
-    voices: the first is what the server says is true of the write and
-    the second is what this client would do about it. A set with no
-    remedy prints the sentence alone, which is also what an older
-    server's silence and a newer server's word both arrive as.
+    One voice rather than two (#426). Both sides are answering the same
+    question, so the one that can answer it whole answers it, and this
+    side can wherever the set is a key above: it says the state and the
+    command that crosses it in one line. A set with no line here is
+    quoted from the server, which is what a boundary with nothing to run
+    about, an older server's silence and a newer server's word all
+    arrive as.
     """
-    remedy = REMEDIES.get(applies)
-    return sentence if remedy is None else f"{sentence}\n{remedy}"
+    return SPOKEN.get(applies, sentence)
 
 
 # What the label on a block means, said once at the head rather than
@@ -4482,18 +4504,19 @@ def _imported(answer: Mapping[str, object]) -> None:
     boundaries are what the operator has to be told about.
 
     One line per entry on stdout, in the order the answer lists them,
-    which is the configuration's own section order. The notices go to
-    stderr the way a single write's does, and each distinct one once: a
+    which is the configuration's own section order. What they are
+    waiting on goes to stderr the way a single write's does, and it is
+    one line over the whole document rather than one per entry: a
     document that wrote nine entities is waiting on one apply, not on
-    nine, and printing the sentence nine times would say otherwise.
+    nine, and printing a sentence nine times would say otherwise.
     """
     for notice in _imported_entries(answer):
         print(notice, file=sys.stderr)
 
 
 def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
-    """What an imported document did, entry by entry, and the distinct
-    boundaries the entries that were written are waiting on.
+    """What an imported document did, entry by entry, and what the
+    entries that were written are waiting on.
 
     Apart from the rendering above it and printing rather than
     returning, because the two halves answer different questions: what
@@ -4520,23 +4543,36 @@ def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
     # output an empty import has would have been read after the notice
     # it came before.
     sys.stdout.flush()
-    # Keyed on whichever half is doing the work, which is the same rule
-    # the rendering keeps one level up: a set this client knows is
-    # spoken by this client, and a set it does not is quoted from the
-    # server. On the set itself and not on the sequence that carried
-    # it, because JSON has no set and the order a server serialized
-    # one in is not a fact about the write: two entries waiting at a
-    # reload and a check-in are one line whichever way round each of
-    # them arrived. So two entries waiting at one boundary are one line
-    # however their sentences read, and two entries from a server older
-    # than the vocabulary, which both carry the empty set, are told
-    # apart by the only half either of them has. Keying on the set
-    # alone would have collapsed an ordinary stored entry and a device
-    # binding from such a server into one, and half of what an operator
-    # is waiting on would have gone unsaid.
-    announced: dict[object, str] = {}
-    for entry in entries:
-        if entry["notice"] is None:
+    # One line for the whole document, and the server's sentences under
+    # it only where this client cannot speak for itself (#426).
+    #
+    # The count line is the answer to what the operator typed: they ran
+    # `import`, so what they are told is what was imported and how much
+    # of it. Counted over the entries that wrote, because an entry the
+    # store already said is not something this command did; the two
+    # halves of that agree by contract, which is what `_one_outcome`
+    # refuses a body over. The boundary rides that line because both
+    # sets this client knows are waiting on the one install this grammar
+    # has, which is what the comment above `INSTALLS` says: a document of
+    # nine entries is waiting on one apply, and saying so nine times, or
+    # twice for two sets, says less than saying it once.
+    #
+    # What is not collapsed is what this client did not compose. An
+    # entry waiting at a boundary with nothing to run about, one from a
+    # server older than the vocabulary and one from a server newer than
+    # it all contribute the sentence the server wrote, deduplicated by
+    # the sentence itself: with no set to key on, the sentence is the
+    # only half either of them has, and two such entries carrying
+    # different sentences are two different things to be waiting on.
+    written = [entry for entry in entries if entry["notice"] is not None]
+    if not written:
+        return ()
+    actionable = False
+    quoted: dict[str, str] = {}
+    for entry in written:
+        applies = _boundaries(entry["applies"])
+        if applies in SPOKEN:
+            actionable = True
             continue
         # Whole, for the reason a prompt and the onboarding URL are
         # printed whole: a boundary sentence cut at a bound would lose
@@ -4545,9 +4581,12 @@ def _imported_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
         # function, which has no exceptions: nothing an answer carries
         # steers a terminal.
         sentence = printable(str(entry["notice"]), UNBOUNDED)
-        applies = _boundaries(entry["applies"])
-        announced.setdefault(applies or sentence, _announced(sentence, applies))
-    return tuple(announced.values())
+        quoted.setdefault(sentence, sentence)
+    counted = f"imported {len(written)} {'entry' if len(written) == 1 else 'entries'}"
+    return (
+        f"{counted}, {NOT_SERVING_YET}" if actionable else counted,
+        *quoted.values(),
+    )
 
 
 def _entry_name(entry: Mapping[str, object]) -> str:
@@ -4567,22 +4606,30 @@ def _entry_name(entry: Mapping[str, object]) -> str:
 
 
 def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
-    """One write acknowledged: what it did, when it takes effect, and
-    what this client would do about that.
+    """One write acknowledged: what it did, and when it takes effect.
 
-    The first two are the API's own words, carried through unchanged:
-    what an act did and which boundary it lands at are decided where the
-    write happens, and this is where they are read out. The third is
-    this client's, composed from the boundaries beside the sentence,
-    because the command that crosses one is a fact of this grammar and
-    not of the server's (#386).
+    The first is the API's own words, carried through unchanged: what an
+    act did is decided where the write happens, and this is where it is
+    read out. The second is this client's wherever it knows the boundary
+    set, because the command that crosses one is a fact of this grammar
+    and not of the server's (#386), and the server's own sentence
+    wherever it does not.
     """
     print(f"wrote {acknowledgement['wrote']}")
     # Flushed first, so the notice lands after the line it is about
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
     print(
-        _announced(str(acknowledgement["notice"]), _boundaries(acknowledgement["applies"])),
+        _announced(
+            # Whole and through the display door, for the reason the
+            # import path records: a boundary sentence cut at a bound
+            # loses the state it ends with, and nothing an answer
+            # carries steers a terminal. This is a sentence a server of
+            # any age composed, so the arm that quotes it is the arm
+            # that needs the door.
+            printable(str(acknowledgement["notice"]), UNBOUNDED),
+            _boundaries(acknowledgement["applies"]),
+        ),
         file=sys.stderr,
     )
 

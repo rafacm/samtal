@@ -33,10 +33,13 @@ is the complete list of the substitutions that licenses.
 
 The last of them no longer moves with the grammar because the server
 said it: #386 took the command out of the two notices that named one,
-so what an operator reads under a write is the server's state sentence
-with the CLI's own advice beneath it. The command is still printed and
-still moves with the grammar; which side prints it is what changed, and
-the two entries below record the whole of it. It is applied to the TRANSCRIPT before the
+and #426 finished the move by having the CLI's own line REPLACE the
+sentence wherever it knows the boundary set. So what an operator reads
+under a write is one line from the side that can say the whole of it.
+The command is still printed and still moves with the grammar; which
+side prints it, and whether the server's sentence is printed at all, is
+what changed, and the two entries below record the whole of it. It is
+applied to the TRANSCRIPT before the
 comparison, so a difference the table does not explain is a failure, and
 the table itself is short enough to read.
 
@@ -131,11 +134,21 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
     #
     # Then #386 split each of the two notices that named a command into
     # two lines from two sides: the server states what is true of the
-    # write, and the CLI prints its own advice under it out of
-    # `cli.REMEDIES`. The command an operator reads is the same command,
-    # printed by the half that owns the grammar, which is why this is a
+    # write, and the CLI says what to do about it out of its own table.
+    # #426 then cut the pair back to one line, because both sides were
+    # answering the same question and only one of them could answer the
+    # whole of it: where this client knows the boundary set, its line
+    # replaces the sentence. The command an operator reads is the same
+    # command, printed by the half that owns the grammar, and the state
+    # it is printed beside is the same state, which is why this is a
     # substitution rather than a recapture: what the pre-rename
-    # transcript recorded is still what the pair prints.
+    # transcript recorded is still what this surface says.
+    #
+    # Both device rows and the default-agent row reach the second entry,
+    # and the default agent's server sentence is its own since #424. It
+    # takes no entry of its own here for the reason the mechanism has:
+    # the set is the same pair, so the line the CLI prints instead is
+    # the same line.
     (
         "This applies when the running server is asked to reload: run `vinga reload`, "
         "which re-reads the stored configuration and applies it without a restart and "
@@ -143,20 +156,16 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
         "tools an agent may reach at its next utterance and its prompt text at its next "
         "activation, while the voice it speaks in and the filled pauses it masks with "
         "reach the next conversation.",
-        "This is stored and not yet serving: the running server goes on serving what "
-        "it already has until the stored configuration is installed on it.\n"
-        "`vinga apply` installs the stored configuration on the running server, and "
-        "`vinga diff` lists everything pending.",
+        "stored, not serving yet: run `vinga apply` to install it on the running "
+        "server, and `vinga diff` to list everything pending.",
     ),
     (
         "The binding applies at the device's next OTA check or connection, but this "
         "server is not serving the agent it names yet: run `vinga reload`, which "
         "installs the stored agents without a restart, and the device reaches it at "
         "the check-in after that.",
-        "The binding applies at the device's next OTA check or connection, but this "
-        "server is not serving the agent it names yet: the agent arrives with the "
-        "install that adds it, and the device reaches it at the check-in after that.\n"
-        "`vinga apply` installs the stored agents.",
+        "stored, and the agent it names is not serving yet: run `vinga apply`, and a "
+        "device reaches the agent at its next check-in after that.",
     ),
     (
         """`vinga apply` takes. Reproduce it in three steps, in this order:

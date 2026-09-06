@@ -170,6 +170,35 @@ def test_the_line_is_drawn_at_a_terminal_and_leaves_stdout_alone(
     assert at_a_terminal[0] == piped[0]
 
 
+def test_the_import_count_line_is_the_same_bytes_either_way(
+    document: Path, monkeypatch: pytest.MonkeyPatch, spare_database: str
+) -> None:
+    """The sentence #426 put on this stream, held to the licence the
+    line above is drawn under: the affordance re-presents what the
+    non-terminal path delivers and changes none of it.
+
+    Two stores rather than two runs against one, because an import says
+    of each entry whether it moved: a second run against the store the
+    first wrote writes nothing and has no count to print. So each run
+    meets an empty database of its own, which is the only way the two
+    are comparable at all.
+    """
+    counted = f"imported 2 entries, {cli.NOT_SERVING_YET}\n"
+
+    piped = _captured(runner(monkeypatch), _argv("import", document), terminal=False)
+    at_a_terminal = _captured(
+        runner(monkeypatch, database=spare_database),
+        _argv("import", document),
+        terminal=True,
+    )
+
+    assert piped[1] == counted
+    # What is left on the screen once the line has erased itself is the
+    # same bytes, drawn under the same stdout.
+    assert _after_the_line(at_a_terminal[1]) == counted
+    assert at_a_terminal[0] == piped[0]
+
+
 @pytest.mark.parametrize("verb", ["import", "apply"])
 def test_the_line_takes_itself_back_off_the_screen(run, document: Path, verb: str) -> None:
     """What the erase is for: whatever prints next prints into an empty
