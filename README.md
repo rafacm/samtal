@@ -53,7 +53,7 @@ Here is a path to get a [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshar
 - **Docker** with Compose v2, for the two containers.
 - **[uv](https://docs.astral.sh/uv/)**, for the CLI.
 - **A Waveshare board** from the Supported Hardware table (see below) and a USB cable to connect the board to your computer.
-- **`curl`, `openssl` and `git`**, which steps 1 and 2 invoke directly. macOS ships all three, which is why they went unnoticed while this was being walked rather than read; a stripped-down Linux may not have them.
+- **`curl`, `openssl` and `git`**, which steps 0, 1 and 2 invoke directly. macOS ships all three, which is why they went unnoticed while this was being walked rather than read; a stripped-down Linux may not have them.
 
 The following steps have been tested on macOS.
 
@@ -65,13 +65,22 @@ Any model [Ollama](https://ollama.com) serves works, and any endpoint that speak
 ollama pull llama3.1:8b
 ```
 
-Ollama unloads a model after five minutes idle, and loading it again takes longer than the server waits for the model's first word, so a reply that meets a cold model is dropped and the device stays silent. Keep it resident:
+A pull puts the model on disk without loading it, and the two questions have two commands: `ollama list` says what you have, `ollama ps` says what is in memory right now. Straight after a pull, `ollama ps` prints its header and no rows.
 
 ```bash
-export OLLAMA_KEEP_ALIVE=-1
+ollama ps
 ```
 
-Ollama reads that when it starts, so set it where your Ollama runs: restart the app after exporting it, or put it in the service environment if you run Ollama as one.
+That distinction matters here, because **Ollama unloads a model after five minutes idle**, and loading it again takes longer than the server waits for the model's first word, so a reply that meets a cold model is dropped and the device stays silent. One request both loads the model and keeps it resident, with no prompt to answer and nothing to restart:
+
+```bash
+curl -s http://localhost:11434/api/generate \
+  -d '{"model":"llama3.1:8b","keep_alive":-1}'
+```
+
+It answers `{"done_reason":"load"}` once the weights are in memory. `ollama ps` then shows the model with `Forever` under `UNTIL`, and that column is the one to read: any duration there is a countdown to the silent device above. Requests that name no expiry of their own, which is what the server sends, leave the pin as it is.
+
+The pin lasts as long as the Ollama process does, so the request above is also how it comes back after Ollama restarts, and `ollama stop llama3.1:8b` is how you end it deliberately. Until you do, the model holds the memory it loaded into.
 
 **Step 1. Configure and start the vinga server**
 

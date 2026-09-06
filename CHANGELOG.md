@@ -107,6 +107,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   puts the renamed agent on the running server. The CLI reference grows
   the command's page, generated from the tree as every page there is.
 
+### Changed
+
+- **Getting Started says how to see the loaded model, and how to pin
+  it.** A pull puts a model on disk without loading it, and step 0's
+  only answer to the five minute idle unload was an
+  `OLLAMA_KEEP_ALIVE=-1` export, which takes effect where Ollama
+  starts rather than in the shell walking the steps. The step now
+  names `ollama ps` as the difference between what is on disk and
+  what is in memory, loads the model and pins it with one request
+  that restarts nothing (`keep_alive` of `-1` to `/api/generate`),
+  and says to read `Forever` under `UNTIL`, since any duration there
+  is a countdown to a device that answers nothing. `ollama stop` ends
+  the pin, and the memory it holds. The `OLLAMA_KEEP_ALIVE` export is
+  gone with the paragraph explaining it: teaching Ollama to start with
+  a different default is Ollama's documentation to write, not a step
+  in getting a board talking. `curl` is named as a step 0
+  prerequisite as well.
+
 ### Fixed
 
 - **A legacy control character in a name is no longer spoken raw**
