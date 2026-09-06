@@ -1192,7 +1192,7 @@ NOT_A_TYPE_AT_ALL = f"https://user:{KEY_SENTINEL}@{HOST}/type"
 THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
 
 
-def world_named(name: str, llm_type: str = "mock", **stages: str) -> Config:
+def world_named(name: str, **stages: str) -> Config:
     """A one-agent configuration whose llm entry and whose agent both
     carry `name`, composed the way a stored snapshot is: the domain half
     as a mapping through `compose_config`, which is the route a boot
@@ -1200,14 +1200,14 @@ def world_named(name: str, llm_type: str = "mock", **stages: str) -> Config:
 
     `stages` is whatever the agent should say about its own, so a case
     about a stage nothing names leaves that stage out rather than
-    restating the world around it, and `llm_type` is what the entry
-    claims to be, so a case about a build that refuses says so here.
+    restating the world around it. A case about a build that refuses
+    plants its rows instead, since what it is about is the boot.
     """
     return compose_config(
         FileConfig(),
         {
             "providers": {
-                "llm": {name: {"type": llm_type}},
+                "llm": {name: {"type": "mock"}},
                 "asr": {"ears": {"type": "mock"}},
                 "tts": {"voice": {"type": "mock"}},
                 "vad": {"gate": {"type": "mock"}},
