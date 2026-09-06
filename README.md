@@ -194,22 +194,31 @@ providers:
     local:
       type: openai_compatible
       # The server dials Ollama from inside its container, where
-      # localhost would mean the container itself.
+      # localhost would mean the container itself. The compose file
+      # resolves this name to the host. On Linux that is not enough:
+      # Ollama listens on loopback there too, and a container cannot
+      # reach a loopback-only service, so widen it with OLLAMA_HOST
+      # (https://github.com/ollama/ollama/blob/main/docs/faq.md).
+      # Untested here, which was walked on macOS.
       base_url: http://host.docker.internal:11434/v1
       model: llama3.1:8b
       # openai_compatible cannot know its own egress, since base_url
       # decides it. False asserts this endpoint stays on this machine.
       egress: false
   asr:
+    # Transcription, on this machine. The weights download on the
+    # first apply, which is what makes that one slow.
     whisper:
       type: faster_whisper
       model: small
       vad_filter: true
   tts:
+    # The voice. Piper's voices download on that first apply too.
     voice:
       type: piper
       voice: en_US-lessac-medium
   vad:
+    # What hears the end of a phrase, so a turn can end.
     ears:
       type: silero
 
@@ -229,20 +238,20 @@ agents:
       speakable: one or two sentences, no lists, no markdown. Always
       reply in the language the user spoke.
 
-# Which agent a board reaches when nothing has bound it.
+# Which agent a board reaches when nothing has bound it. Bind one
+# board instead, by the MAC on its sticker:
+#   vinga device bind aa:bb:cc:dd:ee:ff assistant
 default_agent: assistant
 EOF
+```
 
+That went to the store in one transaction, ordered for you and refused whole rather than half written if anything in it will not resolve. Nothing is serving it yet, which is the other command: `apply` installs what is stored on the running server, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). This first one downloads the speech models, so it is the slow one.
+
+```bash
 vinga apply
 ```
 
-Read top to bottom that is the whole deployment: four engines, the defaults that say which one each job uses, the one agent that inherits them, and which agent a board reaches when nothing has bound it. Bind a specific board instead, by the MAC on its sticker, with `vinga device bind aa:bb:cc:dd:ee:ff assistant`.
-
-`host.docker.internal` rather than `localhost`, because the server dials the model from inside its container and localhost there is the container. The compose file resolves that name to this machine. This was walked on macOS, where it reaches Ollama even though Ollama listens only on loopback. **On Linux, resolving that name is not enough**: Ollama binds loopback there too, and a container cannot reach a loopback-only service, so it has to be told to listen more widely with `OLLAMA_HOST` ([Ollama's FAQ](https://github.com/ollama/ollama/blob/main/docs/faq.md) has the variable and where to set it for your init system). That path is untested here.
-
-Two commands, because they promise different things. `import` writes the document to the store in one transaction and touches nothing that is running: it orders the writes for you, so the defaults naming providers and the agent inheriting them all arrive together, and it is refused whole rather than half written if anything in it will not resolve. `apply` then installs what is stored on the running server, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first apply is the slow one, because it downloads the speech models onto the data volume.
-
-Importing is additive and never deletes, so running the same document twice changes nothing and a section it does not name is left alone. Editing it later means editing the document and importing it again. The same deployment ships as a file at [`vinga-server/examples/presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml), which is what `-f` normally points at once there is more here than fits on a screen; the presets beside it are the same deployment on vendor APIs. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
+Importing is additive and never deletes, so the same document twice changes nothing and a section it does not name is left alone; editing later means editing the document and importing it again. It ships as a file too, at [`vinga-server/examples/presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml), which is what `-f` normally points at, with the same deployment on vendor APIs beside it. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
 
 **4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 

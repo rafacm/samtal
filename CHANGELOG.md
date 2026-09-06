@@ -109,6 +109,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Step 3 explains itself at the lines it is explaining.** The
+  document to paste was followed by four paragraphs, three of which
+  annotated lines the reader had already scrolled past: why the
+  container cannot say `localhost`, what each engine is for, and how
+  to bind one board instead of every board. Those are comments in the
+  document now, where the line they describe is on screen. `apply` is
+  its own block behind its own sentence, rather than a second command
+  sharing the import's fence. What is left after the document is one
+  paragraph on what import promised and one on what to do next.
+
 - **Step 2 ends at one command instead of three.** The in-image CLI
   branch defined a shell function and then ran `vinga list` to prove
   it, both in one fence with their explanation underneath, and the
