@@ -134,6 +134,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Step 5 names the button, the wake word and the event to look
+  for.** "Press the button and speak" is not actionable on a board
+  with three buttons, two of which change the volume. It is a short
+  press of PWR now, with a pointer to the board's own guide for the
+  wake word it ships with, since saying that opens a session without
+  touching anything. The troubleshooting sentence names the events a
+  working turn produces and singles out `speaking_started`, which is
+  the one that separates a server that decided to speak from a board
+  that actually received audio.
+
 - **Step 4 sets a board up over the cable, and nothing else.** The
   step ended at a captive portal: join the board's access point from a
   phone, type WiFi credentials into a page, then write the server's

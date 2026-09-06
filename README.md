@@ -309,14 +309,14 @@ The board reboots into your network and checks in by itself. When it does not tu
 
 **Step 5. Talk**
 
-Step 3 set a `default_agent`, so any board that reaches the server is covered: press the button and speak. Leave it unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
+Step 3 set a `default_agent`, so any board that reaches the server is covered: short-press PWR, the button on its own edge, and speak. Your board's guide in [`docs/devices/`](docs/devices/README.md) says which wake word it ships with, if any, and saying that opens a session with no button at all. Leave the default agent unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
 
 ```bash
 vinga device pending list                     # which board is showing what
 vinga device pending claim 418293 assistant   # bind the one showing 418293
 ```
 
-When a turn does not go the way you expected, `vinga events` is the first place to look: it is the server's own account of what it decided, turn by turn, and it names the stage that failed rather than leaving you to read a container log.
+When a turn does not go the way you expected, `vinga events` is the first place to look: it is the server's own account of what it decided, turn by turn, and it names the stage that failed rather than leaving you to read a container log. A turn that worked reads `heard`, then the model's rounds, then `speaking_started` and `replied`; `speaking_started` is the one worth finding, because it says audio frames went out rather than that the server decided to speak.
 
 That was the trial. Running vinga somewhere it stays up is [`docs/deployment.md`](docs/deployment.md): the same server in a Docker Compose lane and a Kubernetes lane, with the manifests and the hardened compose file committed under [`deploy/`](deploy/). Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](vinga-server/README.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
 
