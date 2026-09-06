@@ -2415,6 +2415,7 @@ This index is the other half: what exists, and when it fires.
 | `event` | when |
 | --- | --- |
 | `ota_check` | a device checks in (no session yet, so the record names the device) |
+| `ota_check_body` | the whole of what a board reported at that check-in, at DEBUG, so `vinga events tail --level DEBUG` is how somebody asks for it |
 | `activation_not_offered` | an unbound device is answered with no activation code, and why |
 | `activation_complete` | a waiting device has been claimed; its next check hands it a token |
 | `activation_pending` | a waiting device polls and is still waiting |

@@ -107,6 +107,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   puts the renamed agent on the running server. The CLI reference grows
   the command's page, generated from the tree as every page there is.
 
+- **A check-in body is readable without repointing the board.** A
+  board's configuration check is the one moment it describes itself, and
+  almost all of what it says was discarded: the partition table, the
+  flash size and the display block reached no surface a person could
+  read, so bringing an unfamiliar board up meant pointing `ota_url` at a
+  listener and back, two NVS writes and a reset. A new event,
+  `ota_check_body`, carries the whole of it, emitted beside whichever
+  outcome the check reached and at `DEBUG`, which is the whole of the
+  off-unless-asked-for: the live stream filters per subscription at a
+  default of `INFO`, so `vinga events tail --level DEBUG` is the asking,
+  and the retained log filters at `server.log_level`, so a deployment at
+  the default never keeps it. **A deployment already configured at
+  `DEBUG` starts retaining a bounded copy of every check-in body at this
+  upgrade**, which is named here so that choice is made with the fact in
+  hand. The endpoint is unauthenticated, so what the event carries is a
+  compact serialization of the PARSED body, `ensure_ascii` escaped and
+  therefore printable by construction, bounded at 8192 characters with a
+  visible `...[truncated]` marker fitted inside the bound, and null for
+  a request that carried no readable JSON object. The reply itself does
+  not move by a byte: this observes. `docs/devices/README.md` carries
+  the capture procedure, in the order that cannot miss the event.
+
 ### Added
 
 - **`Board` and `Device` are defined terms.** The glossary carried
