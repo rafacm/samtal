@@ -318,6 +318,17 @@ vinga device pending claim 418293 assistant   # bind the one showing 418293
 
 When a turn does not go the way you expected, `vinga events` is the first place to look: it is the server's own account of what it decided, turn by turn, and it names the stage that failed rather than leaving you to read a container log. A turn that worked reads `heard`, then the model's rounds, then `speaking_started` and `replied`; `speaking_started` is the one worth finding, because it says audio frames went out rather than that the server decided to speak.
 
+**Swapping a part out**
+
+The trial ran four engines on this machine, and each is one entry in the document from step 3. Changing one is editing that entry and importing it again, so a deployment can be all local, all vendor, or any mix. Every fragment below is a file you can pass to `vinga import -f`, and each carries the measured numbers behind its defaults as comments:
+
+- **The model.** [`llm-openai-compatible.yaml`](vinga-server/examples/llm-openai-compatible.yaml) is any endpoint speaking the OpenAI chat completions API, which is another local runner (LM Studio, vLLM, `llama.cpp`) or a vendor, the difference being a `base_url` and a credential. [`llm-anthropic.yaml`](vinga-server/examples/llm-anthropic.yaml) is the one type that is not OpenAI-shaped. Whatever you choose has to support tool calls, or the board's own controls stop working.
+- **What it hears with.** [`asr-openai.yaml`](vinga-server/examples/asr-openai.yaml) beside the local [`asr-faster-whisper.yaml`](vinga-server/examples/asr-faster-whisper.yaml).
+- **What it sounds like.** [`tts-elevenlabs.yaml`](vinga-server/examples/tts-elevenlabs.yaml) and [`tts-openai.yaml`](vinga-server/examples/tts-openai.yaml) beside the local [`tts-piper.yaml`](vinga-server/examples/tts-piper.yaml). Two agents that should sound different name two entries.
+- **What it can do.** An MCP server gives an agent tools beyond the ones the board publishes: [`mcp-server-stdio.yaml`](vinga-server/examples/mcp-server-stdio.yaml) for a local process, [`mcp-server-streamable-http.yaml`](vinga-server/examples/mcp-server-streamable-http.yaml) for one over the network.
+
+The same deployment you built in step 3 ships as [`presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml), and the same thing on vendor APIs as [`presets/cloud-stack.yaml`](vinga-server/examples/presets/cloud-stack.yaml), which is what `-f` normally points at once a document is bigger than a screen. Every field of every type is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), generated from the models the server validates against, and [`vinga-server/README.md`](vinga-server/README.md#providers) explains what each provider is for and what its numbers do. A credential never goes in the document: name the variable holding it with `api_key_env`, or store it encrypted with `vinga provider secret set`.
+
 That was the trial. Running vinga somewhere it stays up is [`docs/deployment.md`](docs/deployment.md): the same server in a Docker Compose lane and a Kubernetes lane, with the manifests and the hardened compose file committed under [`deploy/`](deploy/). Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](vinga-server/README.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
 
 ## Supported Hardware

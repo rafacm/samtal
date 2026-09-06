@@ -134,6 +134,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Getting Started ends by saying how to change the parts.** The
+  page led with mixing and matching and then walked one fixed local
+  stack, with the fragments that swap a piece out mentioned nowhere a
+  reader arrives at them. A closing section names them per stage, the
+  model, transcription, voice and MCP tools, with the two presets and
+  the generated field reference behind them, and states the rule that
+  a credential is never in the document.
+
 - **Step 5 names the button, the wake word and the event to look
   for.** "Press the button and speak" is not actionable on a board
   with three buttons, two of which change the volume. It is a short
