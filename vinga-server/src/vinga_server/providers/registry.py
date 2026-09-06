@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from vinga_server.config import ConfigError
 from vinga_server.config.entities import provider_label
-from vinga_server.config.models import ProviderConfig, without_url_credential
+from vinga_server.config.models import ProviderConfig, spoken_identity
 from vinga_server.config.provider_options import (
     PROVIDER_TYPES,
     OptionsRefused,
@@ -135,16 +135,16 @@ class OptionsReader:
         touched nothing (#191).
 
         The names come back, unlike the rejected type above, and through
-        the strip rather than withheld. There is no closed set to list
+        the door rather than withheld. There is no closed set to list
         instead here, so a refusal that named nothing would leave an
         operator with a typo they cannot see; and a key spelled as a URL
-        carrying a credential is a stored key like any other, so it gets
-        what a display of one gets (#408, #413). Sorted as they are
-        STORED and shortened afterwards, for the reason
-        `views._shown_mapping` gives.
+        carrying a credential, or holding a control character, is a
+        stored key like any other, so it gets what every spoken identity
+        gets (#408, #413, #414). Sorted as they are STORED and shortened
+        afterwards, for the reason `views._shown_mapping` gives.
         """
         if self._pending:
-            unknown = ", ".join(without_url_credential(key) for key in sorted(self._pending))
+            unknown = ", ".join(spoken_identity(key) for key in sorted(self._pending))
             raise ProviderError(f"{self._label}: unknown option(s): {unknown}")
 
 

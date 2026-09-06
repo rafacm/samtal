@@ -101,7 +101,7 @@ from vinga_server.config.models import (
     DomainConfig,
     FieldProblem,
     normalize_mac,
-    without_url_credential,
+    spoken_identity,
 )
 from vinga_server.config.provider_options import component_name, declared_options
 from vinga_server.config.responses import (
@@ -2883,23 +2883,26 @@ def _renamed(renamed: Renamed) -> str:
     typed.
 
     Both names are stored identities by the time they reach this, so
-    both may be spoken, and the old one goes through the strip every
-    display of a stored identity goes through (#381, #382): a row
-    written before the addressability rule can carry a URL credential in
-    its name, and this line travels out as a response body and into
-    whatever log a client keeps. Belt and braces rather than a reachable
-    path, and the unit test that pins it says so: such a name holds a
-    slash, so no path segment addresses it and no request can reach this
-    with one. The new name needs no such strip and gets one anyway,
-    because a composer that treated the two halves of one line
-    differently would ask every later reader to work out which half was
-    which; it passed `_check_addressable` a moment ago, which refuses
-    the slash such a URL holds.
+    both may be spoken, and the old one goes through the door every
+    spoken identity goes through (#381, #382, #414): a row written
+    before the addressability rule can carry a URL credential and a
+    control character in its name, and this line travels out as a
+    response body and into whatever log a client keeps.
+
+    The two halves of that rule are reachable to different degrees, and
+    the difference is the whole of what makes this an escape rather than
+    belt and braces. A credential-bearing name holds a slash, so no path
+    segment addresses it and no request reaches this with one. A control
+    character percent-encodes losslessly, which is exactly why
+    `_check_addressable` refuses it for what it does to a log line
+    rather than for what it does to routing, so `%1b` in the path
+    reaches this line with one and the sentence is where an operator
+    reads which row they just fixed. The new name needs neither and gets
+    both anyway, because a composer that treated the two halves of one
+    line differently would ask every later reader to work out which half
+    was which; it passed `_check_addressable` a moment ago.
     """
-    return (
-        f"agent {without_url_credential(renamed.old)} renamed to "
-        f"{without_url_credential(renamed.new)}"
-    )
+    return f"agent {spoken_identity(renamed.old)} renamed to {spoken_identity(renamed.new)}"
 
 
 def _unloaded(agents: Sequence[str], loaded: Collection[str]) -> list[str]:

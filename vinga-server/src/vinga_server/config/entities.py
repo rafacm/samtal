@@ -65,7 +65,7 @@ from vinga_server.config.models import (
     ProviderConfig,
     is_mcp_secret_key,
     is_secret_option,
-    without_url_credential,
+    spoken_identity,
 )
 from vinga_server.config.provider_options import declared_options
 from vinga_server.config.responses import Applies
@@ -822,15 +822,16 @@ def entity_location(descriptor: EntityDescriptor, *identity: str) -> str:
     what every refusal about it names: the section it lives in, and the
     parameters that address one entry under it.
 
-    Through the door every display of a stored identity goes through
-    (#381), which costs a write nothing and is what a READ needs. A name
-    reaches this on the write path only after the addressability check
-    has passed it, and a name carrying a URL credential holds a slash,
-    so there is nothing left for the strip to take. A name reaches it on
-    the read path from the database, where a row written before that
-    rule still sits: `agents.<name>: the row cannot be read` is a
-    sentence composed over stored state and printed by a boot, and it
-    was the one identity-speaking refusal with no strip on it (#382).
+    Through the door every SPOKEN identity goes through
+    (`models.spoken_identity`), which costs a write nothing and is what
+    a READ needs. A name reaches this on the write path only after the
+    addressability check has passed it, and such a name holds neither
+    the slash a URL credential brings nor a control character, so there
+    is nothing left for that door to take. A name reaches it on the read
+    path from the database, where a row written before those rules still
+    sits: `agents.<name>: the row cannot be read` is a sentence composed
+    over stored state and printed by a boot, and it was the one
+    identity-speaking refusal with no strip on it (#382).
 
     Here rather than in the store, which is where it was written and
     where its only callers were, because the build names the same
@@ -839,8 +840,8 @@ def entity_location(descriptor: EntityDescriptor, *identity: str) -> str:
     boot comes to say `providers.llm.x` about a row it refused and
     something else about the entry it could not build (#413).
     """
-    shown = (without_url_credential(part) for part in identity)
-    return ".".join((descriptor.moved_key, *shown))
+    said = (spoken_identity(part) for part in identity)
+    return ".".join((descriptor.moved_key, *said))
 
 
 def provider_label(stage: str, name: str) -> str:
