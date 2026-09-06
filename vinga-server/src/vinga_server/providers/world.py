@@ -50,7 +50,12 @@ from typing import cast
 
 from vinga_server.build_info import in_container
 from vinga_server.config.entities import provider_label
-from vinga_server.config.models import PROVIDER_STAGES, Config, ProviderConfig
+from vinga_server.config.models import (
+    PROVIDER_STAGES,
+    Config,
+    ProviderConfig,
+    without_url_credential,
+)
 from vinga_server.config.secrets import SecretStore, provider_identity
 from vinga_server.egress import EgressRefusal, check_provider
 from vinga_server.events import ServerEvents
@@ -233,20 +238,25 @@ async def build_entry(
     # that knows the stage, the entry name and the type at once, and a
     # provider that failed to describe itself in an event would be a
     # provider the operator cannot map back to their configuration.
-    provider.identity = ProviderIdentity(
+    #
+    # Through the strip, for the reason the label above goes through it:
+    # this identity is not an address either, it is what every event
+    # about this provider calls it, and an event is written to a log, to
+    # whatever collects one, to the live stream and into the
+    # conversation's own record (#413).
+    identity = ProviderIdentity(
         stage=stage,
-        name=name,
+        name=without_url_credential(name),
         type=config.type,
         host=provider.host,
         model=provider.model,
     )
-    _loopback_inside_a_container(stage, name, config, provider)
+    provider.identity = identity
+    _loopback_inside_a_container(identity)
     return provider
 
 
-def _loopback_inside_a_container(
-    stage: str, name: str, config: ProviderConfig, provider: Provider
-) -> None:
+def _loopback_inside_a_container(identity: ProviderIdentity) -> None:
     """Say so when a container's entry points at the container itself.
 
     The failure this exists for looks like nothing at all (#340). A
@@ -257,8 +267,16 @@ def _loopback_inside_a_container(
     nothing. Whether this process is inside a container is a thing the
     image knows and says (`build_info.in_container`), and whether the
     endpoint is this machine is three spellings, so the check is two
-    reads and belongs where the answer is: this is the one place that
-    holds the stage, the entry, the type and the host at once.
+    reads and belongs where the answer is: beside the stamp above, which
+    is the one place that holds the stage, the entry, the type and the
+    host at once.
+
+    Told the identity that stamp just made rather than the columns it
+    was made from, which is what keeps this event and every other event
+    about the provider calling the entry one thing: the four fields this
+    warning carries are exactly the four that identity holds, and a
+    second reading of the stored name here is a second answer to what
+    the entry is called (#413).
 
     A warning and never a refusal, because the same configuration is
     right where the endpoint shares this container or its network
@@ -275,14 +293,14 @@ def _loopback_inside_a_container(
     if not in_container():
         return
     try:
-        host = LoopbackHost(provider.host)
+        host = LoopbackHost(identity.host)
     except ValueError:
         return
     events.emit(
         lambda: ProviderReachesLoopback(
-            stage=Identifier(stage),
-            provider=Identifier(name),
-            type=Identifier(config.type),
+            stage=Identifier(identity.stage),
+            provider=Identifier(identity.name),
+            type=Identifier(identity.type),
             host=host,
         )
     )
@@ -391,7 +409,12 @@ async def _stage_engine(
     name, _ = config.provider_for_agent(agent, stage)
     if name is None:
         raise ProviderError(
-            f"agents.{agent}: no {stage} provider is named, and "
+            # The agent's own name, through the door every identity a
+            # refusal speaks goes through (#381, #382). Spelled here
+            # rather than read from a helper, unlike the provider label
+            # above: one sentence says this, and a function forwarding
+            # its argument would hide nothing.
+            f"agents.{without_url_credential(agent)}: no {stage} provider is named, and "
             f"agent_defaults.{stage} names none either; the conversation "
             f"pipeline needs all of: {', '.join(PROVIDER_STAGES)}"
         )

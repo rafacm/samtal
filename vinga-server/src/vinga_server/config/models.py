@@ -3448,10 +3448,18 @@ class Config(DomainConfig):
         """The provider an agent uses for one stage, and the configuration
         location it came from: the agent's own entry when it names one,
         agent_defaults otherwise. The location is what error messages quote,
-        so a mistake points at the layer that holds it."""
+        so a mistake points at the layer that holds it.
+
+        Which makes the location a place an identity leaves this model
+        by, so the agent's name goes through the door every displayed and
+        every spoken identity goes through (#381, #382). The provider
+        name beside it does not: that half is an address, read straight
+        back out of `providers.<stage>` by everything this answers, and
+        stripping it would be a lookup of a row nothing wrote.
+        """
         own = getattr(self.agents[agent], stage)
         if own is not None:
-            return own, f"agents.{agent}.{stage}"
+            return own, f"agents.{without_url_credential(agent)}.{stage}"
         return getattr(self.agent_defaults, stage), f"agent_defaults.{stage}"
 
     def prompt_for_agent(self, agent: str) -> str:
