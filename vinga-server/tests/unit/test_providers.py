@@ -22,10 +22,20 @@ def provider_config(**data: object) -> ProviderConfig:
 
 
 async def test_an_unknown_provider_type_names_the_entry_and_the_known_types() -> None:
+    """The entry and the closed set, and deliberately not what was
+    written.
+
+    This case used to assert that `espeak` came back in the sentence.
+    That pin moved with #413: a `type` is a stored value like any other,
+    a row written before the URL rule can hold a credential in one, and
+    this sentence is printed to an operator's stderr as it is. It is the
+    answer a stage column holding what no stage is already gets, which
+    is the rule it broke plus the set it should have been in.
+    """
     with pytest.raises(ProviderError) as excinfo:
         await build_entry("tts", "voice", provider_config(type="espeak"))
     assert "providers.tts.voice" in str(excinfo.value)
-    assert "espeak" in str(excinfo.value)
+    assert "espeak" not in str(excinfo.value)
     assert "mock" in str(excinfo.value)
 
 
