@@ -3111,14 +3111,38 @@ def _granted(grants: Mapping[str, object]) -> str:
     )
 
 
+# What stands in for a name that comes back from `printable` with
+# nothing in it.
+#
+# There is such a name. `printable` strips before it bounds, so a name
+# that is empty or is nothing but whitespace answers the empty string,
+# and every shape here declares its names as strings without saying how
+# long one may be. Printed as nothing, one would be an entry missing
+# from a listing, or two of them a pair of separators with nothing
+# between; on the comparison it was worse, because a kind whose only
+# pending change rendered to nothing fell out of the answer and left the
+# sentence that says nothing is pending (#425's review round).
+#
+# One question mark, which is what `printable` already answers for every
+# other character it cannot write: a name the store accepted is a fact,
+# and a fact that renders to nothing falsifies the listing it is in.
+UNNAMEABLE = "?"
+
+
 def _names(values: object) -> str:
     """A list of names from an answer, printed. Bounded and made
     printable one by one even though the shape it was read as has
     established they are strings: what that shape knows about them is
     their type, not their length and not whether every character in them
     can be written to a terminal. `None` is a list of nothing here, which
-    is how a grant of the whole server reads."""
-    return ", ".join(printable(str(value)) for value in _sequence(values))
+    is how a grant of the whole server reads.
+
+    A list of N names prints as N things whatever they were spelled,
+    which is what `UNNAMEABLE` above is for. Whether the list has
+    anything in it is the caller's question and is asked of the list, not
+    of this string.
+    """
+    return ", ".join(printable(str(value)) or UNNAMEABLE for value in _sequence(values))
 
 
 def _sequence(value: object) -> Sequence[object]:
@@ -3519,10 +3543,18 @@ def _diff_facts(
     own, which is what most of a comparison used to be.
     """
     boundary = cast(Applies, body["applies"])
+    # Whether a list has something to say is asked of the list, never of
+    # what it rendered to. The shape validated it as a tuple of strings
+    # and said nothing about their length, so a name that renders to
+    # nothing is a name the store holds; reading presence off the
+    # rendered string would drop it, and a kind whose only pending change
+    # was that name would fall out of the answer into the sentence saying
+    # nothing is pending, which would report an install that never
+    # happened.
     facts = [
-        (boundary, f"{listed}: {named}")
+        (boundary, f"{listed}: {_names(body[listed])}")
         for listed in named_lists(shape)
-        if (named := _names(body[listed]))
+        if body[listed]
     ]
     # A flag says its own name and nothing after it: a kind there is one
     # of has nothing to name, so `changed` is the whole fact, and `no` is
