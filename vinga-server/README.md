@@ -1113,11 +1113,8 @@ apply` builds the next snapshot and swaps to it instead:
 ```console
 $ vinga-server config mcp-server set weather -f weather.yaml
 wrote mcp-server weather
-This is stored and not yet serving: the running server goes on
-serving what it already has until the stored configuration is
-installed on it.
-`vinga apply` installs the stored configuration on the running
-server, and `vinga diff` lists everything pending.
+stored, not serving yet: run `vinga apply` to install it on the
+running server, and `vinga diff` to list everything pending.
 $ vinga-server config agent set house -f house.yaml
 $ vinga-server config apply
 mcp:
@@ -1154,11 +1151,13 @@ and stops there, and this is the command that installs what it wrote.
 Two commands rather than one, which is what a rebuild needs anyway,
 since a document's credentials go in between them. The per-entity
 writes say which boundary they are waiting at for the same reason,
-because nothing installs one until somebody asks. The sentence saying
-so is the server's and the line under it is the CLI's: a server ships
-in an image and cannot know the grammar of the client somebody has
-installed beside it, so it states the boundary and the client names the
-command that crosses it.
+because nothing installs one until somebody asks. The boundary is what
+travels between the two halves, as a token: a server ships in an image
+and cannot know the grammar of the client somebody has installed beside
+it, so it states the boundary, and the client says the whole of it in
+its own words wherever it recognizes the set. A boundary the client
+cannot name, which is what one from a newer server arrives as, is
+answered with the server's sentence quoted instead.
 
 **What it applies** is the whole domain half, re-read from the
 configuration database: the `providers` entries and the `mcp_servers`
@@ -1791,11 +1790,15 @@ installing command's own help. A binding naming an agent this server is
 not serving yet carries a sentence of its own, and it is the one an
 operator is most likely to need, because both halves of it are true at
 once: the row is live, and the agent arrives at the apply that installs
-it. No sentence names a command: which command crosses a boundary is a
-fact of the client's grammar, and a client is a program this server
-neither ships nor versions, so the CLI reads the tokens and prints its
-own advice under the sentence. Nothing about a running conversation
-changes when a write lands, in any of these cases.
+it. A default agent naming an unserved agent carries its own for the
+same pair of reasons and about the row it really wrote, which covers
+every device that has no binding of its own. No sentence names a
+command: which command crosses a boundary is a fact of the client's
+grammar, and a client is a program this server neither ships nor
+versions, so the CLI reads the tokens and says the whole of it in its
+own words where it knows the set, and quotes the sentence where it does
+not. Nothing about a running conversation changes when a write lands,
+in any of these cases.
 
 **A refusal is an RFC 9457 problem document**, served as
 `application/problem+json`, and carries the sentence the CLI prints in

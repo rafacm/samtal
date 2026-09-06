@@ -154,6 +154,34 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A write is answered in one voice, and an import in one line.** The
+  boundary a write is waiting at was printed twice: the server's
+  sentence, and this client's advice about the same boundary under it.
+  The token is what travels between the two sides, so whichever of them
+  can answer the whole question now answers it once. The CLI can
+  wherever it recognizes the boundary set: its own line replaces the
+  server's sentence, naming the state first (`stored, not serving yet`)
+  and the command that ends it after. A set it cannot name, which is
+  what a boundary from a newer server arrives as, and a set with nothing
+  to run about are quoted from the server exactly as before. An imported
+  document answers with one line for the whole of it, the act, the count
+  of entries it wrote and the one install they are waiting on, because
+  the two sets that have something to run about are waiting on the same
+  install;
+  every entry whose boundary this client cannot speak for still
+  contributes the server's sentence under that line, so a mixed answer
+  loses neither half. What each entry did is unchanged on stdout.
+
+- **A default agent is no longer answered as a binding.** Setting the
+  default agent to one this server is not serving yet was acknowledged
+  with the sentence written for a device binding, so a document that
+  bound no device was told about "The binding". It carries a sentence of
+  its own now, saying what a default agent is: it covers every device
+  that has no binding of its own, and the agent it names arrives with
+  the install that adds it. The boundaries it announces are unchanged,
+  and both paths that produce it, the single write and an imported
+  `default_agent` entry, answer the same sentence.
+
 - **Getting Started ends by saying how to change the parts.** The
   page led with mixing and matching and then walked one fixed local
   stack, with the fragments that swap a piece out mentioned nowhere a

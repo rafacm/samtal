@@ -486,8 +486,9 @@ added where the other five live.
 
 ## Milestones
 
-- [ ] **M1: an import answers in one line, and a default agent stops
-  being a binding** (#424). `_announced` replaces where the set is
+- [x] **[M1: an import answers in one line, and a default agent stops
+  being a binding](2026-09-06-cli-answer-style-implementation.md#m1-an-import-answers-in-one-line-and-a-default-agent-stops-being-a-binding)**
+  (#424, PR TBD). `_announced` replaces where the set is
   known; the client table reworded to stand alone; the import count
   line with the collapse rule and its pins; the new default-agent
   notice in `entities.py`, both `api.py` producers picking it
