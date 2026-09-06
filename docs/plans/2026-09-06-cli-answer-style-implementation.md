@@ -490,3 +490,137 @@ The lanes above were run against the tree as it stands except for this
 section and the manifest, which followed them; the lanes do not read
 this section, and the census was regenerated and its own suite re-run
 afterwards.
+
+## M4: `info` answers at a glance, with the URL protection kept
+
+### What was done
+
+`config/cli.py`, three renderings and the constants beside them.
+
+`_identity_block` prints the build in one line, `server: <version>
+(<revision>)`, both values through `printable` at the bounded length
+exactly as the two lines were. `BUILD` is the label, beside `BANNER` and
+`CONTACTED` where the other two labels of this answer live. The block's
+leading blank line goes with the second line: the build fact belongs
+under the address that answered it, and the blank that separated them
+was separating one fact from itself.
+
+`ONBOARDING_URL_LABEL` leads with `onboarding URL`, which is this
+codebase's own name for the value, and its parenthetical says both what
+the value is for and what a board calls the field it goes in. Everything
+that made the old line what it was is unchanged: the provenance still
+rides the label, the URL still lands on a line with nothing in front of
+it, and it still goes through `printable(..., UNBOUNDED)`. The
+docstring's wrap-protection paragraph gained the sentence that says
+which half was compacted and why the other could not be: a label may
+wrap and lose nothing, and the line under it may not.
+
+`_configured_counts` answers in one line. Kinds with a zero count are
+absent; a count of one uses `kind.name`, the descriptor's own command
+noun, and any other count uses that noun with an `s`, which is derived
+from the registry rather than listed beside it. The singleton, which the
+old rendering skipped for having no count to give, says `agent_defaults
+set` when anything is set in it. The two settings that are not kinds
+always say what is true, `no devices` or `N devices bound` and `default
+agent <name>` or `no default agent`, because an unbound board reaching
+nothing is the fact an operator is looking for rather than an empty
+field to hide. A store nothing has been written to says `configured:
+nothing yet` (`NOTHING_YET`), since empty output would read as a command
+that failed to answer. Order is the registry's over the counted kinds,
+then the singletons, then devices, then the default agent: two passes
+over `entities.ENTITIES` rather than one, so the order is the one stated
+rather than the one a single pass happens to produce.
+
+`_default_agent` is gone. It existed because two renderings said the
+same thing, and the tally stopped saying it that way; what is left is
+one `printable` call inlined where `_summary` writes the row, with the
+comment that says why the tree's word and `info`'s differ.
+
+The pins. `test_config_cli_info.py`: the end-to-end case reads the build
+line by position and the whole tally as one string, which makes it a
+zero-kinds-absent pin for free, since the deployment it composes writes
+no `agent_defaults`; the URL case reads the label through
+`cli.ONBOARDING_URL_LABEL` and asserts what it leads with, so the pin is
+about the shape rather than a second copy of the string; the
+default-agent, refusal and onboarding-off cases follow the new bytes.
+Five new cases: a kind nothing was written of is absent, asserted over
+the whole line; singular and plural over a one-word kind and a
+hyphenated one, in both directions; `nothing yet` for the empty store;
+`agent_defaults set` present only when the section holds something; and
+two runs against one state compared as bytes on both streams, with
+stderr empty, which is the determinism case this surface did not have.
+`tests/integration/test_cli_live.py` and `test_cli_wheel.py` re-pinned
+to the same lines over the wire and from an installed binary.
+
+Documents. Both root `README.md` transcripts, and the sentence after
+step 2's that pointed at "everything at zero". `CHANGELOG.md` gained two
+`Changed` entries. `vinga-server/tests/unit/command-spellings.txt`
+regenerated.
+
+### Deviations from the plan
+
+Three, none changing what the milestone delivers.
+
+**The parenthetical names OTA, which the plan's target block does not.**
+The plan says both things: its rendered target block reads `onboarding
+URL (the address a device's captive portal asks for)`, while the issues'
+decisions bullet above it says the device's word, `OTA`, rides as a
+parenthetical "for whoever is typing it into a field labelled that". The
+decision is the half that states a requirement and the block is its
+sketch, so the label carries both: `onboarding URL (the address a
+device's captive portal asks for, labelled OTA there)`. Recorded because
+a reviewer diffing the block against the output will find the extra
+clause.
+
+**`_default_agent` was deleted rather than left alone.** The plan's
+module layout names `_identity_block` and `_configured_counts` as the
+two that deepen. The helper was not a third: it was one line whose whole
+justification was that two renderings said the same thing, and this
+milestone is the change that stops them from doing so. Inlined into its
+one remaining caller, which is what the deletion test asks for.
+
+**Two integration lanes were re-pinned as well.** The plan's test list
+names the two unit suites. `tests/integration/test_cli_live.py` asserts
+the build lines and the URL label over the wire and
+`tests/integration/test_cli_wheel.py` asserts them from an installed
+binary, and both were assertions on the exact bytes this milestone
+changes.
+
+### What building it turned up
+
+The constant-rebinding trap was checked for before either name was
+written: `BUILD` and `NOTHING_YET` were unused in `cli.py`. A first
+draft also named `NO_DEVICES`, `DEVICES_BOUND`, `DEFAULT_AGENT` and
+`NO_DEFAULT_AGENT`; they were dropped again, because four constants
+holding fragments of one line put the line back together in the reader's
+head for no gain. `NOTHING_YET` stays, since it is a whole answer.
+
+The tally's own test helper found the zero-kinds pin for free: the
+end-to-end case's deployment writes providers, an MCP server, a
+fragment, two agents, a binding and a default agent, and no
+`agent_defaults`, so asserting the whole line asserts that the singleton
+is absent as well.
+
+### Verification
+
+Run from `vinga-server/` against a development Postgres.
+
+- `uv run ruff check .`: passed.
+- `uv run pytest tests/unit -q`: 5956 passed, 19 skipped (10m32s), with
+  the census manifest failing on that run and its own suite passing
+  after it was regenerated.
+- `uv run pytest tests/integration -q`: 245 passed (5m57s). The first
+  run of it failed two `info` assertions this milestone had rewritten
+  against the wrong deployment: the lane in `test_cli_live.py` does have
+  MCP servers, and the wheel lane has no default agent, so it prints the
+  `no default agent` clause. Both pins now say what those lanes really
+  answer, and the whole-line claim they were reaching for is made in the
+  unit suite, where the document is the case's own.
+- `uv run python -m tests.unit.test_command_spellings`: regenerated
+  after the last documentation edit. Compared ignoring line numbers, the
+  manifest gains exactly one spelling and loses none: `vinga info`,
+  `historical`, in this milestone's own CHANGELOG entry.
+- `python scripts/check_doc_links.py .`: 211 files, 0 failures.
+- `docs/reference/cli.md` and `docs/reference/api-openapi.json`:
+  byte-identical to the branch base. The `info` help row does not
+  change, and no response model does.
