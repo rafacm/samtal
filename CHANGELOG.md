@@ -90,6 +90,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   memory docstrings, the server README's two orphaning passages and the
   observability page's half sentence are corrected in the same change.
 
+- **`vinga agent rename <old> <new>`**, the verb in front of that door.
+  The agent is addressed by the name it has and the name it is to have
+  follows as the payload, which is the route's own order; the request is
+  one POST carrying that name in a body and nothing else, so it stays
+  out of every proxy log between the operator and the server. It asks no
+  confirmation, and that is a decision rather than an omission: a verb
+  destroys when its effect cannot be undone by running another command
+  with information the operator still has, and a rename is undone by
+  running it back, with the memory and the threads travelling back with
+  it. The refusals are what keep that true, so they are what the verb
+  rests on rather than a prompt. What it prints is the acknowledgement
+  every write prints, the server's sentence about the boundary the write
+  is waiting at with this client's own remedy under it, which for a
+  rename that moved a binding or the default agent is the install that
+  puts the renamed agent on the running server. The CLI reference grows
+  the command's page, generated from the tree as every page there is.
+
 ## 2026-09-05
 
 ### Added
