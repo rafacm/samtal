@@ -127,6 +127,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- **Step 1's guard line is no longer a bash syntax error.** The
+  `LAN_IP` check spelled its message "your machine's address", and
+  bash reads that apostrophe as an opening quote inside
+  `${var:?word}`, so a reader pasting the block into bash got
+  `unexpected EOF while looking for matching '` before anything ran.
+  zsh accepts the same line, which is why a macOS walkthrough never
+  met it. The message says the same thing without the apostrophe.
+
 - **A legacy control character in a name is no longer spoken raw**
   (#414). A name is held to one URL path segment at write time only, and
   the rule refuses a control character for a reason it states in as many

@@ -115,7 +115,7 @@ Create the `.env` file that the vinga server and the CLI both read:
 
 ```bash
 # Stop here rather than write a half-configured file
-: "${LAN_IP:?empty; set it to your machine's address on the local network}"
+: "${LAN_IP:?empty; set it to the address this machine has on the local network}"
 
 # .env holds secrets, so create it readable only by you
 umask 077
