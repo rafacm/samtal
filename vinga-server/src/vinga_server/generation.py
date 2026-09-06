@@ -235,6 +235,30 @@ class Generations:
         with self._ledger:
             return tuple(self._renames[self._known.get(generation, 0) :])
 
+    def watermark(self) -> int:
+        """Where the rename ledger stands now, for a caller about to read
+        the stored configuration.
+
+        The number a world built from that read is installed with, and it
+        is taken by the reader rather than by the install for a reason
+        the install cannot fix. A world reflects exactly the renames that
+        had committed when its snapshot was taken, and the install
+        happens long afterwards: the providers are built, the speech is
+        synthesized, and either a rename lands in that interval (a world
+        stamped at the install would be told it knows a rename its
+        snapshot predates) or one commits without having published yet (a
+        world stamped at the install would be told it does not know a
+        rename its snapshot already carries). Both are wrong in opposite
+        directions and neither is visible from here.
+
+        So the reader takes this while it holds the order a rename holds
+        across its commit AND its publication, which is what makes the
+        pair exact: a rename is then wholly before this reading or wholly
+        after it, and never half of each.
+        """
+        with self._ledger:
+            return len(self._renames)
+
     @property
     def mark(self) -> int | None:
         """Which world is installed, or None while one is being replaced.
@@ -255,7 +279,7 @@ class Generations:
         return None if self._applying else self._settled
 
     @contextlib.contextmanager
-    def applying(self) -> Iterator[Install]:
+    def applying(self, known: int | None = None) -> Iterator[Install]:
         """Everything one apply changes about what new work binds, held
         unstable from before its first change until after its last.
 
@@ -271,15 +295,25 @@ class Generations:
         it. It is one assignment with no await in it, which is what
         makes the reads on the other side of it see one world or the
         other and never half of each.
+
+        `known` is where the rename ledger stood when this world's
+        configuration was read, which the reader took with `watermark()`
+        under the order that makes it exact. It is a parameter rather
+        than something the install works out because the install cannot:
+        by the time it runs, the snapshot is old and the ledger has
+        moved for reasons that say nothing about what this world
+        contains. None is a caller that read no store, which is a test
+        and the first world of a process, and it means the ledger as it
+        stands.
         """
         self._applying = True
         try:
-            yield self._install
+            yield lambda generation: self._install(generation, known)
         finally:
             self._settled += 1
             self._applying = False
 
-    def _install(self, generation: Generation) -> None:
+    def _install(self, generation: Generation, known: int | None = None) -> None:
         """The swap: one assignment, no await.
 
         The world that was current is retired in the same statement,
@@ -287,12 +321,14 @@ class Generations:
         holds" a state this class can see rather than a thing an apply
         has to remember to say.
 
-        And the new world joins the rename ledger here, at the end of
-        it: its configuration is what every rename published so far
-        wrote, so what it has not heard is nothing.
+        And the new world joins the rename ledger here, at the place its
+        own snapshot was read at: what it has not heard is what was
+        published after that reading, which is nothing at all for a
+        world built from a configuration every rename so far had already
+        written.
         """
         with self._ledger:
-            self._known[generation] = len(self._renames)
+            self._known[generation] = len(self._renames) if known is None else known
         self._retired.append(self._current)
         self._current = generation
 

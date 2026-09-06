@@ -85,6 +85,12 @@ from vinga_server.config.responses import (
     ProvidersReload,
 )
 from vinga_server.config.secrets import EntityKind
+
+# The order a rename holds across its commit and its publication, taken
+# here around the read that a world is built from. Not a cycle: the
+# conversation store reads this package's loader and models and never
+# this module.
+from vinga_server.conversations.store import erasure_order
 from vinga_server.filler import Fillers, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.providers import Built, Provider, ProviderError, build_world
@@ -160,6 +166,11 @@ class _Candidate:
     retired: tuple[str, ...]
     agents: AgentsReload
     mcp: mcp.McpCandidate
+    # Where the rename ledger stood when this candidate's configuration
+    # was read, carried from the read to the install because that is the
+    # only pair of moments between which it means anything: the snapshot
+    # is what a world reflects, and the install is far too late to ask.
+    renames_known: int
 
 
 class ConfigReload:
@@ -346,7 +357,7 @@ class ConfigReload:
         """
         problem: str | None = None
         try:
-            stored = await self._stored()
+            stored, renames_known = await self._stored()
             previous = self._generations.current()
             # The stored half whole, which is the last thing the overlay
             # had left to say (#191). Nothing in the domain half is
@@ -403,6 +414,7 @@ class ConfigReload:
                 retired=_retired(previous, providers),
                 agents=_agents(previous.config, composed.config),
                 mcp=candidate,
+                renames_known=renames_known,
             )
         except asyncio.CancelledError:
             raise
@@ -448,13 +460,44 @@ class ConfigReload:
             problem = _PROVIDERS_REFUSED
         raise ProviderRefusedError(problem)
 
-    async def _stored(self) -> Loaded:
-        """The stored configuration, read off this loop, refusing in the
-        words the rest of the preparation refuses in.
+    def _in_order(self) -> tuple[Loaded, int]:
+        """The stored half and where the rename ledger stood when it was
+        read, taken together and never one without the other.
+
+        The pair is the whole point. A world is built from this snapshot
+        and installed long afterwards, so "which renames does this world
+        already reflect" is a question about this instant rather than
+        about the install's. Taking the ledger's place here answers it
+        with the snapshot, which is what the install is then told.
+
+        Both under the order a rename holds across its commit AND its
+        publication, which is what makes the answer exact rather than
+        nearly always right. Without it a rename that had committed and
+        not yet published would be missing from a reading that already
+        reflects it, and every world built from this snapshot would be
+        told to translate a name it already serves: harmless while the
+        freed name stays free, and a misattributed turn the moment an
+        operator gives it to a second agent.
+
+        The order is taken outside the read's own transaction, which is
+        the discipline every other holder keeps: this lock goes outside
+        the chain locks, never inside. It costs the conversation writer
+        the length of one small read, which is the same coin retention
+        and a rename already spend.
+        """
+        with erasure_order():
+            return self._read(), self._generations.watermark()
+
+    async def _stored(self) -> tuple[Loaded, int]:
+        """The stored configuration and its place in the rename ledger,
+        read off this loop, refusing in the words the rest of the
+        preparation refuses in.
 
         In a worker thread because it takes the database's write lock
         and waits out its busy timeout, and this coroutine is on the
-        loop every live conversation is on.
+        loop every live conversation is on. That is also what keeps the
+        ordering above off the loop: what waits for a rename to finish
+        publishing is this thread and not the conversations.
 
         A stored snapshot that will not compose is as much a reload that
         changed nothing as a candidate that would not build, and an
@@ -470,7 +513,7 @@ class ConfigReload:
         """
         problem: str | None = None
         try:
-            return await asyncio.to_thread(self._read)
+            return await asyncio.to_thread(self._in_order)
         except (DatabaseBusyError, StorageError):
             raise
         except ConfigError as exc:
@@ -502,7 +545,7 @@ class ConfigReload:
         client whose connection pool will not shut cannot turn an
         applied world into a refusal.
         """
-        with self._generations.applying() as install:
+        with self._generations.applying(known=candidate.renames_known) as install:
             install(candidate.generation)
             # The transfer, said in the window that performs it: what
             # the preparation built is the installed generation's now,

@@ -332,9 +332,10 @@ the plan's own test list asks for that the code cannot answer.
 
 ### The review round
 
-Backend codex, model `gpt-5.6-sol`, against PR #417: 2 P1, mergeable
-after the fixes. Both are fixed on the branch, in one commit each, and
-the first of them moved a design decision the plan had made.
+Backend codex against PR #417: `gpt-5.6-sol` found 2 P1, and the
+`gpt-5.6-terra` delta that followed the fixes found 1 P2. All three are
+fixed on the branch, in one commit each, and the first of them moved a
+design decision the plan had made.
 
 1. **P1: a session could miss a rename before it was registered.** The
    writer marked the sessions it already had, and a served session
@@ -380,7 +381,42 @@ the first of them moved a design decision the plan had made.
    name given to a new agent, is exactly what the world boundary
    answers.
 
-2. **P1: reusing and renaming a freed source name corrupted older
+2. **P2 (the terra delta): a world could be installed between a
+   rename's commit and its publication.** The rename commits before it
+   announces, and the install stamped a new world with the ledger as it
+   stood at that moment, so an apply that read the store inside that
+   interval built a world FROM the renamed configuration and was then
+   told it had not heard the rename. Inert while the freed name stays
+   free, and a misattributed turn the moment an operator gives that name
+   to a second agent.
+
+   *Fixed with the second of the two options terra offered, because the
+   code refuses the first.* Serializing the INSTALL with the
+   commit-to-publication interval closes only one direction: the
+   install happens long after the snapshot it installs was read, with
+   the providers built and the speech synthesized in between, so a
+   rename committing inside THAT interval would leave the opposite
+   error, a world whose snapshot predates the rename told it already
+   knows one. `reload.py` has no re-read to catch that, and
+   `RunningConfigMovedError` guards the diff rather than the apply. So
+   the watermark is taken where it means something, which is the read:
+   `_in_order` takes the stored half and `Generations.watermark()`
+   together, under the order a rename holds across its commit and its
+   publication, and `applying(known=...)` carries that number to the
+   install. A rename is then wholly before a world's reading or wholly
+   after it.
+
+   What that costs is one small read's worth of the ordering lock, paid
+   in the worker thread the read already runs in, which is the same coin
+   retention and a rename already spend and never the event loop's. It
+   cannot cycle: the order is taken outside the read's own transaction,
+   which is the discipline every other holder keeps.
+
+   The forced interleaving holds the publication back on a thread of its
+   own, gives the freed name to a second agent inside that window, and
+   shows the read parked on the order rather than racing it.
+
+3. **P1: reusing and renaming a freed source name corrupted older
    sessions.** Composition assigned the old name as a source
    unconditionally, so a session holding `sam -> poet` was rewritten to
    `sam -> bard` by a later rename of a recreated `sam`, and its next
@@ -440,6 +476,14 @@ landing code refers to a decision rather than to a tracker.
   - A world not stamped when it is installed: the pin that a world
     installed after a rename has nothing to translate fails, and it is
     the one that keeps a reused name safe.
+  - The read and the watermark taken without the order (the terra
+    delta's finding, put back): the new pin fails on the read never
+    reaching the order. With that assertion relaxed as well, so the
+    consequence can be seen rather than inferred, the world built from
+    the renamed snapshot is handed `('sam', 'poet')` to translate, and
+    with the watermark assertion relaxed too the second agent's thread
+    is filed under `poet` instead of `sam`, which is the misattribution
+    the finding predicted. Every probe was reverted.
 - The generated-document drift checks: clean. M2 touches no generated
   document; the census manifest is regenerated in the last commit of the
   milestone as always.
