@@ -174,8 +174,21 @@ device nothing binds, and that is what its sentence says. Same
 `applies` set ({reload, check-in}) when the named agent is unloaded,
 so every client-side mechanism above treats it identically; the
 sentence only ever reaches an operator through an old client, a bare
-API caller, or the unknown-set arm. `tests/support/notices.py` gains
-the instance the way it holds the other five.
+API caller, or the unknown-set arm.
+
+The sentence has two producers, and both change, because the path
+that produced #424's specimen is the second one: an imported
+`default_agent` entry is answered by `_applied_notice`, whose
+fallback sends both `devices` and `default_agent` through
+`_binding_notice` (`api.py:2776-2807`). `_applied_notice` therefore
+gains a default-agent branch keyed on `entry.section`, choosing the
+new notice exactly where `write_default_agent` does, with the
+unloaded-agent and snapshot questions asked the same way. Both
+paths are pinned through the real API: the single write's
+acknowledgement and an imported document's `default_agent` entry
+each assert the new sentence and the unchanged `applies` set.
+`tests/support/notices.py` gains the instance as the seventh member
+of `_COMPOSED`, which holds six today.
 
 ### What the diff prints: groups by boundary, sections by content
 
@@ -350,9 +363,11 @@ added where the other five live.
   reads, which is the file's stated job; nothing new is exported.
 - **`config/entities.py`** deepens by one sentence: the default-agent
   write gets the notice that says what it is.
-- **`config/api.py`**: `write_default_agent` picks the new notice;
-  one line.
-- **`tests/support/notices.py`** gains the sixth instance.
+- **`config/api.py`**: `write_default_agent` picks the new notice,
+  and `_applied_notice` gains the default-agent branch, so the single
+  write and the imported entry answer the same sentence.
+- **`tests/support/notices.py`** gains the seventh instance, in
+  `_COMPOSED`.
 
 ## Tests
 
@@ -418,8 +433,10 @@ added where the other five live.
   being a binding** (#424). `_announced` replaces where the set is
   known; the client table reworded to stand alone; the import count
   line with the collapse rule and its pins; the new default-agent
-  notice in `entities.py`, `api.py` picking it,
-  `tests/support/notices.py` carrying it; the licensed substitution;
+  notice in `entities.py`, both `api.py` producers picking it
+  (`write_default_agent` and `_applied_notice`), both pinned through
+  the real API paths, `tests/support/notices.py` carrying it as the
+  seventh `_COMPOSED` member; the licensed substitution;
   `vinga-server/README.md`'s write transcript re-captured (the
   1116-area notice block and the mcp-server transcript);
   `cli-guide.md`'s "The sentence states and the client advises"
@@ -489,6 +506,16 @@ ready, pending the P1 amendments.
    say "The binding". Also `tests/support/notices.py` already holds
    six notices, so the new one is the seventh, and it must join
    `_COMPOSED`.
+
+   *Resolution*: accepted in full, and verified against `api.py`
+   before amending: `default_agent` is not in `_SECTION_NOTICE`, so
+   an imported entry falls through to `_binding_notice` at line 2807,
+   which is exactly the path the walkthrough's specimen took. The
+   plan now names both producers, gives `_applied_notice` its
+   default-agent branch keyed on the entry's section, pins both the
+   single write and the imported entry through the real API paths,
+   and corrects the notice count to seven with `_COMPOSED` named as
+   where the instance lands.
 
 2. **P1: the unknown-token diff group head cannot pass `Act.read()`
    and contradicts the no-leak rule.** Diff `applies` fields are
