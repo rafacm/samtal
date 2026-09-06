@@ -154,6 +154,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The CLI guide carries the five practices an answer is held to.**
+  The page a reviewer reads before adding a command stated eleven rules,
+  and none of them was about what an answer says once the command has
+  worked, which is what the four renderings this chain moved were all
+  getting wrong in the same way. Five sections join them, each with the
+  merged rendering as its example and this repository's own earlier
+  output as the counterexample: an answer prints what has something to
+  say, an answer speaks the verb that was typed, an action that succeeds
+  says so, a boundary is stated once over the group, and a command
+  volunteers no advice about features nobody is using. The reviewer's
+  checklist at the top gains their five questions, so the list goes on
+  being the whole of the page's interface; the boundary half of the
+  second practice stays where it already lives, in the passage about
+  what a write says, rather than being stated in two places.
+
 - **`vinga info` answers at a glance.** It printed nine lines to say
   five things, six of them a tally of mostly zeroes under a heading.
   Which build answered is one line now, `server: <version>
