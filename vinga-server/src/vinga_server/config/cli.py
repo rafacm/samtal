@@ -3911,13 +3911,19 @@ def _configured_counts(document: Mapping[str, object]) -> str:
         if not kind.addressing and read[kind.moved_key]
     ]
     devices = len(read["devices"])
+    # Asked of the value the answer carried rather than of what it
+    # prints as: a null is a deployment with no default agent, and a
+    # name that renders to nothing is one that has one, for the reason
+    # `UNNAMEABLE` is there for.
     named = read["default_agent"]
-    if not counted and not devices and not named:
+    if not counted and not devices and named is None:
         return f"\n{CONFIGURED} {NOTHING_YET}\n"
     counted.append(
         f"{devices} device{'' if devices == 1 else 's'} bound" if devices else "no devices"
     )
-    counted.append(f"default agent {printable(named)}" if named else "no default agent")
+    counted.append(
+        "no default agent" if named is None else f"default agent {printable(named) or UNNAMEABLE}"
+    )
     return f"\n{CONFIGURED} " + ", ".join(counted) + "\n"
 
 

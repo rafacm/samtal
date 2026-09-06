@@ -908,6 +908,8 @@ docs/plans/2026-09-05-server-state-vocabulary.md:590  historical  vinga-server c
 docs/plans/2026-09-06-cli-answer-style-implementation.md:417  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style-implementation.md:483  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style-implementation.md:621  historical  vinga info
+docs/plans/2026-09-06-cli-answer-style-implementation.md:656  historical  vinga list
+docs/plans/2026-09-06-cli-answer-style-implementation.md:664  historical  vinga list
 docs/plans/2026-09-06-cli-answer-style.md:17  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style.md:122  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style.md:129  historical  vinga apply
@@ -1329,10 +1331,10 @@ vinga-server/src/vinga_server/config/cli.py:668  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:837  respell  vinga provider
 vinga-server/src/vinga_server/config/cli.py:3468  respell  vinga apply
 vinga-server/src/vinga_server/config/cli.py:3868  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:3925  respell  config list
-vinga-server/src/vinga_server/config/cli.py:8327  respell  vinga agent rename
-vinga-server/src/vinga_server/config/cli.py:8746  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:8746  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:3931  respell  config list
+vinga-server/src/vinga_server/config/cli.py:8333  respell  vinga agent rename
+vinga-server/src/vinga_server/config/cli.py:8752  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:8752  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:206  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:616  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:207  respell  vinga apply
