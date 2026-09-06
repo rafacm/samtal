@@ -814,7 +814,7 @@ that lane can and cannot see.
 specimen is quoted in the issue, which this milestone does not read; the
 block in the guide is the pre-M2 renderer (`_diff_block` and
 `DIFF_INTRO`, at `f7311714~1`) run over `DIFF_PENDING`, the fixture the
-merged pin uses for the state Getting Started's step 2 leaves behind. So
+merged pin uses for the state Getting Started's step 3 leaves behind. So
 it is this repository's own output for that state rather than a
 paraphrase, which is what **historical** claims, and the sentence under
 it counts what the block itself shows rather than repeating the issue's

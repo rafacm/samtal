@@ -933,7 +933,7 @@ state.
 
 **Counterexample, historical** (#425). `vinga diff` labelled every kind
 with its own boundary and defined the vocabulary in a preamble printed
-on every run. The state Getting Started's step 2 leaves behind has three
+on every run. The state Getting Started's step 3 leaves behind has three
 changes in it, and this is what they were answered with:
 
 ```
