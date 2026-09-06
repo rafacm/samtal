@@ -585,6 +585,80 @@ and one a placement.
   composer's pin asserts the whole line, so it records that rather than
   only the absence.
 
+### The review round
+
+Backend codex, model `gpt-5.6-sol`, against PR #418: 4 P2, mergeable
+after the listed fixes. All four are fixed on the branch, in one commit
+each. Two of them are the same mistake at two altitudes, a sentence that
+was true of the case it was written for and false of the other case its
+chooser selects it for.
+
+1. **P2: the refusal responses documented false retry semantics.** The
+   route inherited the shared descriptions, and the shared 409 promises
+   that the request can be retried. That is true of the three states it
+   lists, a held write lock, a claim in flight, a reload already
+   running, and false of the fourth this route adds: an occupied
+   destination stays occupied however many times the request is made, so
+   a generated client would have been describing a retry loop that
+   cannot terminate. The shared 422 is about addressing and left out the
+   same-name refusal, which is a refusal about a request that addressed
+   everything correctly.
+
+   *Fixed as prescribed:* two description files beside the reload's and
+   the diff's, which carry their own for the same reason, passed through
+   `_problems(..., instead=...)`; the document regenerated; and a pin on
+   the distinction rather than on the paragraph, which also refuses the
+   shared sentence's promise outright so it cannot come back unnoticed.
+
+2. **P2: the sixth notice was false for a default-only rename.**
+   `_rename_notice` chooses it when a device binding moved OR when the
+   default agent did, and the sentence said a device BOUND to the agent
+   reaches it at the check-in after the install. The default agent is
+   what covers the boards that have no binding of their own, so a rename
+   that moved the default alone moved the reference of precisely the
+   devices that are not bound to the agent.
+
+   *Fixed as prescribed:* it speaks of a device that resolves to the
+   agent and names both ways one can, by its own binding or by the
+   default agent. Still one sentence, because a caller cannot act on the
+   difference. Nothing pinned the wording, which is why the finding was
+   possible: the route's case reads the sentence off the constant and
+   the respelling suite pins the binding's sentence rather than this
+   one. The pin arrives with the fix.
+
+3. **P2: the no-leak case did not read every surface the plan names.**
+   Five, and it read the body, the headers and two formatter renderings.
+   Both process streams were not read at all, and a formatter rendering
+   is a weaker claim than the record itself: a formatter prints the
+   message, so a value that reached a record as a stray attribute, as an
+   argument no format string consumed, or on an attached exception is
+   invisible to both formatters and still in the object another handler
+   would serialize whole.
+
+   *Fixed as prescribed:* stdout and stderr captured and asserted, and
+   the walk over the records reads each of them three ways, as JSON, as
+   text, and as the record's own message, attribute dictionary,
+   arguments and exception. That is the #381-era shape rather than a new
+   one. Both new surfaces were verified to bite by mutation, each
+   reverted: a stderr line carrying the pasted value fails the case, and
+   so does a record carrying it as an attribute.
+
+4. **P2: the generated agent reference misstated post-rename history.**
+   The descriptor's note said categorically that a renamed thread holds
+   turns under the old name, which the in-flight protocol makes false
+   for half of them: a turn a live session durably writes after the
+   rename is translated at the write boundary and carries the current
+   name, because it is a new write rather than an edit and a row may not
+   disagree with the thread it lands on.
+
+   *Fixed as prescribed:* the note draws the line the protocol draws, a
+   row already written keeps its name and a row written after the rename
+   carries the current one, with the session row keeping the name it
+   opened with either way. The window that stays became a note of its
+   own, since what a live conversation REMEMBERS in it is a different
+   fact from what its turns are filed under, and the reference
+   regenerated.
+
 ### Open questions the plan left, and what M3 answers
 
 None. The route's shape, its body, its answer and its three arms were
@@ -593,8 +667,11 @@ through the registered command are M4's.
 
 ### Verification
 
+Re-run after the review round's fixes, which is where these numbers are
+from.
+
 - `uv run ruff check .`: clean.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5785 passed,
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5792 passed,
   19 skipped.
 - `uv run pytest tests/integration -q`: 243 passed.
 - `scripts/check_doc_links.py .`: 206 files, 0 failures.
@@ -615,6 +692,15 @@ through the registered command are M4's.
   migrated comments were read back from `col_description` and are the
   new ones. What was not run locally is the rest of that step, the table
   and column inventories, which this change does not move.
+
+One thing the re-run caught that is worth writing down, because it cost
+a whole integration lane: the lane's own last fixture asserts that
+nothing left a `__pycache__` under `vinga_server`, and the commands this
+milestone runs outside pytest to regenerate documents write them. The
+first re-run answered "243 passed, 1 error", the error being that guard
+rather than anything in the product. `PYTHONDONTWRITEBYTECODE=1` on
+every out-of-pytest command is what `AGENTS.md` already asks for, and it
+is what the clean re-run above was taken with.
 
 The first spelling of the record revision id is what caught the version
 column's width, and it was caught by running the migration rather than
