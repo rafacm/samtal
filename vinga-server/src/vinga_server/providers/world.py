@@ -54,6 +54,7 @@ from vinga_server.config.models import (
     PROVIDER_STAGES,
     Config,
     ProviderConfig,
+    spoken_identity,
     without_url_credential,
 )
 from vinga_server.config.secrets import SecretStore, provider_identity
@@ -256,6 +257,16 @@ async def build_entry(
     # type that is not is refused before anything is built, and the host
     # is `urlsplit().hostname`, which has no userinfo in it by
     # construction.
+    #
+    # The credential strip and not the control-character escape beside
+    # it, which is where #414 deliberately stops. These five are FIELDS,
+    # and every writer of one escapes a control character already: the
+    # JSON log format and the event record spell it out, the text log
+    # format carries no extra fields at all, and the CLI's terminal door
+    # replaces what it cannot print. What has no such writer is a
+    # SENTENCE, and the one sentence this identity reaches is the
+    # loopback warning below, which names the entry through
+    # `provider_label` and is escaped there.
     identity = ProviderIdentity(
         stage=stage,
         name=without_url_credential(name),
@@ -422,11 +433,11 @@ async def _stage_engine(
     if name is None:
         raise ProviderError(
             # The agent's own name, through the door every identity a
-            # refusal speaks goes through (#381, #382). Spelled here
-            # rather than read from a helper, unlike the provider label
-            # above: one sentence says this, and a function forwarding
-            # its argument would hide nothing.
-            f"agents.{without_url_credential(agent)}: no {stage} provider is named, and "
+            # refusal speaks goes through (#381, #382, #414). Spelled
+            # here rather than read from a helper, unlike the provider
+            # label above: one sentence says this, and a function
+            # forwarding its argument would hide nothing.
+            f"agents.{spoken_identity(agent)}: no {stage} provider is named, and "
             f"agent_defaults.{stage} names none either; the conversation "
             f"pipeline needs all of: {', '.join(PROVIDER_STAGES)}"
         )
