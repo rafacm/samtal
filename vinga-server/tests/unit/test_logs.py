@@ -105,19 +105,6 @@ def test_text_format_is_the_one_the_server_has_always_printed() -> None:
     assert line.endswith('INFO     vinga_server.session: session abc123: heard "hello there"')
 
 
-@pytest.fixture
-def restore_root_logger():
-    """configure() takes the root logger over, so give it back."""
-    root = logging.getLogger()
-    handlers, level = list(root.handlers), root.level
-    yield
-    for handler in list(root.handlers):
-        root.removeHandler(handler)
-    for handler in handlers:
-        root.addHandler(handler)
-    root.setLevel(level)
-
-
 def test_configure_installs_exactly_one_handler(restore_root_logger) -> None:
     logs.configure(ServerConfig(log_format="json", log_level="DEBUG"))
     logs.configure(ServerConfig(log_format="json", log_level="DEBUG"))

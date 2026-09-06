@@ -1062,3 +1062,63 @@ def no_unexpected_refusals(request: pytest.FixtureRequest) -> Iterator[None]:
             f"If the test drives one on purpose, request the "
             f"`{REFUSALS_EXPECTED}` fixture."
         )
+
+
+@pytest.fixture
+def restore_root_logger() -> Iterator[None]:
+    """`logs.configure` takes the root logger over, so give it back.
+
+    Requested by every test that boots a server far enough to configure
+    logging, whether it calls `configure` itself or reaches it through
+    `serving.run`. One home for it because two suites need it and the
+    guard below holds all of them to it.
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    for handler in handlers:
+        root.addHandler(handler)
+    root.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def root_logging_is_given_back() -> Iterator[None]:
+    """Fail any test that leaves the root logger reconfigured, and put
+    it back so the next test is not the one that suffers.
+
+    `logs.configure` removes every handler on the root logger and adds
+    one of its own, bound to whatever `sys.stderr` was at that moment.
+    Under pytest that handler is bound to a capture stream belonging to
+    the test that installed it, and pytest's own capture handler is one
+    of the ones removed. A later test in the same worker then emits a
+    record into a stream nobody owns any more, the handler raises, and
+    `logging` prints its `--- Logging error ---` fallback: the RAW
+    record, arguments and all, straight to the real stderr.
+
+    That is why this is a guard rather than a tidy-up. The dump bypasses
+    every formatter, so it defeats exactly the assertions a no-leak test
+    makes, and it lands on a test that did nothing wrong: it was a
+    conversation-erasure case that failed on CI, holding a URL with its
+    own sentinel in it, three files away from the test that had
+    reconfigured logging (#413). The blame belongs where the state was
+    left.
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    left = list(root.handlers)
+    if left == handlers and root.level == level:
+        return
+    for handler in left:
+        root.removeHandler(handler)
+    for handler in handlers:
+        root.addHandler(handler)
+    root.setLevel(level)
+    pytest.fail(
+        "this test left the root logger reconfigured, which poisons every later "
+        "test in this worker: a handler bound to a capture stream that is gone "
+        "makes `logging` dump the raw record to stderr. Request the "
+        "`restore_root_logger` fixture."
+    )
