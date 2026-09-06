@@ -903,16 +903,25 @@ little to install.
 
 ### A boundary is stated once per run, over the group
 
-Every kind pending in a comparison is waiting on the same apply. Saying
-so once per kind says less than saying it once: a label repeated down a
-column stops being read after the second row, and what it was telling
-the reader is a fact about the run rather than about the row.
+Every kind in one group of an answer is waiting at the same boundary, so
+the boundary is said once over the group rather than once per kind: a
+label repeated down a column stops being read after the second row, and
+what it was telling the reader is a fact about the group rather than
+about the row.
+
+Once per group, not once per answer, because an answer can carry more
+than one. The kinds waiting on an install are one group and a kind
+waiting at the next server start is another, and each says its own
+boundary once. What the rule forbids is the same boundary said twice in
+one answer, not two boundaries each said once.
 
 **Example.** `HEADS` gives each boundary this client's own words for it,
 and `_diff_listing` prints one head per boundary present, in the order
-`Applies` declares them, with one line per kind underneath. `INSTALLS`
-is where the one command that crosses a boundary is spelled, once, and
-both the heads and the write-side lines read it. The import's count line
+`Applies` declares them, with one line per kind underneath. Only one of
+those heads names a command, because only one boundary has one:
+`INSTALLS` is where that spelling lives, once, and the reload head and
+the write-side lines both read it, while the restart head says what
+crosses it, which is a server starting. The import's count line
 carries `NOT_SERVING_YET` for the whole document rather than a clause
 per entry, and carries it once however many entries wait, because the
 two boundary sets this client knows are waiting on that same install.
