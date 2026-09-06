@@ -165,13 +165,7 @@ If your shell then reports `vinga` as not found, `uv` installed it into a direct
 vinga() { docker compose exec -T vinga vinga "$@"; }
 ```
 
-Every command below then reads the same as it would from an installed CLI, with one difference: a file on this machine is piped in rather than named, because a path is resolved inside the container. `list` asks the server what it holds, which is the harmless way to see the wiring work. Nothing is configured yet, so it prints the empty shape of step 3, `(none)` against every slot:
-
-```bash
-vinga list
-```
-
-The image door in the CLI's own page has both details and how to put the binary back.
+Every command below then reads the same as it would from an installed CLI, with one difference: a file on this machine is piped in rather than named, because a path is resolved inside the container.
 
 Check the vinga server status with:
 
@@ -179,9 +173,7 @@ Check the vinga server status with:
 vinga info
 ```
 
-Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked.
-
-[`docs/reference/cli.md`](docs/reference/cli.md) is the CLI's own page: the one-off `uvx` spelling, the image door above, reaching a deployment you do not host, and every command's help.
+Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do, including how to put the binary back, is on [its own page](docs/reference/cli.md).
 
 **Step 3. Configure an agent**
 

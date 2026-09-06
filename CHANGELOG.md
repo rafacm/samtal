@@ -109,13 +109,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
-- **Step 2's in-image CLI is two commands with two explanations.**
-  Defining the shell function and running `vinga list` shared one
-  fence and were explained by a paragraph underneath, so a reader met
-  two unfamiliar lines at once and learned afterwards what either was
-  for. Each has its own block now, with its sentence in front of it,
-  and the `list` sentence says what the output looks like before step
-  3 fills it in.
+- **Step 2 ends at one command instead of three.** The in-image CLI
+  branch defined a shell function and then ran `vinga list` to prove
+  it, both in one fence with their explanation underneath, and the
+  step closed with a paragraph listing what the CLI reference covers.
+  `vinga info` two lines later already proves the wiring and answers
+  something the reader needs, so the `list` demonstration is gone and
+  the function stands alone with its sentence in front of it. The
+  reference link survives as a clause on the sentence that was
+  already there.
 
 - **Getting Started says which platform it was walked on before the
   reader spends anything.** The sentence sat under the prerequisite
