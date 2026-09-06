@@ -182,9 +182,12 @@ closing it is the capture's job, not this plan's.
   a named constant, unprintables replaced, on every surface an event
   reaches. The sentinel test plants a body with an escape sequence, a
   lone surrogate and a field longer than the bound, and asserts the
-  neutralized form on the JSON log, the plain rendering and the live
-  stream, and that nothing of the raw form survives anywhere,
-  including exception chains. The template interpolates only the
+  neutralized form positively on the event payload, the JSON
+  formatter's output, an attached tap and the live stream, and
+  negatively on the text formatter and the message arguments, where
+  the body must not appear at all (the template never interpolates
+  it), with nothing of the raw form surviving anywhere, exception
+  chains included. The template interpolates only the
   bounded `said` arguments the sibling events already interpolate,
   never the body: the body is a field, not a sentence.
 - **Pin before reshaping.** The `_read_json_object` fold-in is the
@@ -227,6 +230,13 @@ read-once fold. The deletion test keeps the value type in
   pin that pair generically (reuse the existing case if it does).
 - The generated events reference regenerates and its drift check
   holds it.
+- **The event-baseline inventory**: the new `check_version` emission
+  gets its driver in `tests/tools/event_baseline.py` beside the four
+  the handler already has, the driver-count pin in
+  `test_event_baseline.py` moves, and the `CARRIED` table gains the
+  row naming `OtaCheckBodyReported` and its exact payload keys, so
+  the baseline suite proves the fifth path the way it proves the
+  other four.
 
 ## Risks
 
@@ -313,11 +323,18 @@ ready, pending the P1 amendments.
    driver, with a driver-count pin; the four current `check_version`
    paths are inventoried and the fifth must be.
 
+   *Resolution*: accepted in full; the driver, the moved count pin
+   and the `CARRIED` row join the tests section and the milestone.
+
 5. **P2: the plain-log assertion cannot pass as described.** The text
    formatter renders only the message; structured fields reach the
    JSON formatter alone. Positive assertions belong on the payload,
    the JSON formatter, an attached tap and the live stream; the text
    formatter and message arguments get negative assertions.
+
+   *Resolution*: accepted in full; the sentinel test's surfaces are
+   restated exactly that way in the no-leak lens, positive where the
+   body travels and negative where it must not appear.
 
 6. **P2: the documented capture procedure is ordered so the event can
    be missed.** The live stream retains nothing; the tail must be
