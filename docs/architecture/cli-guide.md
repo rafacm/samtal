@@ -50,7 +50,7 @@ trusting that it was; the short version is at the foot of this page.
 - [The grammar](#the-grammar): noun first and why, identity
   addressing, the flat system verbs, naming a noun or a verb, and how
   deep the tree may go.
-- [The practices](#the-practices): the eleven rules a command is held
+- [The practices](#the-practices): the sixteen rules a command is held
   to, each with an example from the merged CLI and the shape it
   rejects.
 - [The sources, and what became of
@@ -695,6 +695,285 @@ scope. When they are two acts, they are two commands.
 under one name. It read as one operation, and it needed a flag, a second
 rendering and a sentence about a half-finished pair to stay honest about
 being two.
+
+### An answer prints what has something to say
+
+An empty list, a false flag and a section with nothing in it are absent,
+not enumerated. Absence is absence, and a column of `(none)` is
+something an operator reads in order to learn nothing.
+
+The determinism objection is answered by what the filter reads. What is
+printed is a function of the answer, so two renders of one answer are
+the same bytes and [Output is deterministic, and an answer cannot steer
+a terminal](#output-is-deterministic-and-an-answer-cannot-steer-a-terminal)
+holds unchanged: filtering by state is not varying by terminal, and the
+state is what the reader came to ask about.
+
+The one thing absence may not mean is silence. A run with nothing at all
+to say says that in one fixed sentence, because empty output reads as a
+command that failed to answer rather than as one with nothing to report,
+and an empty deployment is exactly what somebody following Getting
+Started is looking at.
+
+**Example.** Three renderings and three sentences, all merged under
+#426. `_diff_listing` prints a line for a kind with names in a list or a
+flag that is true, and `SERVING_THE_STORE` where no kind has either.
+`_apply_listing` does the same over the outcome sections, with
+`NOTHING_DIFFERED` for an apply that moved nothing; a section the build
+answered null keeps its `NOT_APPLIED` line, because "this build does not
+touch this kind" is content rather than emptiness, and a kind that went
+silently missing would read as one with nothing to report.
+`_configured_counts` drops a kind whose count is zero and answers
+`configured: nothing yet` for a store nothing has been written to.
+
+**Two absences are deliberately not filtered**, and they are where this
+rule stops. `info` says `no devices` and `no default agent` rather than
+dropping them, because an unbound board reaching no agent is the fact an
+operator is hunting for rather than an empty field to hide. And the
+`(none)` in the memory and MCP status listings stays: each answers a
+per-row question somebody asked, rather than enumerating an empty change
+set.
+
+**Counterexample, historical** (#426). `vinga info` printed the tally as
+a block whatever was in it, so what a person got the first time they ran
+it was six rows of nothing:
+
+```
+configured:
+  providers: 0
+  mcp_servers: 0
+  prompt_fragments: 0
+  agents: 0
+  devices: 0
+  default_agent: (none)
+```
+
+It is one line now, and on that deployment the line is `configured:
+nothing yet`.
+
+### An answer speaks the verb that was typed
+
+The operator ran `import`, so the answer says `imported`. It does not
+say `wrote`, `stored` and `resynthesized`, which are what the layers
+underneath call what each of them did.
+
+A field name is the vocabulary of the side that did the work, and it is
+the right vocabulary there: `fallback_resynthesized` names what the
+reload layer rebuilt, it is documented, and clients other than this one
+read it. What it is not is an answer to a question a person asked in
+their own words about a document they wrote themselves.
+
+**Example.** `_imported_entries` answers a whole document in the verb
+that was typed, in one line: the act, the count, and the state the
+entries are in.
+
+```
+imported 4 entries, not serving yet: run `vinga apply`
+```
+
+`APPLY_LABELS` sits beside `APPLY_SECTIONS` and maps (section,
+field) to the operator's phrase for that outcome, so
+`fallback_resynthesized: assistant` is read out as `failure phrase
+spoken again: assistant`; the table is keyed by the pair because one
+word means two things in two sections, and a completeness pin keyed off
+the models holds it total, so a field added to the contract is a failing
+test rather than a line that quietly goes missing. Both sides keep their
+own words: no response model moved for any of this, and
+`docs/reference/api-openapi.json` is the document it was.
+
+**The boundary half of this rule is stated once, above.** Where the
+server's sentence states a boundary this client knows, the client's line
+replaces it, and where it does not, the sentence is quoted alone; the
+mechanism, and why the command spelling has to be on this side, is [A
+write says what it did and when it takes
+effect](#a-write-says-what-it-did-and-when-it-takes-effect)'s "the
+sentence states and the client speaks", and is not restated here.
+
+**Counterexample, historical** (#424). Importing Getting Started's
+document answered on stderr with the server's sentence and the client's
+advice under it, once per distinct boundary set, wrapped as a terminal
+wraps it and saying nothing about what had just been run:
+
+```
+This is stored and not yet serving: the running server goes on serving
+what it already has until the stored configuration is installed on it.
+`vinga apply` installs the stored configuration on the running server,
+and `vinga diff` lists everything pending.
+The binding applies at the device's next OTA check or connection, but
+this server is not serving the agent it names yet: the agent arrives
+with the install that adds it, and the device reaches it at the check-in
+after that.
+`vinga apply` installs the stored agents.
+```
+
+Four lines of prose to say "run `vinga apply`", in nobody's words but
+the two programs' own. `The binding` is the other half of #424: that
+sentence was the device binding's, reused for the `default_agent` write
+an operator's document had just made, so it named a row the document
+never contained. It became a seventh sentence in `config/entities.py`
+rather than a reworded shared one, for the reason the comment above
+those sentences gives.
+
+### An action that succeeds says so
+
+In one line of its own, on stderr, because "it worked" is a fact about
+this invocation rather than about the deployment.
+
+A listing that stops is not a statement that anything worked. A reader
+cannot tell a command that finished from one that printed what it had
+and then went quiet, and the shorter the listing the worse that reads:
+an apply that moved one thing, or nothing at all, is where the whole
+answer is a line or two and the full stop is the only thing saying the
+install happened.
+
+**Example.** `_applied` is the apply's own render callable rather than
+`_printed`: the listing to stdout, a flush, then `INSTALLED` on stderr,
+which says the stored configuration is installed and serving. The flush
+is the discipline `_acknowledged` and `_imported_entries` already
+document, since stderr is unbuffered and stdout is not, and without it
+the success could land above the listing it is about on a merged
+terminal. The import's count line is the same shape on the same stream,
+and the split is the one [Data on stdout, notices on
+stderr](#data-on-stdout-notices-on-stderr) draws: the outcome listing is
+the artifact and the success is about the run.
+
+**And no wall-clock number in it** (#426). A slow act's elapsed time is
+the progress line's job, `narrated`, which draws whole seconds at a
+terminal and writes no byte anywhere else, under the licence in [Output
+is deterministic, and an answer cannot steer a
+terminal](#output-is-deterministic-and-an-answer-cannot-steer-a-terminal).
+A duration in retained output would make two runs against one stored
+state different bytes, and time is not state. A deployment that wants
+durations in what it keeps is asking an events question rather than a
+rendering one.
+
+**Counterexample, historical** (#426). `vinga apply` printed twenty
+lines of outcome fields, then the MCP status block, and stopped:
+
+```
+mcp:
+  started: weather
+  restarted: (none)
+  stopped: (none)
+  unchanged: home
+prompts:
+  changed: house
+fillers:
+  resynthesized: (none)
+  reused: house, kids
+  disabled: (none)
+providers:
+  built: (none)
+  reused: asr.ears, llm.local, tts.voice, vad.gate
+  retired: (none)
+agents:
+  added: house
+  removed: (none)
+  defaults_changed: no
+```
+
+Nothing in it says the command did what it was asked to do, and the
+operator most in need of hearing so is the one whose deployment had
+little to install.
+
+### A boundary is stated once per run, over the group
+
+Every kind pending in a comparison is waiting on the same apply. Saying
+so once per kind says less than saying it once: a label repeated down a
+column stops being read after the second row, and what it was telling
+the reader is a fact about the run rather than about the row.
+
+**Example.** `HEADS` gives each boundary this client's own words for it,
+and `_diff_listing` prints one head per boundary present, in the order
+`Applies` declares them, with one line per kind underneath. `INSTALLS`
+is where the one command that crosses a boundary is spelled, once, and
+both the heads and the write-side lines read it. The import's count line
+carries `NOT_SERVING_YET` for the whole document rather than a clause
+per entry, and carries it once however many entries wait, because the
+two boundary sets this client knows are waiting on that same install.
+
+`READ_AS_ASKED` is the deliberate exception and is not a boundary being
+restated: it says why the two live kinds are never in a group at all,
+which is a question about every comparison rather than about this one's
+state.
+
+**Counterexample, historical** (#425). `vinga diff` labelled every kind
+with its own boundary and defined the vocabulary in a preamble printed
+on every run. The state Getting Started's step 2 leaves behind has three
+changes in it, and this is what they were answered with:
+
+```
+# what the stored configuration would change on the running server. `applies`
+# says when a change of that kind reaches a conversation: `reload` when `vinga apply`
+# next installs the stored configuration, `check-in` as a device next asks, and
+# `restart` at the next server start.
+providers: applies at reload
+  added: asr.whisper, llm.local, tts.voice, vad.ears
+  removed: (none)
+  changed: (none)
+mcp_servers: applies at reload
+  added: (none)
+  removed: (none)
+  changed: (none)
+prompt_fragments: applies at reload
+  added: (none)
+  removed: (none)
+  changed: (none)
+agent_defaults: applies at reload
+  changed: yes
+agents: applies at reload
+  added: assistant
+  removed: (none)
+  changed: (none)
+  grants: applies at reload
+    changed: (none)
+  prompt: applies at reload
+    changed: (none)
+  filler: applies at reload
+    changed: (none)
+  fallback: applies at reload
+    changed: (none)
+devices: applies at check-in
+default_agent: applies at check-in
+```
+
+The token `reload` labels nine of those lines, and the four lines above
+them are the definition a reader needs to make sense of it. The same
+three changes are three lines under one head now, and the head names the
+command rather than the token, so the definition has nothing left to
+define.
+
+### A command volunteers no advice about features not in use
+
+A feature's own noun answers questions about it. That is a good deal of
+what noun first bought (see [Noun first, verb
+second](#noun-first-verb-second)): every feature has a place its answer
+belongs, and it is the place a reader goes when they want it, rather
+than the tail of an answer about something else. Advice printed where it
+was not asked for is read once as noise and thereafter not read at all,
+which costs the sentences beside it that were addressed to the reader.
+
+**Example.** `_apply_listing` asks `_status_block` for the MCP half only
+where there are entries to say something about, and `NOTHING_CONFIGURED`
+goes on being exactly what `vinga mcp-server status` answers for a
+deployment with none, where the same sentence is the whole answer to a
+question somebody asked. One entry point either way: what changed is who
+asks it. The same instinct had put a paragraph advertising the CLI
+reference at the end of Getting Started's step 2, and it was deleted for
+the same reason.
+
+**Counterexample, historical** (#426). Every `vinga apply` on a
+deployment with no MCP servers at all ended with this, under the
+outcomes it had just listed:
+
+```
+this server has no MCP servers configured. An entry is written with
+`vinga mcp-server set`, and an agent reaches it by naming it in its mcp
+list
+```
+
+The walkthrough that found it had no MCP servers, was not being asked
+about MCP servers, and got that paragraph on every apply.
 
 ### A credential is never an argument, and never travels in a read
 
