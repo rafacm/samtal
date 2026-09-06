@@ -881,6 +881,49 @@ def test_a_change_named_with_nothing_is_still_a_change(named: str) -> None:
     )
 
 
+def test_the_comparison_puts_each_kind_under_its_own_boundary() -> None:
+    """Two boundaries in one answer, which no other case here has: every
+    populated kind in them says `reload`, so a rendering that grouped
+    only `reload`, or that ordered its groups by something of its own,
+    would pass all of them.
+
+    Read through the act, because what makes this answer legal is the
+    alias the fields are declared with: `restart` is a `DiffApplies`
+    member, so a kind carrying it validates and has to be rendered
+    somewhere.
+    """
+    body = {
+        **DIFF_EMPTY,
+        "providers": {
+            "applies": "restart",
+            "added": ["llm.local"],
+            "removed": [],
+            "changed": [],
+        },
+        "agents": {**DIFF_EMPTY["agents"], "added": ["assistant"]},  # type: ignore[dict-item]
+    }
+
+    rendered = cli._diff_listing(cli.DIFF.read(body))
+
+    restart, reload = cli.HEADS[Applies.RESTART], cli.HEADS[Applies.RELOAD]
+    assert rendered.count(restart) == 1
+    assert rendered.count(reload) == 1
+    # Each fact under the head of the boundary its own kind named, and
+    # nothing else under either.
+    blocks = {
+        lines[0]: lines[1:] for lines in (block.splitlines() for block in rendered.split("\n\n"))
+    }
+    assert blocks[restart] == ["  providers  added: llm.local"]
+    assert blocks[reload] == ["  agents     added: assistant"]
+    # And the groups in the order `Applies` declares its members, which
+    # is where `restart` above `reload` comes from: read off the
+    # declaration rather than written out here.
+    planted = (Applies.RESTART, Applies.RELOAD)
+    assert [line for line in rendered.splitlines() if line in {restart, reload}] == [
+        cli.HEADS[boundary] for boundary in Applies if boundary in planted
+    ]
+
+
 def test_the_comparison_renders_the_same_answer_as_the_same_bytes() -> None:
     """Determinism, said as bytes rather than as a style. What the
     rendering leaves out is a function of the answer alone, so two
