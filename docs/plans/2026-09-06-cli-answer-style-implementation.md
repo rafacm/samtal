@@ -292,3 +292,56 @@ One honesty note about the order. The two lanes above were run against
 the tree as it stands except for this section, which was written after
 them; the lanes do not read it, and the census was regenerated and its
 own suite re-run afterwards.
+
+### The review round
+
+Backend codex, against PR #429. Two P2s, both accepted.
+
+**A non-empty change list could render as "nothing is pending".**
+`_diff_facts` decided whether a kind had something to say from the
+string `_names` returned. `EntityDiff` declares its names as strings and
+says nothing about how long one may be, so `added: [""]` is an answer
+`Act.read()` accepts, and `printable` strips before it bounds, so such a
+name rendered to nothing. The fact disappeared; a kind whose only
+pending change was that name fell out of the answer; and with no group
+left the command printed `SERVING_THE_STORE`, which tells an operator
+their writes are installed. Of everything this rendering can get wrong
+that is the worst, because it is the one answer that is acted on by
+doing nothing.
+
+Presence now comes from the validated tuple. The rendering half went
+into `_names` rather than into the diff, because it is a door and not a
+branch: a name that comes back from `printable` with nothing in it
+prints as `UNNAMEABLE`, one question mark, which is what `printable`
+already answers for every other character it cannot write. So a list of
+N names is N things however they were spelled, on the apply's outcome
+lists and the grant and tool listings as well, each of which had the
+same hole one row deep. The sub-section facts needed nothing of their
+own: they are `_diff_facts`'s answer one level down. Flags were never at
+risk, being booleans. The regression is parametrized over an empty name
+and a whitespace-only one, driven through `Act.read()`, and asserts both
+that the nothing-pending sentence is absent and that the kind is there
+with the placeholder, plus that two such names print as two things.
+
+**The multi-boundary grouping had no behavioral pin.** Every populated
+fixture said `reload` and the head table's pin compared keys only, so a
+rendering that grouped `reload` alone, or that ordered its groups by
+something of its own, would have passed the whole milestone. One answer
+now carries a kind at `restart` and a kind at `reload`, built through
+`Act.read()` because what makes it legal is the alias the fields are
+declared with. It asserts each head appears exactly once, that each
+kind's line sits under the head of the boundary its own kind named and
+nothing else sits under either, and that the groups follow the order
+`Applies` declares its members in, read off the declaration rather than
+written out.
+
+Verification after the round, from `vinga-server/`: `uv run ruff check
+.` passed; `uv run pytest tests/unit -q` gave 5942 passed, 19 skipped
+in 628s; the census manifest was regenerated after each commit, and
+moved for the first (source line positions) and not the second. The
+integration lane was not re-run, and here is the reasoning rather than
+the assertion: its two diff assertions read `cli.SERVING_THE_STORE` and
+`cli.READ_AS_ASKED` by name against a deployment whose comparison is
+empty, and an empty comparison has no list for the presence rule to
+read and no group for the ordering pin to order. Nothing on this path
+moves either sentence or the answer they are asserted against.
