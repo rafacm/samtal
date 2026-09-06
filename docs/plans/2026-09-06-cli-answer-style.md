@@ -276,7 +276,14 @@ same reading `_identity_block` records for `info`.
   vocabulary moved to the side that talks to people.
 - **The success line**: one fixed sentence on stderr after the
   listing, stating the stored configuration is installed and serving.
-  No duration, per practice 3.
+  No duration, per practice 3. It cannot live in `_apply_listing`,
+  which returns one stdout string that `_printed` prints; `APPLY`
+  gets its own render callable in `cli.py`, shaped like `_imported`:
+  print the listing to stdout, flush, then the sentence on stderr,
+  so the success lands under the listing it is about on a merged
+  terminal. The ordering is pinned the way the import's is, with a
+  recording stream proving listing-before-success, beside the
+  presence-on-success and absence-on-refusal cases.
 - **The MCP status block prints only when MCP servers exist.**
   `NOTHING_CONFIGURED` stops appearing in an apply's answer and
   remains exactly what `mcp-server status` answers for an empty
@@ -492,14 +499,18 @@ added where the other five live.
   guide has no diff worked example today.
 - [ ] **M3: an apply says what happened and that it worked.** The
   content rule, the label table with its completeness pin, the
-  success line, the MCP block only when entries exist; the apply pins
-  re-cut; README step-3 prose checked against the new output;
-  CHANGELOG; implementation doc. Design footprint: `_apply_listing`
+  apply-specific render callable (listing, flush, success sentence
+  on stderr) wired as `APPLY.render` with the ordering pin, the MCP
+  block only when entries exist; the apply pins re-cut; README
+  step-3 prose checked against the new output; CHANGELOG;
+  implementation doc. Design footprint: `_apply_listing`
   keeps its derived skeleton and gains the one table whose absence
   was the operator reading build-internals; deletion test says the
-  table stays in `cli.py` beside its only reader.
-  Documentation footprint: root `README.md` if step 3's surrounding
-  prose describes the old shape; CHANGELOG; census manifest.
+  table and the renderer stay in `cli.py` beside their only readers.
+  Documentation footprint: `vinga-server/README.md`'s apply
+  transcript (~1122-1148) re-captured with its surrounding prose
+  reconciled; root `README.md` if step 3's surrounding prose
+  describes the old shape; CHANGELOG; census manifest.
 - [ ] **M4: `info` answers at a glance, with the URL protection
   kept.** The one-line server fact, the relabelled URL line above the
   bare URL, the one-line tally with derived plurals and the
@@ -587,6 +598,13 @@ ready, pending the P1 amendments.
    `APPLY` wraps it in `_printed`; the success sentence cannot live
    there, and printing stderr afterwards without flushing stdout can
    land the success above the listing it is about.
+
+   *Resolution*: accepted in full. The apply gains its own render
+   callable in `cli.py`, shaped like `_imported`: listing to stdout,
+   flush, sentence to stderr, wired as `APPLY.render`. The flush is
+   the same discipline `_acknowledged` and `_imported_entries`
+   document, and the ordering pin with a recording stream joins the
+   M3 tests beside presence-on-success and absence-on-refusal.
 
 5. **P2: M3 omits the maintained apply transcript it invalidates.**
    `vinga-server/README.md:1122-1148` carries the full current apply
