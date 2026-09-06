@@ -538,8 +538,9 @@ added where the other five live.
   transcript (~1122-1148) re-captured with its surrounding prose
   reconciled; root `README.md` if step 3's surrounding prose
   describes the old shape; CHANGELOG; census manifest.
-- [ ] **M4: `info` answers at a glance, with the URL protection
-  kept.** The one-line server fact, the relabelled URL line above the
+- [x] **[M4: `info` answers at a glance, with the URL protection
+  kept](2026-09-06-cli-answer-style-implementation.md#m4-info-answers-at-a-glance-with-the-url-protection-kept)**
+  (PR TBD). The one-line server fact, the relabelled URL line above the
   bare URL, the one-line tally with derived plurals and the
   `nothing yet` arm; `test_config_cli_info.py` and
   `test_config_cli_summary.py` re-pinned; both root-README `info`
