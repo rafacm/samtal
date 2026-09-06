@@ -107,6 +107,32 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   puts the renamed agent on the running server. The CLI reference grows
   the command's page, generated from the tree as every page there is.
 
+### Fixed
+
+- **A legacy URL credential no longer reaches the provider build
+  either** (#413). #381 put every DISPLAY of a stored identity through a
+  strip and #382 put every REFUSAL through the same door, both of them
+  inside the composition that turns a stored snapshot into a
+  configuration. What runs next is the build, and it names the same
+  entries again in a vocabulary of its own, composed by a different
+  renderer after the composition has finished: the label every provider
+  refusal carries (`providers.<stage>.<name>`, which reaches an unknown
+  type, a bad option, a missing extra, a library that would not start
+  and every egress refusal), the sentence an agent missing a stage is
+  refused with, the location `provider_for_agent` answers beside the
+  name, and the identity every provider event calls the entry by. A name
+  written before the addressability rule can hold a URL carrying a
+  credential, and all four carried it whole. All four now leave through
+  the same door, so what a boot prints on stderr as it fails to start,
+  and what an event says about the entry it is about, is the address
+  without the credential. Two things are deliberately untouched: the
+  name a stored credential is filed under, which is an address rather
+  than a sentence, and an apply's answer, which already names nothing
+  stored. The location an entry is written at moved to `entities`
+  beside the addressing it is built from, so the sentence a boot prints
+  about a provider row it could not read and the sentence it prints
+  about one it could not build cannot come to disagree.
+
 ## 2026-09-05
 
 ### Added
