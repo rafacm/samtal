@@ -377,9 +377,13 @@ question, not a rendering one.
   `grep -n '(none)' src/vinga_server/config/cli.py` (the memory
   listings and `_status_block`'s own lines are out of scope and stay;
   the diff, apply and info sites go). The committed transcripts that
-  change: `grep -rn "applies at reload\|configured:\|not yet serving"
-  README.md vinga-server/README.md docs/` re-run per milestone,
-  because a rebase can add one.
+  change: `grep -rn "applies at reload\|configured:\|not yet
+  serving\|(none)\|defaults_changed" README.md vinga-server/README.md
+  docs/` re-run per milestone, because a rebase can add one; the
+  `(none)` and `defaults_changed` terms are what find an apply
+  transcript, which the first three patterns miss, and the
+  `docs/plans/` hits it returns are historical records that never
+  move.
 
 ## Module layout
 
@@ -611,6 +615,13 @@ ready, pending the P1 amendments.
    field dump and MCP status block, and none of the plan's inventory
    greps (`applies at reload`, `configured:`, `not yet serving`)
    finds it.
+
+   *Resolution*: accepted in full. M3's documentation footprint now
+   names the transcript with its line range and the reconciliation
+   of the prose around it, and the inventory grep gains `(none)` and
+   `defaults_changed`, the two terms that actually match an apply
+   transcript, with the note that its `docs/plans/` hits are
+   historical records that never move.
 
 6. **P2: mixed known and unknown import boundaries are
    underspecified, and the named test can permit lost advice.** As
