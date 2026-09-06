@@ -134,6 +134,31 @@ neighbouring leak found while reproducing the second.
   nothing, since a model forbidding extras refuses through
   `validation_problems`, which names only declared keys.
 
+### What booting that far cost, and the guard it bought
+
+The boot case is the first test in either lane to reach `logs.configure`:
+every other `serving.run` case refuses in `load_boot_config`, which runs
+before it. That line takes the root logger over for the whole process,
+removing every handler on it (pytest's capture handler included) and
+installing one bound to whatever `sys.stderr` was at that moment. Left
+behind, it makes the next test in that worker emit into a stream nobody
+owns; the handler raises, and `logging` prints its `--- Logging error ---`
+fallback, which is the RAW record with its arguments, straight to the
+real stderr.
+
+CI found it as a conversation-erasure case failing on its own stderr
+assertion, three files away, because `--dist loadfile` put the two on one
+worker and a local run had not. The dump is what makes this worth a guard
+rather than a tidy-up: it bypasses every formatter, so it defeats exactly
+the assertions a no-leak test makes, and it fails a test that did nothing
+wrong.
+
+`restore_root_logger` therefore moves out of `test_logs.py` into the
+shared conftest, and an autouse guard fails any test that leaves the root
+logger reconfigured, putting it back so the next test is not the one that
+suffers. Over the whole unit lane the guard finds exactly one offender,
+which is the case that introduced it.
+
 ## Key parameters
 
 - `entities.entity_location(descriptor, *identity)`: where an entry is
@@ -240,6 +265,13 @@ that renders it today; both callers take the name and discard it.
     visible.
   - The option name's strip, reverted: the refusal listed the key
     whole.
+- The CI-only failure that followed the round was reproduced by pairing
+  the two files in one worker (`uv run pytest
+  tests/unit/test_config_url_credential_display.py
+  tests/unit/test_conversations_erasure.py`), which fails on the raw
+  record dumped to stderr and passes with the fixture requested. The
+  guard was checked from the other end too: without the fixture, the
+  case that leaves the root logger reconfigured is the one that fails.
 
 ## Files modified
 
