@@ -154,6 +154,34 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **`vinga info` answers at a glance.** It printed nine lines to say
+  five things, six of them a tally of mostly zeroes under a heading.
+  Which build answered is one line now, `server: <version>
+  (<revision>)`, because a version and the revision it was cut from are
+  one fact about one process. The stored half is one line too, and only
+  of what has something to say: a kind nothing was written of is absent
+  rather than printed as a zero, a count of one says the kind's own
+  command noun and any other count says that noun with an `s`, and the
+  shared defaults say `agent_defaults set` when anything is set in them.
+  Boards and the default agent always say what is true, `no devices` or
+  `2 devices bound`, `default agent assistant` or `no default agent`,
+  because an unbound board reaching nothing is the fact an operator is
+  looking for. A deployment nothing has been written to says `configured:
+  nothing yet`, which is what Getting Started's step 2 now shows. What is
+  printed is still a function of the stored state alone, so two runs
+  against one state are the same bytes.
+
+- **The onboarding URL is labelled the way this codebase names it.**
+  The line above it read "the URL to type into a device's captive
+  portal", which described the value without naming it, so the label and
+  the noun every other page uses were different words. It leads with
+  `onboarding URL` now and names the field a board asks for it in, and
+  it still carries the provenance and still stands above the URL rather
+  than in front of it: the label may wrap and lose nothing, and the URL
+  it protects may not. The banner and the address this CLI contacted
+  have not moved either, for the reason they print before the first act:
+  a server that refuses has to refuse under the address that refused.
+
 - **An apply says what it did, in the operator's words, and that it
   worked.** `vinga apply` printed every field of every section whether
   or not the field had anything to say, in the field names of the layer
