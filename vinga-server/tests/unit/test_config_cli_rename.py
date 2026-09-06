@@ -33,8 +33,8 @@ import httpx
 import pytest
 
 from tests.support.config_cli import answering, runner
+from tests.support.leaks import renderings
 from tests.support.notices import CHECK_IN, RELOAD, STORE_BOOT, boundaries
-from vinga_server import logs
 from vinga_server.config import cli, entities
 from vinga_server.config.responses import Applies
 
@@ -69,18 +69,6 @@ def pipeline(run) -> None:
     assert run("provider", "set", "asr", "ears", "-f", "-", stdin="type: mock\n") == 0
     assert run("agent-defaults", "set", "-f", "-", stdin="llm: claude\nasr: ears\n") == 0
     assert run("agent", "set", "sam", "-f", "-", stdin="prompt: You are Sam.\n") == 0
-
-
-def leaked(caplog: pytest.LogCaptureFixture) -> list[str]:
-    """Every record written while a command ran, in both formats a
-    deployment writes one in: a value kept off both streams and written
-    to a log line is not kept."""
-    text = logging.Formatter(logs.TEXT_FORMAT)
-    return [
-        rendering
-        for record in caplog.records
-        for rendering in (logs.JsonFormatter().format(record), text.format(record))
-    ]
 
 
 # What the command sends
@@ -274,8 +262,12 @@ def test_a_new_name_carrying_a_credential_is_refused_and_never_echoed(
 
     The new name is caller text: it arrived on this command line, no
     row holds it, and it is refused for the slash such a URL carries.
-    So it is echoed in neither stream and in no log record, in either
-    format a deployment writes one in.
+    So it is echoed in neither stream and in no log record, read the
+    way `tests.support.leaks` reads one: both formats a deployment
+    writes with, and then the record itself, its attribute dictionary,
+    its unformatted arguments and any exception on it. That third
+    reading is the one the formatters cannot give, and it is where a
+    value that never reached a message would still be sitting.
     """
     pipeline(run)
 
@@ -283,7 +275,7 @@ def test_a_new_name_carrying_a_credential_is_refused_and_never_echoed(
         code, printed, err = out(run, capsys, "agent", "rename", "sam", PASTED_NAME)
 
     assert code == 1
-    for rendering in (printed, err, *leaked(caplog)):
+    for rendering in (printed, err, *renderings(caplog)):
         assert PASTED not in rendering
         assert PASTED_NAME not in rendering
 
