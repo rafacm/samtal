@@ -102,7 +102,7 @@ def recording(run) -> list[httpx.Request]:
     return sent
 
 
-def test_the_verb_sends_one_post_carrying_the_new_name_and_nothing_else(
+def test_the_verb_sends_one_post_carrying_the_new_name_as_it_was_typed(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The request, recorded off the wire.
@@ -113,10 +113,21 @@ def test_the_verb_sends_one_post_carrying_the_new_name_and_nothing_else(
     reaches the route as one segment; the new name is in the body
     rather than in the target, which is also what keeps it out of every
     proxy log between here and the server.
+
+    The name is typed with whitespace around it, which is what makes
+    "as it was typed" an assertion rather than a sentence: every value
+    that survives a trim unchanged would pass this case with a
+    `strip()` in the body builder, and a client quietly editing what an
+    operator typed is exactly what must not happen. What the SERVER
+    makes of the padding is the server's own business and is pinned
+    where that decision lives (`test_config_api_writes.py`): it strips
+    like every other path that stores a name, answers 200, and files
+    the row under the trimmed one, which is why the acknowledgement
+    this transport hands back names the trimmed one.
     """
     sent = recording(run)
 
-    code, printed, _ = out(run, capsys, "agent", "rename", "sam", "poet")
+    code, printed, _ = out(run, capsys, "agent", "rename", "sam", "  poet  ")
 
     assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
     assert len(sent) == 1
@@ -124,9 +135,9 @@ def test_the_verb_sends_one_post_carrying_the_new_name_and_nothing_else(
     assert sent[0].url.raw_path.endswith(b"/agents/sam/rename")
     assert sent[0].url.query == b""
     # The body as a shape rather than as bytes: what is claimed is the
-    # one key and nothing beside it, and how a JSON encoder spaces a
-    # pair is that library's business.
-    assert json.loads(sent[0].content) == {"to": "poet"}
+    # one key, nothing beside it, and the value unedited, while how a
+    # JSON encoder spaces a pair is that library's business.
+    assert json.loads(sent[0].content) == {"to": "  poet  "}
 
 
 def test_a_name_a_path_cannot_hold_travels_as_one_segment(
