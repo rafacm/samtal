@@ -1076,7 +1076,6 @@ def test_an_apply_installs_what_an_import_wrote(
     # document moved, and then what every MCP entry is doing.
     assert "prompts:" in lines
     assert "  changed: sam" in lines
-    assert "mcp:" in lines
     assert "house" in printed.out
     # And nothing waiting, which is the whole of what the apply buys.
     assert printed.err == ""

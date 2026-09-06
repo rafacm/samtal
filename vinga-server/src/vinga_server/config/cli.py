@@ -3268,22 +3268,86 @@ APPLY_SECTIONS: dict[str, type[BaseModel]] = {
 }
 
 
+# What each outcome an apply can report is called, in the words of the
+# person who ran it
+#
+# The field names are the layer that did the work talking to itself:
+# `fallback_resynthesized` is a field of the reload result, and an
+# operator whose document contains no `fallback` section has no way to
+# read it as "the phrase this agent speaks when a reply fails was made
+# again in its voice" (#426). So the vocabulary moves to the side that
+# talks to people, and each label is written from what its own field's
+# description in `responses.py` says the field means.
+#
+# Keyed by (section, field), because one word means two things in two
+# sections: a provider entry that was `reused` is an engine nothing
+# rebuilt, and a filler that was `reused` is audio nothing sent to a
+# voice. A row whose field name is already the operator's own word for
+# it keeps that word; what the table buys is not novelty but totality,
+# which a pin asserts over `APPLY_SECTIONS`: a field added to the
+# contract without a label here fails a test rather than going missing
+# from an answer.
+#
+# Short, lowercase and fixed text, for the reason every other sentence
+# in this module is: what is printed has to be a function of the answer
+# alone, and a label is this module's own string rather than anything a
+# far side wrote.
+APPLY_LABELS: dict[tuple[str, str], str] = {
+    ("mcp", "started"): "connection started",
+    ("mcp", "restarted"): "connection remade",
+    ("mcp", "stopped"): "connection stopped",
+    ("mcp", "unchanged"): "connection kept",
+    ("prompts", "changed"): "changed",
+    ("fillers", "resynthesized"): "filled pause spoken again",
+    ("fillers", "reused"): "filled pause kept",
+    ("fillers", "disabled"): "filled pause off, synthesis failed",
+    ("fillers", "fallback_resynthesized"): "failure phrase spoken again",
+    ("fillers", "fallback_reused"): "failure phrase kept",
+    ("fillers", "fallback_degraded"): "failure phrase shown, not spoken",
+    ("providers", "built"): "engine built",
+    ("providers", "reused"): "engine kept",
+    ("providers", "retired"): "engine retired",
+    ("agents", "added"): "added",
+    ("agents", "removed"): "removed",
+    ("agents", "defaults_changed"): "agent_defaults changed",
+}
+
+# What an apply that moved nothing says. A sentence rather than no
+# output at all, for the reason the comparison's own is one: a command
+# that printed nothing would read as one that failed to answer. It says
+# the state and not the act, because the act is what the success line
+# on stderr says, and stdout is the half a pipe reads for what happened.
+NOTHING_DIFFERED = "nothing differed from what this server was already serving."
+
+
 def _apply_listing(applied: Mapping[str, Any]) -> str:
     """What the apply installed, kind by kind, and then what is running.
 
     The outcomes first, because they are the answer to the question that
     was asked, and the MCP status underneath because it is the answer to
     the one that follows: an entry that started is not thereby
-    connected, and the block below it says which.
+    connected, and the block below it says which. The status half is
+    asked for only where there are entries to say something about
+    (#426): `NOTHING_CONFIGURED` is the whole answer to a question an
+    operator asked `mcp-server status`, and advice about a feature not in
+    use is not an answer to `apply`.
 
-    One block per section, and every section printed, including the ones
-    this server does not apply yet: a section silently missing from the
-    output would read as a kind with nothing to report rather than as a
-    kind this build does not touch. What each section can say is read
-    off its own model rather than listed here, so a section or an
-    outcome added to the result is one the operator sees, and a field
-    shaped like neither a list of names nor a flag is a failing test
-    rather than output nobody notices is gone.
+    A section appears where it has something to say, and within one
+    section a list with names in it and a flag that is true (#426): an
+    empty list and a false flag are absent rather than enumerated,
+    because absence is absence and what an operator is reading for is
+    what moved. What is filtered is a function of the answer, so two
+    renders of one answer are still the same bytes. A section answered
+    null keeps its line: "this build does not touch this kind" is
+    content rather than emptiness, and a kind silently missing would
+    read as one with nothing to report.
+
+    What each section can say is still read off its own model rather
+    than listed here, so a section or an outcome added to the result is
+    one the operator sees, and a field shaped like neither a list of
+    names nor a flag is a failing test rather than output nobody notices
+    is gone. What the labels above add is the vocabulary, held to the
+    same models by their own pin.
 
     Read as one shape, the status half included, which is what the act
     declares: the outcome lists are printed name by name and the status
@@ -3296,13 +3360,23 @@ def _apply_listing(applied: Mapping[str, Any]) -> str:
         if body is None:
             lines.append(f"{section}: {NOT_APPLIED}")
             continue
-        lines.append(f"{section}:")
-        lines += [
-            f"  {outcome}: " + (_names(body[outcome]) or "(none)")
+        said = [
+            f"  {APPLY_LABELS[section, outcome]}: {_names(body[outcome])}"
             for outcome in outcomes(shape)
-        ]
-        lines += [f"  {flag}: {'yes' if body[flag] else 'no'}" for flag in flags(shape)]
-    return "\n".join(lines) + "\n\n" + _status_block(applied["mcp"]["servers"])
+            if body[outcome]
+        ] + [f"  {APPLY_LABELS[section, flag]}" for flag in flags(shape) if body[flag]]
+        if said:
+            lines.append(f"{section}:")
+            lines += said
+    if not lines:
+        lines.append(NOTHING_DIFFERED)
+    servers = applied["mcp"]["servers"]
+    # The blank line goes with the block it separates, so an answer with
+    # no status half ends on the line before it rather than on
+    # whitespace.
+    if not servers:
+        return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n\n" + _status_block(servers)
 
 
 # What the database holds that the running server is not serving

@@ -631,8 +631,12 @@ async def test_a_synthesis_failure_reaches_the_response_body_and_the_rendering()
         # reply says, so this is not the mask going off.
         "fallback_degraded": ["assistant"],
     }
-    assert "  disabled: assistant" in cli._apply_listing(body)
-    assert "  fallback_degraded: assistant" in cli._apply_listing(body)
+    # In the words the CLI puts on the two outcomes rather than in the
+    # field names above them (#426): what an operator reads off this is
+    # that the mask went off and that the failure phrase is shown
+    # without being spoken.
+    assert "  filled pause off, synthesis failed: assistant" in cli._apply_listing(body)
+    assert "  failure phrase shown, not spoken: assistant" in cli._apply_listing(body)
 
 
 async def test_an_agent_defaults_filler_edit_reaches_an_inheriting_agent() -> None:

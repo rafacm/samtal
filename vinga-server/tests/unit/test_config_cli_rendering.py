@@ -512,9 +512,77 @@ def _applied(
     return reload
 
 
+def _every_section(**overrides: object) -> dict[str, object]:
+    """One apply's answer with every section filled and nothing in any
+    of them, as a server that applies every kind answers one.
+
+    No MCP entries in it, which is what lets a case pin the whole
+    listing as bytes: the status block underneath carries the moment
+    each connection was made.
+    """
+    return {
+        "mcp": {
+            "started": [],
+            "restarted": [],
+            "stopped": [],
+            "unchanged": [],
+            "servers": {},
+        },
+        "prompts": {"changed": []},
+        "fillers": {
+            "resynthesized": [],
+            "reused": [],
+            "disabled": [],
+            "fallback_resynthesized": [],
+            "fallback_reused": [],
+            "fallback_degraded": [],
+        },
+        "providers": {"built": [], "reused": [], "retired": []},
+        "agents": {"added": [], "removed": [], "defaults_changed": False},
+    } | overrides
+
+
+# Every outcome an apply can report, said once, in the words this
+# client puts on them (#426). The field names are the reload layer's,
+# and `fallback_resynthesized` is the specimen: an operator whose
+# document contains no `fallback` section cannot read it, and what they
+# came to know is that the phrase an agent speaks when a reply fails was
+# made again in its voice.
+APPLIED = """\
+mcp:
+  connection started: weather
+  connection stopped: gone
+prompts:
+  changed: sam
+fillers:
+  filled pause spoken again: sam
+  filled pause kept: kid
+  filled pause off, synthesis failed: mute
+  failure phrase spoken again: kid
+  failure phrase kept: sam
+  failure phrase shown, not spoken: mute
+providers:
+  engine built: tts.voice
+  engine kept: llm.mock
+  engine retired: asr.old
+agents:
+  added: kid
+  removed: mute
+  agent_defaults changed
+"""
+
+
 def test_apply_prints_what_it_did_and_what_is_running(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """The whole answer: the outcomes byte for byte, the status block
+    under them, and the success sentence on the other stream.
+
+    Every list has a name in it and the one flag is true, so this is
+    where each label is pinned as an operator reads it. The two kinds of
+    filler are crossed on purpose: they are staled apart, so one agent
+    can be kept under one and spoken again under the other.
+    """
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
     servers = _configured({"weather": entry}, {"sam": ["weather"]})
     run.runtime["mcp_servers"] = servers
@@ -539,46 +607,11 @@ def test_apply_prints_what_it_did_and_what_is_running(
 
     assert run("apply") == 0
 
-    printed = capsys.readouterr().out
-    assert "mcp:" in printed
-    assert "  started: weather" in printed
-    assert "  restarted: (none)" in printed
-    assert "  stopped: gone" in printed
-    assert "  unchanged: (none)" in printed
-    # The prompt half beside the MCP one, since an apply moves both.
-    assert "prompts:" in printed
-    assert "  changed: sam" in printed
-    # And the filler half, all three outcomes, the degraded one
-    # included: an agent whose voice would not speak is what an operator
-    # most needs to read off this, since the reload applied anyway.
-    assert "fillers:" in printed
-    assert "  resynthesized: sam" in printed
-    assert "  reused: kid" in printed
-    assert "  disabled: mute" in printed
-    # And the failure phrases beside them, crossed the other way round
-    # on purpose: the two kinds are staled apart, so one agent can be
-    # reused under one and re-synthesized under the other.
-    assert "  fallback_resynthesized: kid" in printed
-    assert "  fallback_reused: sam" in printed
-    assert "  fallback_degraded: mute" in printed
-    # And the engines, whose three outcomes an operator reads for the
-    # opposite reason: what was built is what a swap of a local model
-    # cost, and what was reused is what it did not.
-    assert "providers:" in printed
-    assert "  built: tts.voice" in printed
-    assert "  reused: llm.mock" in printed
-    assert "  retired: asr.old" in printed
-    # And the agent set, whose two lists say what a device can reach
-    # from now on and what it cannot, beside the one field of the whole
-    # answer that is a flag rather than a list: there is one
-    # `agent_defaults` and nothing to name.
-    assert "agents:" in printed
-    assert "  added: kid" in printed
-    assert "  removed: mute" in printed
-    assert "  defaults_changed: yes" in printed
+    printed = capsys.readouterr()
+    assert printed.out.startswith(APPLIED + "\n")
     # And the status underneath, which is what says whether an entry
     # that started actually connected.
-    assert "weather: down since " in printed
+    assert "weather: down since " in printed.out
 
 
 def test_a_section_answered_null_is_named_rather_than_missing() -> None:
@@ -587,7 +620,8 @@ def test_a_section_answered_null_is_named_rather_than_missing() -> None:
     already holds buys nothing; this server fills all of them, so what
     could still answer null is an older one. A section silently missing
     from the output would read as a kind with nothing to report, so it
-    is named instead.
+    is named instead: "this build does not touch this kind" is content,
+    which is why the rule below does not filter it away.
     """
     body = _reload_answer()
     body["agents"] = None
@@ -595,13 +629,26 @@ def test_a_section_answered_null_is_named_rather_than_missing() -> None:
     assert f"agents: {cli.NOT_APPLIED}" in cli._apply_listing(body)
 
 
-def test_the_apply_listing_renders_every_field_of_every_section() -> None:
-    """The named failure to test for: a section's field that is neither
-    a list of names nor a flag would drop silently out of the rendering
-    above, and an operator would be reading an answer with a hole in it.
+def test_every_outcome_an_apply_can_report_has_a_label() -> None:
+    """Two named failures at once.
 
-    Read off the models rather than listed here, so a field added to a
-    section is either rendered or fails this."""
+    The first: a section's field that is neither a list of names nor a
+    flag would drop silently out of the rendering, and an operator would
+    be reading an answer with a hole in it. The second: a field the
+    rendering does have a rule for, and no word for, would reach the
+    operator as a `KeyError` or as the layer's own name for it.
+
+    Both directions, keyed off the models rather than listed here: a
+    field added to a section without a label fails this, and a label for
+    a field no section declares is a line nobody will ever read.
+    """
+    labelled = {
+        (section, field)
+        for section, shape in APPLY_SECTIONS.items()
+        for field in outcomes(shape) + flags(shape)
+    }
+
+    assert set(cli.APPLY_LABELS) == labelled
     for section, shape in APPLY_SECTIONS.items():
         rendered = set(outcomes(shape)) | set(flags(shape))
         # The MCP status document is the one field rendered by a
@@ -609,6 +656,111 @@ def test_the_apply_listing_renders_every_field_of_every_section() -> None:
         # what makes it the one exception this pin states.
         unrendered = set(shape.model_fields) - rendered
         assert unrendered == ({"servers"} if section == "mcp" else set())
+
+
+def test_the_apply_prints_only_what_has_something_to_say() -> None:
+    """An empty list, a false flag and a section of neither are absent
+    rather than enumerated (#426): absence is absence, and what an
+    operator is reading for is what the apply moved. What is filtered is
+    a function of the answer, so two renders of one answer are still the
+    same bytes, which the case further down pins.
+    """
+    body = _every_section(
+        mcp={
+            "started": ["weather"],
+            "restarted": [],
+            "stopped": [],
+            "unchanged": [],
+            "servers": {},
+        }
+    )
+
+    assert cli._apply_listing(body) == "mcp:\n  connection started: weather\n"
+
+
+def test_the_apply_says_so_when_nothing_differed() -> None:
+    """A sentence rather than no output at all: a command that printed
+    nothing would read as one that failed to answer, and what this
+    answers is that the store was already what the server was serving.
+    """
+    assert cli._apply_listing(_every_section()) == cli.NOTHING_DIFFERED + "\n"
+
+
+def test_an_apply_volunteers_nothing_about_mcp_servers_that_do_not_exist(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The advertisement #426 counted, gone from the one command that
+    was not asked about it.
+
+    `NOTHING_CONFIGURED` says how an MCP entry is written and how an
+    agent reaches one, which is the whole answer to a question an
+    operator asked `mcp-server status`, and no part of the answer to
+    `apply`. So it stays exactly where it was asked for, which is what
+    the second half of this pins.
+    """
+    servers = _configured({}, {"sam": []})
+    run.runtime["mcp_servers"] = servers
+    run.runtime["reload"] = _applied(servers)
+
+    assert run("apply") == 0
+
+    printed = capsys.readouterr().out
+    assert cli.NOTHING_CONFIGURED not in printed
+    # And no separator left hanging under the listing where the block
+    # it separates is not there.
+    assert printed == cli.NOTHING_DIFFERED + "\n"
+
+    assert run("mcp-server", "status") == 0
+
+    assert capsys.readouterr().out.startswith(cli.NOTHING_CONFIGURED)
+
+
+def test_the_apply_renders_the_same_answer_as_the_same_bytes(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Determinism, said as bytes rather than as a style, and per
+    stream: what the rendering leaves out is a function of the answer
+    alone, and the sentence on stderr is fixed text with no duration in
+    it. A wall-clock number anywhere in either half is where two runs
+    against one state would stop being the same bytes.
+    """
+    servers = _configured({}, {"sam": []})
+    run.runtime["mcp_servers"] = servers
+    run.runtime["reload"] = _applied(servers, prompts=("sam",))
+
+    assert run("apply") == 0
+    first = capsys.readouterr()
+    assert run("apply") == 0
+    second = capsys.readouterr()
+
+    assert first.out == second.out
+    assert first.err == second.err
+
+
+def test_a_name_the_apply_reports_does_not_steer_a_terminal(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one thing an apply's outcomes carry that a far side wrote:
+    the names, which are the rows as the store holds them. Neutralized
+    rather than dropped, for the reason the import cases give: a name
+    that vanished would be an outcome an operator was never told
+    about."""
+    body = _every_section(
+        mcp={
+            "started": [f"weather{STEERING}"],
+            "restarted": [],
+            "stopped": [],
+            "unchanged": [],
+            "servers": {},
+        }
+    )
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("apply") == 0
+
+    printed = capsys.readouterr().out
+    assert STEERING not in printed
+    assert "weather" in printed
 
 
 def test_apply_prints_the_refusal_the_api_answered(
