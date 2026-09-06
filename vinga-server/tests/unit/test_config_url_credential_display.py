@@ -1302,7 +1302,41 @@ async def test_every_event_about_a_built_entry_names_it_without_its_credential(
         await provider.close()
 
     assert payload["provider"] == HISTORIC_SHOWN
-    _carries_no_sentinel(_rendered(payload), *_logged(caplog))
+    _carries_no_sentinel(_rendered(payload), both_formats(caplog), *_logged(caplog))
+
+
+async def test_the_model_an_event_reports_is_stripped_and_the_one_it_runs_is_not(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of that identity, and the one that is not an
+    identity at all.
+
+    `model` is free text a vendor names, written as an option, and the
+    URL rule is write-time only, so a row stored before it can hold
+    `model: https://user:password@host/m`, build, and put that string in
+    the `gen_ai.request.model` field of every round this entry answers.
+    Nothing about the strip may reach what the entry RUNS, though: that
+    string goes into the request, so the provider's own `model` stays
+    exactly as configured and only the identity built from it is shown
+    without the credential.
+    """
+    running = f"https://user:{KEY_SENTINEL}@{HOST}/m"
+    entry = ProviderConfig.model_validate(
+        {"type": "openai_compatible", "base_url": f"https://{HOST}/v1", "model": running}
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        provider = await build_entry("llm", LAWFUL, entry)
+        try:
+            payload = assembly.provider_failure(
+                LAWFUL, THREAD, "llm", provider, ConnectionRefusedError(), 0.5
+            ).payload()
+        finally:
+            await provider.close()
+
+    assert payload["model"] == f"https://{HOST}/m"
+    assert provider.model == running, "the strip reached the model the entry runs"
+    _carries_no_sentinel(_rendered(payload), both_formats(caplog), *_logged(caplog))
 
 
 async def test_the_container_warning_names_the_entry_without_its_credential(
