@@ -787,7 +787,7 @@ Two, and neither changes what the milestone ships.
   named nothing; with the row registered, the same spelling in a code
   comment and in the changelog entry passes the guard, and it passes on
   the argument count too: the matcher reads a row's positional budget
-  off the built tree, and `agent rename <new> <old>` fits the two this
+  off the built tree, and `agent rename <old> <new>` fits the two this
   row declares.
 
 - **A one-segment claim cannot be asserted on `httpx.URL.path`.** That
