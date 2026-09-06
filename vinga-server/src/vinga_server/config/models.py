@@ -1704,6 +1704,14 @@ def is_url_credential_parameter(name: str) -> bool:
     return any(fragment in lowered for fragment in _UNDECLARED_SECRET_KEY_FRAGMENTS)
 
 
+# What `urllib.parse` removes from a URL before it parses one, spelled
+# here so the test in front of the parse reads the same string the parse
+# will. Kept as the library's list rather than widened to every control
+# character: the point is to ask the question the parser answers, and a
+# character the parser leaves alone stays where it is.
+_URL_DELETES = str.maketrans("", "", "\t\r\n")
+
+
 def url_credential(value: object) -> str | None:
     """Which credential a URL-shaped value carries, or None.
 
@@ -1718,8 +1726,20 @@ def url_credential(value: object) -> str | None:
     Two answers, because they are two different mistakes: `userinfo` is
     the credential written before the host, and `query` is a credential
     passed as a parameter, which is the other place vendors accept one.
+
+    The cheap test in front of the parse is asked of the value the
+    PARSER will see, and that is not the same string: `urlsplit` deletes
+    every tab, carriage return and newline before it reads anything, so
+    `https:/<CR>/user:password@host/v1` is a URL with a credential to
+    the library and to every client that opens one, and holds no literal
+    `://` for a substring test to find. Found while measuring what a
+    control character does to the rules that read a stored value (#414).
+    Only this test had the gap, which is what says it is a gap rather
+    than a policy: everything below reads what `urlsplit` returns, so a
+    parameter spelled `?to<CR>ken=` already reached
+    `is_url_credential_parameter` as `token` and was already refused.
     """
-    if not isinstance(value, str) or "://" not in value:
+    if not isinstance(value, str) or "://" not in value.translate(_URL_DELETES):
         return None
     try:
         parts = urlsplit(value)
