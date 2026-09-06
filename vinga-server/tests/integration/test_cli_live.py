@@ -440,6 +440,12 @@ KNOWN_MAC = "aa:bb:cc:dd:ee:ff"
 
 WAITING_MAC = "11:22:33:44:55:66"
 
+# And the board the rename's case binds, which is its own for the reason
+# the session verbs' two are theirs: what that case reads back is a
+# binding rewritten by a transaction, and a board another case is about
+# would make the reading ambiguous.
+RENAMED_MAC = "02:00:00:00:00:31"
+
 # And the board nobody owns, which presents its own documented default
 # rather than a third address invented here.
 SIMULATED_MAC = board.DEFAULT_MAC
@@ -757,6 +763,54 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     assert made_there
     assert {record.threadName for record in made_there} != {threading.current_thread().name}
     assert any(record.name.startswith("vinga_server.") for record in made_there)
+
+
+def test_an_agent_is_renamed_with_its_binding_over_the_wire(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The act that rewrites a name everywhere it is still read, over a
+    real connection to a real store.
+
+    An agent of this case's own and a board of its own, so that what the
+    rename moved can be read back without touching the deployment every
+    other case is written against, and the store is left as it was
+    found because the export round trip further down is about what this
+    lane wrote rather than what it borrowed.
+
+    What makes it a lane's rather than an acceptance suite's: the
+    binding and the agents row move in one transaction against a
+    database a running server is reading, and both halves are read back
+    through the verbs an operator would use rather than through the
+    result the write returned.
+    """
+    assert run("agent", "set", "understudy", "prompt=You are standing in.") == 0
+    assert run("device", "bind", RENAMED_MAC, "understudy") == 0
+    capsys.readouterr()
+
+    assert run("agent", "rename", "understudy", "stand-in") == 0
+    renamed = capsys.readouterr()
+    assert renamed.out == "wrote agent understudy renamed to stand-in\n"
+    # A binding moved with the row, so the write says so on stderr the
+    # way every write that is waiting somewhere does.
+    assert renamed.err.strip()
+
+    assert run("agent", "show", "stand-in") == 0
+    assert "You are standing in." in capsys.readouterr().out
+
+    assert run("device", "show", RENAMED_MAC) == 0
+    assert document(capsys.readouterr().out) == {"agents": ["stand-in"]}
+
+    # And nothing answers to the name it had, which is the half a
+    # delete-and-create workaround could not reach without unbinding
+    # the board first.
+    assert run("agent", "show", "understudy") == 1
+    gone = capsys.readouterr()
+    assert gone.out == ""
+    assert "Traceback" not in gone.err
+
+    assert run("device", "delete", RENAMED_MAC) == 0
+    assert run("agent", "delete", "stand-in") == 0
+    capsys.readouterr()
 
 
 # A credential's whole life over the wire

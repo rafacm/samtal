@@ -547,6 +547,26 @@ def test_the_settings_are_written_and_read_back(run) -> None:
     assert answered(run(*defaults), *defaults).startswith("wrote ")
 
 
+def test_an_agent_is_renamed_from_the_installed_wheel(run) -> None:
+    """The rename from a BARE install, which is the claim worth making
+    about it here: the verb moves rows in three schemas, and it carries
+    none of that with it, because everything that moves them is on the
+    other end of the socket.
+
+    Written and taken away again inside this case, so what the apply
+    below installs is the document the bootstrap wrote and nothing this
+    one borrowed.
+    """
+    written = ("agent", "set", "understudy", "prompt=You are standing in.")
+    assert answered(run(*written), *written).startswith("wrote ")
+
+    argv = ("agent", "rename", "understudy", "stand-in")
+    assert answered(run(*argv), *argv) == "wrote agent understudy renamed to stand-in\n"
+
+    assert "You are standing in." in answered(run("agent", "show", "stand-in"), "agent show")
+    assert answered(run("agent", "delete", "stand-in"), "agent delete").startswith("wrote ")
+
+
 def test_the_running_server_is_read_after_an_apply(run) -> None:
     """The three reads that are of the process rather than of the
     database, and the act that makes them different.
