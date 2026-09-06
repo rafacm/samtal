@@ -256,6 +256,42 @@ BOARD_BOUNDS = Bounds(BOARD_LIMIT)
 FIRMWARE_BOUNDS = Bounds(FIRMWARE_LIMIT)
 CLIENT_BOUNDS = Bounds(CLIENT_ID_LIMIT)
 
+# And the one descriptor bound whose home IS here, because its decision
+# site has no bound of its own to import: the compact serialization of
+# the check-in body a board sends, which nothing but the event carries.
+#
+# The bound is a character count and it includes the final length,
+# marker and all. A real check-in with a full partition table is one to
+# two kilobytes; four times that is headroom for a richer firmware, and
+# the value is far-side bytes from an unauthenticated request, so the
+# headroom is where the generosity stops.
+#
+# The decision site (`ota/reply.py`) produces the value with
+# `json.JSONEncoder(ensure_ascii=True, separators=(",", ":"))` driven
+# through `iterencode`, stopping as soon as the accumulation passes the
+# bound, so the accumulation and the retained value are both bounded
+# whatever the body's size. The one cost proportional to the body is
+# reading and parsing the request, which happens before this and exists
+# today. `ensure_ascii=True` is the printability mechanism
+# rather than a formatting preference: every character outside printable
+# ASCII, control characters and lone surrogates included, leaves as a
+# `\uXXXX` escape, so the result is printable by construction and there
+# is no replacement pass to forget. Non-finite numbers keep the
+# encoder's default spellings (`NaN`, `Infinity`, printable ASCII
+# words): this is a diagnostic representation of what the parser
+# accepted, not a JSON document anything re-parses.
+CHECK_IN_BODY_LIMIT: Final = 8192
+
+# What a value cut at that bound ends with, so a truncated body is
+# visibly truncated rather than silently short. Literal ASCII, no
+# ellipsis character, and it is fitted INSIDE the bound: the decision
+# site cuts at `CHECK_IN_BODY_LIMIT - len(CHECK_IN_BODY_TRUNCATED)` and
+# appends this, so a truncated value is never longer than the bound and
+# carries nothing from past the cut.
+CHECK_IN_BODY_TRUNCATED: Final = "...[truncated]"
+
+CHECK_IN_BODY_BOUNDS = Bounds(CHECK_IN_BODY_LIMIT)
+
 # What a trusted configured name may be, which is what the
 # configuration says and no more.
 #
@@ -936,6 +972,28 @@ class FirmwareVersion(Descriptor):
 
 
 @dataclass(frozen=True)
+class CheckInBody(Descriptor):
+    """The whole of what a board said about itself at its configuration
+    check, compactly serialized.
+
+    The one descriptor a board chooses every byte of, which is why it is
+    a value type rather than a dict on the record: the endpoint is
+    unauthenticated, so the body is a stranger's JSON of a stranger's
+    size with any character in it. `ota/reply.py` serializes the PARSED
+    object, bounded and `ensure_ascii` escaped, and this is the bound
+    applied again where the value reaches the surface: the two are
+    different pieces of code, and a decision site that forgot the
+    transformation is a refused value here rather than a leaked one.
+
+    Never rendered. The sentence beside it interpolates only the bounded
+    `said` values its sibling check-in events already interpolate, so
+    the body is a field and never a sentence.
+    """
+
+    BOUNDS: ClassVar[Bounds | None] = CHECK_IN_BODY_BOUNDS
+
+
+@dataclass(frozen=True)
 class PromptSources(EventValue):
     """How much of a prompt came from where, by provenance.
 
@@ -1447,10 +1505,13 @@ __all__ = [
     "AlsoBoundTo",
     "AuthRejection",
     "BoardName",
+    "CHECK_IN_BODY_LIMIT",
+    "CHECK_IN_BODY_TRUNCATED",
     "CLASS_NAME_PATTERN",
     "CLASS_NAME_SEPARATOR",
     "CaptureDeclined",
     "CaptureWrite",
+    "CheckInBody",
     "ClassName",
     "ClassNames",
     "ClientId",

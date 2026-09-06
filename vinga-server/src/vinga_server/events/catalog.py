@@ -66,6 +66,7 @@ from vinga_server.events.values import (
     BoardName,
     CaptureDeclined,
     CaptureWrite,
+    CheckInBody,
     ClassName,
     ClassNames,
     ClientId,
@@ -2313,6 +2314,52 @@ class OtaCheckResolved(Variant):
 
 
 @dataclass(frozen=True)
+class OtaCheckBodyReported(Variant):
+    """The whole of what a board reported at its check-in, for whoever is
+    bringing one up.
+
+    Its own event rather than a fifth shape of `ota_check`: it is
+    emitted beside whichever outcome the check reached, so joining that
+    declaration would put two records named `ota_check` on every
+    check-in and break every assertion that reads the one.
+
+    At DEBUG, which is the whole of the "off unless asked for": the
+    retained log filters at `server.log_level` and the live stream
+    filters per subscription at a default of INFO, so no
+    default-configured surface retains or shows this, and
+    `vinga events tail --level DEBUG` is the asking.
+    """
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.DEBUG
+    TEMPLATE: ClassVar[str] = (
+        "device %s (%s, firmware %s) described itself; the body rides this event"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware")
+
+    device: DeviceId = value()
+    client: ClientId | None = value()
+    board: BoardName = value()
+    firmware: FirmwareVersion = value()
+    body: CheckInBody | None = value(
+        note=(
+            "What the board sent, as a compact serialization of the "
+            "parsed object: duplicate keys collapse to the last, escapes "
+            "and numbers normalize, and everything outside printable "
+            "ASCII leaves as an escape. Null for a request that carried "
+            "no readable JSON object, which is a real state of an "
+            "unfamiliar board rather than nothing to say."
+        )
+    )
+    # The header as the firmware spelled it, rendered beside the
+    # canonical form the field carries. `agents` and `unloaded` are
+    # deliberately not repeated here: they are what the server resolved,
+    # they ride the outcome event emitted in the same breath, and this
+    # event is about what the board said.
+    said_device: ReportedMac = value(carried=False)
+
+
+@dataclass(frozen=True)
 class ActivationNotOfferedUnreadable(Variant):
     """The database could not be read, so no code was minted: this
     device may already be bound."""
@@ -3282,6 +3329,19 @@ OTA_CHECK = declare(
     ),
 )
 
+OTA_CHECK_BODY = declare(
+    "ota_check_body",
+    note=(
+        "The whole of what a board reported at its configuration check, "
+        "for whoever is bringing an unfamiliar one up: the partition "
+        "table, the flash size and the display block that no other "
+        "surface keeps. At DEBUG, so no default-configured deployment "
+        "retains or shows it; `vinga events tail --level DEBUG` is how "
+        "somebody asks for it."
+    ),
+    variants=(OtaCheckBodyReported,),
+)
+
 ACTIVATION_NOT_OFFERED = declare(
     "activation_not_offered",
     note="An unbound device that was answered with no activation code, and why.",
@@ -3701,6 +3761,7 @@ __all__ = [
     "ONBOARDING_KEY_UNSHAPED",
     "OTA_CHANNEL",
     "OTA_CHECK",
+    "OTA_CHECK_BODY",
     "OTA_REQUEST_REJECTED",
     "OnboardingKeyMismatch",
     "OnboardingKeyUnshaped",
@@ -3708,6 +3769,7 @@ __all__ = [
     "OnboardingOn",
     "OtaCheckActivating",
     "OtaCheckAgentNotLoaded",
+    "OtaCheckBodyReported",
     "OtaCheckNoAgent",
     "OtaCheckResolved",
     "OtaRequestRejected",
