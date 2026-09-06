@@ -74,12 +74,15 @@ from tests.support.sessions import (
 )
 from tests.support.sockets import LoopingSocket
 from tests.support.stores import rows
+from tests.support.tools_mcp import reading
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.reload import ConfigReload
 from vinga_server.config.store import ConfigStore
 from vinga_server.conversations import store as record_store
 from vinga_server.conversations.records import TurnLeg, TurnRecord
 from vinga_server.conversations.store import ConversationStore, renames_announced_to
 from vinga_server.db import open_database
+from vinga_server.tools.mcp import McpServers
 
 # The name a session opens under, the name it is given, and two more for
 # the cases that need a third and a fourth. Distinct values, because a
@@ -803,6 +806,91 @@ async def test_a_world_installed_after_a_rename_has_nothing_to_translate(
         assert landed.wait(TIMEOUT_S) is True
         served_store.close_session(session, duration_s=2.0, reason="client")
         served_store.stop()
+
+    assert agent_of(thread) == OLD
+    assert [row["agent"] for row in turns_of(thread)] == [OLD]
+
+
+async def test_a_world_read_after_the_commit_is_never_told_to_translate(
+    config: ConfigStore,
+    recording: ConversationStore,
+    session: str,
+    thread: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The interval between a rename's commit and its publication, from
+    the other side.
+
+    A rename is durable before it is announced, and an apply that reads
+    the store inside that interval builds a world FROM the renamed
+    configuration. Stamping such a world with the ledger as it stands at
+    the install would place it before the announcement, so it would be
+    told to translate a rename it already reflects. That is inert while
+    the freed name stays free and a misattributed turn the moment an
+    operator gives it to a second agent, which is what this arranges.
+
+    Forced with the publication held back on a thread of its own: the
+    read is released into exactly that interval and is shown to be
+    parked on the order, so what it comes back with is a reading taken
+    after the announcement rather than one that raced it.
+    """
+    a_working_configuration(config, OLD)
+    settings = recording_config(Path("/nonexistent"))
+    generations = world(settings)
+    reload = ConfigReload(generations, McpServers({}), reading(settings))
+
+    order = WatchedOrder(record_store._erasure_order)
+    monkeypatch.setattr(record_store, "_erasure_order", order)
+    publishing = record_store.renamed
+    committed = threading.Event()
+    release = threading.Event()
+
+    def held_back(old: str, new: str) -> None:
+        # Called after the commit and inside the order, which is the
+        # interval this test is about.
+        committed.set()
+        assert release.wait(TIMEOUT_S), "the publication was never released"
+        publishing(old, new)
+
+    monkeypatch.setattr(record_store, "renamed", held_back)
+    with renames_announced_to(generations.renamed):
+        renaming = threading.Thread(
+            target=lambda: config.rename_agent(OLD, NEW), daemon=True
+        )
+        renaming.start()
+        assert committed.wait(TIMEOUT_S), "the rename never committed"
+
+        # The freed name, given to a second agent while the first
+        # rename is still unannounced. Both are in the store now, so a
+        # world read here serves them both.
+        config.set_agent(OLD, {"prompt": "A different agent under a free name."})
+
+        reading_the_store = asyncio.create_task(reload._stored())
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if order.waiting:
+                break
+        assert order.waiting, "the read never reached the order"
+        assert not reading_the_store.done(), "the read took a snapshot inside the window"
+
+        release.set()
+        renaming.join(TIMEOUT_S)
+        _, known = await asyncio.wait_for(reading_the_store, TIMEOUT_S)
+
+    # The world built from that reading, installed with what it read.
+    with generations.applying(known=known) as install:
+        install(world(settings).current())
+    installed = generations.current()
+
+    assert generations.renames_for(installed) == ()
+    # And the second agent's session, on that world, keeps its own name.
+    recording.open_session(
+        session, 100.0, manifest(OLD), renames=lambda: generations.renames_for(installed)
+    )
+    landed = recording.record_turn(session, a_turn(thread, OLD, "the second agent"))
+    assert landed.wait(TIMEOUT_S) is True
+    recording.close_session(session, duration_s=2.0, reason="client")
+    recording.stop()
 
     assert agent_of(thread) == OLD
     assert [row["agent"] for row in turns_of(thread)] == [OLD]
