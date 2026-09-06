@@ -274,3 +274,21 @@ holds their names apart.
 ### Verification
 
 Run from `vinga-server/` against a development Postgres.
+
+- `uv run ruff check .`: passed.
+- `uv run pytest tests/unit -q`: 5936 passed, 19 skipped (10m24s).
+- `uv run pytest tests/integration -q`: 245 passed (5m56s).
+- `uv run python -m tests.unit.test_command_spellings`: regenerated
+  after the last source edit; the manifest's diff is line numbers only,
+  no spelling gained or lost. Regenerated a second time after the
+  documentation edits, which changed nothing: this section contributes
+  no command spelling the census counts.
+- `python scripts/check_doc_links.py .`: 211 files, 0 failures.
+- `docs/reference/cli.md` and `docs/reference/api-openapi.json`:
+  byte-identical to the branch base, as the plan expects. No help row
+  moved and no response model did.
+
+One honesty note about the order. The two lanes above were run against
+the tree as it stands except for this section, which was written after
+them; the lanes do not read it, and the census was regenerated and its
+own suite re-run afterwards.
