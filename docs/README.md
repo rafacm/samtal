@@ -4,7 +4,7 @@ Two questions place a page. **What may it claim?** is authority, and
 the seven classes below answer it. **Who is it for?** is audience,
 and it decides only where a page is listed and how it is written:
 **user-facing documentation** describes vinga to somebody running it
-(the READMEs, the device guides, and the reference section below),
+(the READMEs, the board guides, and the reference section below),
 **working notes** are how this project thinks and what it decided
 (the research notes, the architecture pages, and the record).
 Audience never settles authority. A working note does not outrank a
@@ -115,7 +115,7 @@ records link it.
 - [**vinga-esp32**](../vinga-esp32/README.md): the thin firmware
   customization and the boards it targets.
 - [**devices/**](devices/README.md): the per-board guides, described
-  under [Device guides](#device-guides) below.
+  under [Board guides](#board-guides) below.
 - [**deployment.md**](deployment.md): the worked path from a published
   image to a running deployment, in a Docker Compose lane and a
   Kubernetes lane. The contract both implement as a table of links into
@@ -174,7 +174,7 @@ it cannot come to describe a server this repository does not build.
   technologies the project is built on, one short definition each with
   pointers for going deeper.
 
-## Device guides
+## Board guides
 
 [**devices/**](devices/README.md) holds one user-facing guide per board
 vinga targets, describing the hardware in front of the user: which

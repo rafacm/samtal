@@ -152,7 +152,7 @@ distinct on purpose:
 - **Hardware facts from the board catalog**: what the model implies
   but the wire never says: microphone count, echo cancellation,
   display, button layout. Keyed by the reported board model; the
-  per-board [device guides](devices/README.md) are the prose form for
+  per-board [board guides](devices/README.md) are the prose form for
   the help agent, and a machine-readable sibling serves the server.
 
 The help agent reads all three ("this board has one microphone and no
@@ -547,15 +547,15 @@ per-conversation accounting and cross-agent threads out of its scope.
 
 ## The help agent
 
-**Decided direction** (issue #21), except the device guides, which
+**Decided direction** (issue #21), except the board guides, which
 exist.
 
 A built-in agent, bound to every device by default, that answers three
 kinds of question:
 
 - **This device**: which button starts a conversation, how long to hold
-  it to power off, what the display shows. Its source is the per-board
-  device guide, selected by the device model at runtime, so it explains
+  it to power off, what the display shows. Its source is the guide for
+  the board it runs on, selected at runtime, so it explains
   the hardware actually in front of the user.
 - **This system**: vinga's concepts, the contents of this page: what an
   agent is, what a conversation is, why the wake word wakes the device
@@ -570,7 +570,7 @@ facts for the board that checked in, keyed on the reported board model,
 and a board the deployment has no facts for gets an honest vague
 answer rather than a confident wrong one.
 
-The [device guides](devices/README.md) that feed it are user-facing
+The [board guides](devices/README.md) that feed it are user-facing
 markdown, one per supported board, and they exist today (issue #93), so
 the help agent's knowledge is reviewable documentation rather than
 prompt text.

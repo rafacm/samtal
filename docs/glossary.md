@@ -68,6 +68,17 @@ can reach several agents. Today it is the device's agent list in
 configuration, first entry the default. See
 [the concepts page](concepts.md#binding).
 
+### Board
+
+A model of hardware, not one piece of it: what `board.type` names when
+a device checks in, what one guide under [`devices/`](devices/README.md)
+describes, and what is true of every unit of that model. Which button
+starts a conversation, which wake word is listening, what the display
+shows and whether the captive portal can take a server's address are
+all board facts, read from the firmware a board runs. vinga's primary
+board is the Waveshare ESP32-S3-Touch-LCD-1.54. Contrast a
+[device](#device), which is one of them.
+
 ### Capture
 
 Per-session recording for field analysis: a stereo WAV
@@ -133,6 +144,15 @@ acoustic delay and its gain the leakage. A null result is only
 trusted alongside a positive control (a synthetic echo the method
 must find).
 More: [cross-correlation](https://en.wikipedia.org/wiki/Cross-correlation).
+
+### Device
+
+One physical unit, addressed by its MAC: what `devices.<mac>` names in
+configuration, what a [binding](#binding) binds to an agent, and what
+accrues [memory](#memory) and conversations. Three units of one
+[board](#board) are three devices, and everything a board guide says is
+true of all three. A device reports which board it is at every
+check-in, so a board is observed rather than configured.
 
 ### Echo leakage
 
@@ -212,7 +232,7 @@ direction (issue #190). See
 
 The planned built-in agent bound to every device by
 default. Answers how the device in front of the user works (from the
-per-board device guide, selected by device model at runtime), what
+guide for the board it runs on, selected at runtime), what
 vinga's concepts mean, and which voice commands the device itself
 publishes as MCP tools. Knows whether its device has a wake word
 enabled, and that the wake word wakes the device, not an agent. See

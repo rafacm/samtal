@@ -109,6 +109,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **`Board` and `Device` are defined terms.** The glossary carried
+  thirty-six entries and neither of the two nouns the rest of them are
+  built on, so the difference lived in a memory of a conversation: a
+  board is a model, a device is one unit of it, addressed by its MAC.
+  The guides under `devices/` are named for what they describe now,
+  `Board guides`, since everything in one is true of every unit of that
+  model; the directory keeps its path, which 71 links point at.
+
 - **A page on flashing a board, `docs/devices/flashing.md`.** The
   walkthrough has always told a reader to flash the prebuilt firmware
   and no page in this repository said how, or where an image comes

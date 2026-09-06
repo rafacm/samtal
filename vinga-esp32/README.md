@@ -36,7 +36,7 @@ idf.py build flash monitor
 
 Until our fork lands here, the fastest path is the upstream prebuilt merged
 binary flashed at offset `0x0`, with the OTA URL written to NVS; the
-procedure is on the device guides'
+procedure is on the board guides'
 [common page](../docs/devices/README.md#writing-the-servers-address-into-nvs),
 and what the URL is for is in
 [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md#the-firmware-and-the-one-url-that-points-it-at-a-server).

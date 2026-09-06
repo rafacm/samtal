@@ -25,7 +25,7 @@ they age differently:
 
 Board-specific behavior is not here. What a particular board does, and
 every procedure that involves the board in front of you, is in
-[the device guides](devices/README.md), which say of every fact whether
+[the board guides](devices/README.md), which say of every fact whether
 it was read from the board support code, verified in hands-on use, or
 not verified at all. This page keeps what every board running the
 upstream firmware shares, and links the guides for the rest.
@@ -112,7 +112,7 @@ re-read rather than a claim about everything that changed.
 **Maintained protocol facts**, with the dated field observations that
 are the evidence for two of them. This is what every board running
 upstream's firmware does; which board does what is in
-[the device guides](devices/README.md).
+[the board guides](devices/README.md).
 
 - Board support is compile-time: `main/boards/<vendor>/<board>/`,
   selected via Kconfig (`Xiaozhi Assistant → Board Type`), so which
@@ -140,7 +140,7 @@ upstream's firmware does; which board does what is in
   all. Where it is absent, or where a provisioned board offers no way
   back into its portal, the URL is written directly to NVS over USB,
   which is the route that works on every board:
-  [the device guides' common page](devices/README.md#writing-the-servers-address-into-nvs)
+  [the board guides' common page](devices/README.md#writing-the-servers-address-into-nvs)
   carries that procedure, and each guide says what its own board's
   portal was observed to carry.
 - **The portal may save the URL without its trailing slash** (or the
@@ -167,7 +167,7 @@ upstream's firmware does; which board does what is in
   over the conversation channel.
 - What a particular board does with all of this, its buttons, its wake
   word, its display and its own voice commands, is in
-  [the device guides](devices/README.md), and so are the procedures
+  [the board guides](devices/README.md), and so are the procedures
   that involve the board in front of you: writing NVS over USB,
   resetting it, and reading its boot log back.
 

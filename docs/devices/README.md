@@ -1,4 +1,4 @@
-# Device guides
+# Board guides
 
 One guide per board vinga targets, describing the hardware in front of
 you: which button starts a conversation, whether a wake word is
