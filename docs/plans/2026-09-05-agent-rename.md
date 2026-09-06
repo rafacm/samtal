@@ -1157,7 +1157,7 @@ where it is enforced rather than asserting it.
   a store change; no new module.
 - [x] **[M3: the route, the boundary it announces, and the caveat it
   retires](2026-09-05-agent-rename-implementation.md#m3-the-route-the-boundary-it-announces-and-the-caveat-it-retires)**
-  (PR TBD). `POST /agents/{name}/rename` with its request model and
+  (PR #418). `POST /agents/{name}/rename` with its request model and
   `Acknowledgement` answer; the sixth `Notice` and the three-arm choice;
   the acknowledgement's line composed from `Renamed` with the old name
   stripped; the route's cases and the three boundary arms asserted on

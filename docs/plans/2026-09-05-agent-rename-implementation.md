@@ -490,7 +490,7 @@ landing code refers to a decision rather than to a tracker.
 
 ## M3: the route, the boundary it announces, and the caveat it retires
 
-PR TBD.
+PR #418.
 
 ### What landed
 
