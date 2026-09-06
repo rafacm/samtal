@@ -1119,17 +1119,17 @@ docs/reference/domain-config.md:293  generated  vinga prompt-fragment set
 docs/reference/domain-config.md:298  generated  vinga agent preview
 docs/reference/domain-config.md:310  generated  vinga agent preview
 docs/reference/domain-config.md:327  generated  vinga agent set
-docs/reference/domain-config.md:361  generated  vinga memory list agent
-docs/reference/domain-config.md:380  generated  vinga agent-defaults set
-docs/reference/domain-config.md:418  generated  vinga mcp-server status
+docs/reference/domain-config.md:367  generated  vinga memory list agent
+docs/reference/domain-config.md:386  generated  vinga agent-defaults set
 docs/reference/domain-config.md:424  generated  vinga mcp-server status
-docs/reference/domain-config.md:477  generated  vinga apply
-docs/reference/domain-config.md:500  generated  vinga memory delete
-docs/reference/domain-config.md:514  generated  vinga device bind
-docs/reference/domain-config.md:520  generated  vinga device delete
-docs/reference/domain-config.md:530  generated  vinga default-agent set
-docs/reference/domain-config.md:533  generated  vinga default-agent clear
-docs/reference/domain-config.md:543  generated  vinga show
+docs/reference/domain-config.md:430  generated  vinga mcp-server status
+docs/reference/domain-config.md:483  generated  vinga apply
+docs/reference/domain-config.md:506  generated  vinga memory delete
+docs/reference/domain-config.md:520  generated  vinga device bind
+docs/reference/domain-config.md:526  generated  vinga device delete
+docs/reference/domain-config.md:536  generated  vinga default-agent set
+docs/reference/domain-config.md:539  generated  vinga default-agent clear
+docs/reference/domain-config.md:549  generated  vinga show
 docs/reference/events.md:393  generated  vinga-server config apply
 docs/reference/events.md:1321  generated  vinga-server config device pending claim
 docs/reference/events.md:1346  generated  vinga-server config apply
@@ -1499,7 +1499,7 @@ vinga-server/tests/unit/test_command_spellings.py:884  historical  vinga export
 vinga-server/tests/unit/test_command_spellings.py:884  historical  vinga export
 vinga-server/tests/unit/test_config_api_pending.py:350  respell  config list
 vinga-server/tests/unit/test_config_api_runtime.py:690  respell  config apply
-vinga-server/tests/unit/test_config_api_writes.py:379  respell  vinga apply
+vinga-server/tests/unit/test_config_api_writes.py:404  respell  vinga apply
 vinga-server/tests/unit/test_config_apply.py:4  respell  config import
 vinga-server/tests/unit/test_config_cli_events.py:1  respell  vinga events tail
 vinga-server/tests/unit/test_config_cli_events.py:448  respell  vinga events tail
