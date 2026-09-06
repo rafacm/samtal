@@ -1322,12 +1322,12 @@ vinga-server/src/vinga_server/config/api.py:583  respell  vinga-server config ap
 vinga-server/src/vinga_server/config/api.py:584  respell  vinga-server config list
 vinga-server/src/vinga_server/config/cli.py:655  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:817  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:3342  respell  vinga apply
-vinga-server/src/vinga_server/config/cli.py:3728  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:3756  respell  config list
-vinga-server/src/vinga_server/config/cli.py:8142  respell  vinga agent rename
-vinga-server/src/vinga_server/config/cli.py:8561  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:8561  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:3366  respell  vinga apply
+vinga-server/src/vinga_server/config/cli.py:3760  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:3788  respell  config list
+vinga-server/src/vinga_server/config/cli.py:8174  respell  vinga agent rename
+vinga-server/src/vinga_server/config/cli.py:8593  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:8593  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:206  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:616  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:207  respell  vinga apply

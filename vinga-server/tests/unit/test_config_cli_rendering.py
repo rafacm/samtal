@@ -848,6 +848,39 @@ def test_the_comparison_names_what_moved_and_where_it_reaches() -> None:
     assert "  agents  changed: sam; prompt changed: sam; filler changed: kids\n" in rendered
 
 
+@pytest.mark.parametrize(
+    "named", [pytest.param("", id="empty"), pytest.param("  \t ", id="whitespace")]
+)
+def test_a_change_named_with_nothing_is_still_a_change(named: str) -> None:
+    """The one answer this command must never give falsely: nothing is
+    pending, which says an operator's writes are installed.
+
+    `EntityDiff` declares its names as strings and says nothing about
+    their length, so a list holding one that is empty or is only
+    whitespace is an answer `Act.read()` accepts. `printable` strips
+    before it bounds, so such a name renders to nothing, and a rendering
+    that read presence off the rendered string would lose the change and
+    then say none was pending.
+
+    Read through the act, so what is exercised is the shape this client
+    insists on and then the renderer it feeds.
+    """
+    body = {
+        **DIFF_EMPTY,
+        "providers": {"applies": "reload", "added": [named], "removed": [], "changed": []},
+    }
+
+    rendered = cli._diff_listing(cli.DIFF.read(body))
+
+    assert cli.SERVING_THE_STORE not in rendered
+    assert f"  providers  added: {cli.UNNAMEABLE}\n" in rendered
+    # And the count survives with it: two such names are two things.
+    both = {**body, "providers": {**body["providers"], "added": [named, named]}}
+    assert f"added: {cli.UNNAMEABLE}, {cli.UNNAMEABLE}\n" in cli._diff_listing(
+        cli.DIFF.read(both)
+    )
+
+
 def test_the_comparison_renders_the_same_answer_as_the_same_bytes() -> None:
     """Determinism, said as bytes rather than as a style. What the
     rendering leaves out is a function of the answer alone, so two
