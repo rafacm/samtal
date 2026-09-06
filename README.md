@@ -247,7 +247,7 @@ EOF
 
 That saved the document as your configuration and left the running server alone. It is all or nothing: a mistake anywhere in it means nothing was saved, rather than half a deployment. `apply` is what puts it into service, [without a restart](vinga-server/README.md#applying-a-change-without-a-restart) and without cutting off a conversation in progress.
 
-Give this first apply a few minutes, since it downloads the transcription and voice models:
+**Give this first apply a few minutes**, since it downloads the transcription and voice models:
 
 ```bash
 vinga apply
