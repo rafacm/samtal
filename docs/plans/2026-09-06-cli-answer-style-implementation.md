@@ -441,6 +441,28 @@ satisfy it today, at some forty sites that predate this milestone. Worth
 knowing before reading a `--check` run as a regression: `uv run ruff
 check .` is the lint lane, and it passes.
 
+### The review round
+
+Backend codex, against PR #430. One P2, accepted: the case that pins the
+labels says every list of the answer is populated, and two of the MCP
+section's four were not. `restarted` and `unchanged` printed nothing, so
+`connection remade` and `connection kept` were held by the completeness
+pin's table keys alone, which is a claim about the table rather than
+about the output: either could have been skipped by the rendering, or
+carried any wording at all, with the suite still green.
+
+Both are populated now, with names distinct from the two beside them, so
+each line is attributable to the field it came from. The docstring says
+what the fixture is for rather than repeating the claim that was untrue,
+and it records the one repetition that stays: the two kinds of filler
+cross deliberately, since one agent kept under the filled pauses and
+spoken again under the failure phrases is the property that says they
+are staled apart. That repetition costs the pin nothing, because the
+labels are literal text printed in the models' declaration order, so a
+swapped pair moves the bytes wherever the names fall. The sweep the
+finding asks for found no third case: every other list of every section,
+and the one flag, were populated already.
+
 ### Verification
 
 Run from `vinga-server/` against a development Postgres.
@@ -448,8 +470,12 @@ Run from `vinga-server/` against a development Postgres.
 - `uv run ruff check .`: passed.
 - `uv run pytest tests/unit -q`: 5945 passed, 19 skipped (10m27s), with
   the census manifest failing on the run before it was regenerated and
-  its own suite passing after (48 passed).
-- `uv run pytest tests/integration -q`: 245 passed (5m56s).
+  its own suite passing after (48 passed). For the review round, 5949
+  passed, 19 skipped (10m28s), the four added by a rebase onto main.
+- `uv run pytest tests/integration -q`: 245 passed (5m56s). Not re-run
+  for the review round, which moved one unit fixture and no committed
+  transcript: that lane pins the apply's stderr and the prompts line,
+  and neither moved.
 - `uv run python -m tests.unit.test_command_spellings`: regenerated
   after the last documentation edit. Compared ignoring line numbers, the
   manifest gains exactly two spellings and loses none, both `historical`

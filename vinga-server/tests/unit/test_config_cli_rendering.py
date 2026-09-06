@@ -551,7 +551,9 @@ def _every_section(**overrides: object) -> dict[str, object]:
 APPLIED = """\
 mcp:
   connection started: weather
+  connection remade: home
   connection stopped: gone
+  connection kept: archive
 prompts:
   changed: sam
 fillers:
@@ -578,10 +580,18 @@ def test_apply_prints_what_it_did_and_what_is_running(
     """The whole answer: the outcomes byte for byte, the status block
     under them, and the success sentence on the other stream.
 
-    Every list has a name in it and the one flag is true, so this is
-    where each label is pinned as an operator reads it. The two kinds of
-    filler are crossed on purpose: they are staled apart, so one agent
-    can be kept under one and spoken again under the other.
+    Every list of every section has a name in it and the one flag is
+    true, which is what makes this the pin on the labels: a label
+    printed over an empty list is a label nothing here would catch
+    being wrong. The names are distinct per outcome within a section, so
+    a line is attributable to the field it came from rather than to its
+    neighbour.
+
+    The one deliberate repetition is across the two kinds of filler,
+    which are staled apart: one agent kept under the filled pauses and
+    spoken again under the failure phrases is the property that says so,
+    and it costs nothing here, since the labels are literal text in
+    declaration order and a swapped pair moves the bytes either way.
     """
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
     servers = _configured({"weather": entry}, {"sam": ["weather"]})
@@ -602,7 +612,9 @@ def test_apply_prints_what_it_did_and_what_is_running(
         ),
         agents=AgentsReload(added=["kid"], removed=["mute"], defaults_changed=True),
         started=("weather",),
+        restarted=("home",),
         stopped=("gone",),
+        unchanged=("archive",),
     )
 
     assert run("apply") == 0
