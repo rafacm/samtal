@@ -253,7 +253,7 @@ Give this first apply a few minutes, since it downloads the transcription and vo
 vinga apply
 ```
 
-Importing is additive and never deletes, so the same document twice changes nothing and a section it does not name is left alone; editing later means editing the document and importing it again. It ships as a file too, at [`vinga-server/examples/presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml), which is what `-f` normally points at, with the same deployment on vendor APIs beside it. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
+Importing is additive and never deletes, so the same document twice changes nothing and a section it does not name is left alone; editing later means editing the document and importing it again.
 
 **4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
