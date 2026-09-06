@@ -352,13 +352,19 @@ write: by an agent, by remembered facts, or by recorded conversation threads.
 That refusal is what keeps the act reversible, since a rename that merged two
 pasts into one could not be told apart afterwards by any second rename.
 
-What a rename deliberately does not rewrite is the record of what happened: a
-session, a turn and an event keep the name the agent had when they were
-written, so a thread whose owner was renamed is filed under the new name with
-turns inside it under the old one. And the running server goes on serving the
-old name until the stored configuration is installed on it, so what a
-conversation still in flight remembers in that window is filed under the old
-name; `vinga memory list agent` is what shows such a row.
+What a rename deliberately does not rewrite is the record of what happened. A
+session, a turn and an event that was already written keeps the name the agent
+had when it was written, so a thread whose owner was renamed is filed under
+the new name with its earlier turns under the old one. A turn a conversation
+still in flight writes after the rename is a new write rather than an edit,
+and carries the name the agent has now; the session's own row keeps the name
+it opened with either way, because what that column records is the moment the
+session opened.
+
+The running server goes on serving the old name until the stored configuration
+is installed on it. What a conversation still in flight remembers in that
+window is filed under the old name, which is the one thing a rename leaves
+behind; `vinga memory list agent` is what shows such a row.
 
 Whether an agent remembers at all is its `memory` section, which is on unless
 it says otherwise. Switched off, the agent is offered no memory tools and is
