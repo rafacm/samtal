@@ -40,6 +40,25 @@ everything the server exposes: the interactive API docs are turned off,
 the WebSocket requires a device token the OTA endpoint issued, and every
 request to `/api` carries a bearer token.
 
+## On this page
+
+- [Goals](#goals): what this server is for, and what it refuses to become.
+- [Providers](#providers): the four stages, what each engine costs in latency and accuracy, and how to choose between local and vendor at every one.
+- [Tools](#tools): MCP servers and the board's own controls, what the model is actually sent, and installing a change without a restart.
+- [Stack](#stack) and [Development](#development): what it is built on, and the two lanes a change is exercised in before it ships.
+- [Configuration](#configuration): the store, the API in front of it, and where a credential lives.
+- [Security](#security): the defaults, the tokens, and what is exposed to whom.
+- [Listening and barge-in](#listening-and-barge-in): how a turn ends, and what it takes to interrupt a reply.
+- [Masking reply latency](#masking-reply-latency), [When a reply fails](#when-a-reply-fails), and [When a model writes a tool call into its speech](#when-a-model-writes-a-tool-call-into-its-speech): the three things that go wrong between a model and a speaker, and what the server does about each.
+- [Limits](#limits): the bounds on a conversation, a session and a deployment, each with the number and why it is that number.
+- [Logging](#logging) and [Capturing a session](#capturing-a-session): what a running server says about itself, and how to record a conversation for study.
+- [The conversation store](#the-conversation-store): what is kept of a turn after it ends.
+- [Which build is running](#which-build-is-running): how to ask, and why the answer matters.
+- [Running in a container](#running-in-a-container): the image, its database, its refusals at boot, and which tag to deploy.
+- [Onboarding a device](#onboarding-a-device): how a board is given a server and admitted, with no cable where its firmware allows it.
+- [Transports](#transports) and [Ports and topology](#ports-and-topology): what speaks to what, on which port, and what changes behind a reverse proxy.
+- [Status](#status): what works today, and what is still a promise.
+
 ## Goals
 
 - Python, and one Postgres database holding everything this server
