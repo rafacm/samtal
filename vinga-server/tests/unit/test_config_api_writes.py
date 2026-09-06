@@ -36,6 +36,7 @@ from vinga_server.config.api import APPLY_BODY_LIMIT, _renamed, build_api
 from vinga_server.config.entities import (
     APPLY_NOTICE,
     BINDING_UNSERVED_NOTICE,
+    DEFAULT_AGENT_UNSERVED_NOTICE,
     PROGRAM,
     RENAME_UNSERVED_NOTICE,
 )
@@ -251,6 +252,28 @@ def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> 
     assert boundaries(unserved.json()) == {CHECK_IN, RELOAD}
 
 
+def test_an_unserved_default_agent_is_not_answered_as_a_binding(
+    serving_client: TestClient,
+) -> None:
+    """The write that produced #424's specimen, from the route that
+    makes it.
+
+    The boundaries are the binding's and stay the binding's, because
+    what a default agent is waiting at really is the same pair. The
+    sentence is not: this write bound no device, so a sentence opening
+    on "The binding" describes a row the operator never wrote.
+    """
+    _pipeline(serving_client)
+    serving_client.put("/agents/poet", json={"prompt": "You are a poet."})
+
+    answer = serving_client.put("/default-agent", json={"name": "poet"})
+
+    body = answer.json()
+    assert body["notice"] == DEFAULT_AGENT_UNSERVED_NOTICE.sentence
+    assert boundaries(body) == {CHECK_IN, RELOAD}
+    assert "The binding" not in body["notice"]
+
+
 def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
     """Nothing has to be loaded for a device to stop being served, so
     neither delete has a case where it waits for a restart."""
@@ -351,6 +374,25 @@ def test_the_unserved_binding_notice_states_two_boundaries_and_no_command() -> N
     assert set(BINDING_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
 
 
+def test_the_default_agent_notice_says_what_a_default_agent_is() -> None:
+    """The sentence that exists because the binding's will not do
+    (#424): it announces the same two boundaries and it is about the
+    other live row, so what it has to carry is what that row means.
+
+    A default agent covers every device no binding of its own claims,
+    which is why a document that set one and bound nothing is still
+    about devices, and why the word the binding sentence opens with is
+    the one this one may not use.
+    """
+    sentence = DEFAULT_AGENT_UNSERVED_NOTICE.sentence
+
+    assert set(DEFAULT_AGENT_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
+    assert "\n" not in sentence
+    assert "default agent" in sentence
+    assert "no binding of its own" in sentence
+    assert "The binding" not in sentence
+
+
 def test_the_rename_notice_is_true_of_both_rows_that_can_have_moved() -> None:
     """The second sentence that announces two boundaries at once, and
     the one whose middle arm covers two different live rows.
@@ -432,7 +474,7 @@ def test_every_notice_this_server_composes_announces_a_known_boundary() -> None:
         value for value in vars(entities).values() if isinstance(value, entities.Notice)
     ]
 
-    assert len(composed) == 6
+    assert len(composed) == 7
     for notice in composed:
         assert notice.applies, notice.sentence
         assert set(notice.applies) <= set(Applies), notice.sentence
@@ -1560,6 +1602,25 @@ def test_every_applied_entry_says_when_it_takes_effect(client: TestClient) -> No
     # that would install the agent beside the check-in the row is live at.
     assert named["devices"] == {CHECK_IN, RELOAD}
     assert named["default_agent"] == {CHECK_IN, RELOAD}
+
+
+def test_an_applied_document_says_which_live_row_each_entry_wrote(
+    client: TestClient,
+) -> None:
+    """The second producer of the two settings' sentences, and the one
+    #424's specimen came down: an imported `default_agent` entry used to
+    fall through to the binding sentence, so a document that set a
+    default agent was answered about a binding it did not contain.
+
+    The boundaries are the same pair on both entries, which is why the
+    tokens alone could not have caught this: what tells the two apart is
+    the sentence.
+    """
+    entries = client.post("/apply", json=DOCUMENT).json()["entries"]
+
+    said = {one["section"]: one["notice"] for one in entries}
+    assert said["default_agent"] == DEFAULT_AGENT_UNSERVED_NOTICE.sentence
+    assert said["devices"] == BINDING_UNSERVED_NOTICE.sentence
 
 
 def test_an_applied_binding_to_a_loaded_agent_needs_no_reload(
