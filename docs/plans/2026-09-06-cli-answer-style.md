@@ -510,7 +510,7 @@ added where the other five live.
   falsifies), `CHANGELOG.md`, the census manifest.
 - [x] **[M2: a diff prints its changes, grouped by the boundary they
   wait at](2026-09-06-cli-answer-style-implementation.md#m2-a-diff-prints-its-changes-grouped-by-the-boundary-they-wait-at)**
-  (#425, PR TBD). The grouped rendering, the content rule, the
+  (#425, PR #429). The grouped rendering, the content rule, the
   LiveKind sentence, the nothing-pending sentence, `DIFF_INTRO`
   deleted, the diff pins re-cut, the head table pinned total over
   `DiffApplies` with the existing refuses-whole case kept (review
