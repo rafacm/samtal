@@ -55,7 +55,6 @@ from vinga_server.config.models import (
     Config,
     ProviderConfig,
     spoken_identity,
-    without_url_credential,
 )
 from vinga_server.config.secrets import SecretStore, provider_identity
 from vinga_server.egress import EgressRefusal, check_provider
@@ -258,21 +257,20 @@ async def build_entry(
     # is `urlsplit().hostname`, which has no userinfo in it by
     # construction.
     #
-    # The credential strip and not the control-character escape beside
-    # it, which is where #414 deliberately stops. These five are FIELDS,
-    # and every writer of one escapes a control character already: the
-    # JSON log format and the event record spell it out, the text log
-    # format carries no extra fields at all, and the CLI's terminal door
-    # replaces what it cannot print. What has no such writer is a
-    # SENTENCE, and the one sentence this identity reaches is the
-    # loopback warning below, which names the entry through
-    # `provider_label` and is escaped there.
+    # Both halves of that door, and the escape is not belt and braces
+    # here either: the loopback warning below is told this identity, and
+    # the events package composes its SENTENCE out of these values, so
+    # what the stamp says is what an operator reads in a log line rather
+    # than only what a payload carries (#414). The stamp has never been
+    # the name as stored, which is the point: it is what every event
+    # about this entry calls it, and that has to be the one thing every
+    # sentence about the entry calls it too.
     identity = ProviderIdentity(
         stage=stage,
-        name=without_url_credential(name),
+        name=spoken_identity(name),
         type=config.type,
         host=provider.host,
-        model=None if provider.model is None else without_url_credential(provider.model),
+        model=None if provider.model is None else spoken_identity(provider.model),
     )
     provider.identity = identity
     _loopback_inside_a_container(identity)
