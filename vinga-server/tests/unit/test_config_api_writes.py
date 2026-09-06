@@ -37,6 +37,7 @@ from vinga_server.config.entities import (
     APPLY_NOTICE,
     BINDING_UNSERVED_NOTICE,
     PROGRAM,
+    RENAME_UNSERVED_NOTICE,
 )
 from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES, DatabaseConfig
 from vinga_server.config.responses import Applies
@@ -348,6 +349,30 @@ def test_the_unserved_binding_notice_states_two_boundaries_and_no_command() -> N
     install."""
     assert f"{PROGRAM} apply" not in BINDING_UNSERVED_NOTICE.sentence
     assert set(BINDING_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
+
+
+def test_the_rename_notice_is_true_of_both_rows_that_can_have_moved() -> None:
+    """The second sentence that announces two boundaries at once, and
+    the one whose middle arm covers two different live rows.
+
+    `_rename_notice` chooses it when a device binding moved OR when the
+    default agent did, and the two are not the same devices: the default
+    agent is what covers the boards that have no binding of their own.
+    So a sentence about a device BOUND to the agent would be false of
+    every device a default-only rename affected, which is the reason it
+    speaks of a device that resolves to the agent and names both ways
+    one can.
+    """
+    sentence = RENAME_UNSERVED_NOTICE.sentence
+
+    assert set(RENAME_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
+    assert "\n" not in sentence
+    assert "default agent" in sentence
+    assert "own binding" in sentence
+    # The wording that was true of one arm and false of the other,
+    # refused outright: it is what this sentence carried, and the only
+    # way it comes back is unnoticed.
+    assert "a device bound to it" not in sentence
 
 
 def test_no_sentence_this_server_composes_names_a_command_of_a_client() -> None:
