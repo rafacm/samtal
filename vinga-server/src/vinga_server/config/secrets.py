@@ -305,6 +305,32 @@ def _unwrap(location: SecretLocation, payload: bytes) -> str:
             f"{location.describe()}: the stored secret's payload names no location"
         )
 
+    # The kind is checked before a location is built out of it, because
+    # `SecretLocation.kind` is a closed set and the payload is not held
+    # to one by anything above: `isinstance(str)` is all that has been
+    # asked of it. A location built from a word that is not one of them
+    # is a value that lies about its own type, and it used to reach
+    # `describe`, which reads the kind against the registry.
+    #
+    # What that cost is the whole reason this is a check and not a
+    # `get`: the miss left as a `KeyError` whose one argument is the
+    # payload's own word, past the bounded handler in `serving.run`, so
+    # a boot printed a traceback carrying decrypted bytes. Nothing about
+    # them is this repository's, control characters included.
+    #
+    # So the refusal names the two kinds and never the word, which is
+    # the shape `store._NOT_A_STAGE` has for the same situation: a
+    # closed set this server chose is named, and a value that failed to
+    # be in it is not repeated. The requested location is the location
+    # this quotes, and it is the one the operator has to fix.
+    if fields[0] not in SECRET_HOLDERS:
+        raise ConfigError(
+            f"{location.describe()}: the stored secret's payload names an entity "
+            f"kind that is not one of: {', '.join(sorted(SECRET_HOLDERS))}, and it "
+            f"is not quoted back; set it again with that entry's own secret set "
+            f"command"
+        )
+
     stored = SecretLocation(kind=fields[0], identity=fields[1], slot=fields[2])
     if stored != location:
         # A valid token that belongs somewhere else. Both locations are
