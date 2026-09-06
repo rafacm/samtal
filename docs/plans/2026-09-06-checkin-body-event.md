@@ -87,13 +87,28 @@ the empty mapping where it does today, so no request is parsed twice
 and `_read_json_object`'s collapsing moves into the one caller that
 wanted it.
 
-### Where it emits: unconditionally, beside the outcome event
+### Where it emits: unconditionally, with the work bounded at the site
 
 One emission per check-in, whatever the outcome, because the boards
 this exists for are exactly the ones whose outcome is unpredictable.
-The DEBUG level is the volume control; an emission that is filtered
-costs a closure that is never called (the `events.emit(lambda: ...)`
-shape defers construction), so the quiet path stays quiet.
+
+The cost of that is stated rather than assumed, because the review
+round showed the assumption wrong: `ServerEvents.emit` invokes the
+closure and dispatches to every tap on every emission, the dispatch
+deep-copies the payload before the live filter can reject it by
+level, so a DEBUG event is built and copied per request whether or
+not anyone is listening. What makes that acceptable is that every
+piece of the added work is O(bound), not O(body): the serialization
+below stops producing output at the bound, so the value constructed,
+copied and dispatched is at most `CHECK_IN_BODY_LIMIT` characters
+plus the marker, per check-in, which is the same order of work the
+existing four bounded `said` fields already do. The one O(body) cost
+on this path, reading and parsing the request, exists today and does
+not grow. An emitter-level interest gate was considered and not
+taken: it would be a new mechanism on the events seam for one
+caller, and the bounded cost does not justify it; if a second
+body-sized DEBUG event ever arrives, that is the moment to build
+one, and this paragraph is where that trade is recorded.
 
 ### What the docs say, and where
 
