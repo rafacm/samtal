@@ -624,3 +624,41 @@ Run from `vinga-server/` against a development Postgres.
 - `docs/reference/cli.md` and `docs/reference/api-openapi.json`:
   byte-identical to the branch base. The `info` help row does not
   change, and no response model does.
+
+### The review round
+
+Backend codex, against PR #431. One P2, accepted.
+
+**A whitespace-only default agent rendered as a blank fact.** The tally
+asked the raw value whether there was a default agent and then printed
+it through `printable`, which strips before it bounds, so a name the
+answer carried as `"   "` produced `default agent ` with nothing after
+it: neither of the two forms this line promises, and the same hole M2
+closed on the diff's name lists. The rendering now falls back to
+`UNNAMEABLE` for the reason recorded there. Which of the two forms is
+printed is asked of the value rather than of what it prints as, since a
+null is a deployment with no default agent and a name that renders to
+nothing is a deployment that has one; an empty string is a set name by
+that reading too, so `nothing yet` is now decided on the null as well.
+Four cases through `Act.read()` pin the distinction, and a fifth pins
+that a store whose only setting is an unnameable agent is not an empty
+one.
+
+The rest of the milestone's own `printable` calls were swept for the
+same shape. The tally's other facts are arithmetic, so there is no name
+among them: the kind counts and the device count are integers and the
+singleton is a count of keys. Two sites were looked at and left. The
+build line's version and revision are not names in a listing, and they
+carried the same bare `printable` when they were two lines. The tree's
+`default_agent` row keeps `(none)`, which is the answer every other row
+of that listing gives to the same question; the tree prints no name
+through `UNNAMEABLE` anywhere, and singling out one row would make
+`vinga list` disagree with itself.
+
+Verified the same way, from `vinga-server/`: `uv run ruff check .`
+passed, `uv run pytest tests/unit -q` gave 5962 passed and 19 skipped
+(10m33s), and `python scripts/check_doc_links.py .` gave 211 files and 0
+failures. The integration lane was not re-run: neither of the two
+transcripts it pins reaches this arm, since both of those deployments
+answer a null default agent, and the manifest moved only by the line
+numbers this change shifted plus the `vinga list` this paragraph names.

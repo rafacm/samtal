@@ -477,6 +477,48 @@ def test_the_singleton_is_named_only_when_something_is_set_in_it(
     ).split(", ")
 
 
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        pytest.param("   ", "default agent ?", id="whitespace-only"),
+        pytest.param("\t\n", "default agent ?", id="nothing-but-blanks"),
+        pytest.param("", "default agent ?", id="empty"),
+        pytest.param(None, "no default agent", id="no-default-agent"),
+    ],
+)
+def test_a_default_agent_that_renders_to_nothing_is_still_one(
+    stored: str | None, expected: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A name is a value the far side chose, and `printable` answers the
+    empty string for one that is blank or is nothing but whitespace.
+
+    Which half of the line it decides is asked of the value the answer
+    carried rather than of what that value prints as: a null is a
+    deployment with no default agent, and a name that renders to nothing
+    is a deployment that has one an operator cannot read. Read through
+    the act, because that is the surface the command reads its answer
+    through.
+    """
+    capsys.readouterr()
+
+    cli.COUNTS.render(cli.COUNTS.read(document(default_agent=stored)))
+
+    assert capsys.readouterr().out.strip().endswith(expected)
+
+
+def test_a_deployment_whose_only_setting_is_an_unnameable_agent_is_not_empty(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The other side of the same question: `nothing yet` is the answer
+    to a store nothing was written to, and a default agent that renders
+    to nothing was written."""
+    capsys.readouterr()
+
+    cli.COUNTS.render(cli.COUNTS.read(document(providers={}, default_agent="   ")))
+
+    assert capsys.readouterr().out.strip() == "configured: no devices, default agent ?"
+
+
 def test_two_runs_against_one_state_are_the_same_bytes(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
