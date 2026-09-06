@@ -235,6 +235,28 @@ assertion: the only consumer of the `wrote` sentence anywhere is
 Nothing parses a name back out of one, so these are operator-facing
 sentences and the strip belongs in them.
 
+**The terra delta on PR #423, 1 P1, adopted, and it is a defect the
+first of those two fixes introduced.** `describe` reads the kind against
+the registry now, and `_unwrap` builds a `SecretLocation` out of a
+decrypted payload whose three fields have been held to
+`isinstance(str)` and to nothing else. A valid envelope naming a kind
+that is not one of the two therefore left as a `KeyError` whose single
+argument is the payload's own word, past the bounded handler in
+`serving.run`, so a boot printed a traceback carrying decrypted bytes,
+control characters included.
+
+The check goes in front of the construction rather than inside
+`describe`, because that is where the invariant is: `SecretLocation.kind`
+is a closed set of two, and a location built from a word that is not one
+of them is a value lying about its own type. The refusal names the two
+kinds and never the word, which is the shape `store._NOT_A_STAGE` has
+for the same situation, and it quotes the REQUESTED location, which is
+the one an operator has to fix. `_unwrap` is the only place a
+`SecretLocation` is built from anything but repository vocabulary: the
+two classmethods pass literal kinds, the store reads `secret_slots` off
+a descriptor, and the CLI's gate already checks a stored answer's kind
+against the closed set.
+
 ### The re-census
 
 Run again over `api.py` and `secrets.py`, and then over the tree, since
@@ -293,7 +315,7 @@ which is exactly the shape #421 owns.
 
 - Lint: `uv run ruff check .` clean.
 - Unit, the shape CI runs: `uv run pytest tests/unit -q -n auto --dist
-  loadfile`, 5918 passed and 19 skipped, 98 of them the cases added here
+  loadfile`, 5919 passed and 19 skipped, 99 of them the cases added here
   (5820 on the branch point). Not one existing pin moved, which is the
   byte-identical claim asserted from the other end.
 - Integration: `uv run pytest tests/integration -q`, 245 passed.
@@ -322,6 +344,9 @@ which is exactly the shape #421 owns.
     bound-agent list): four cases failed, including the device binding
     in each suite, which is the one route a credential-bearing name
     reaches a 200 by.
+  - The payload's kind check, reverted: the boot left as a `KeyError`
+    carrying the rogue word, which is the traceback the finding is
+    about.
 - The reachability the decision turns on is driven end to end rather
   than argued: the planted row is fetched, renamed and deleted over the
   API by percent-encoding the byte, and the rename acknowledgement is
