@@ -1444,6 +1444,7 @@ def unbuildable(store: ConfigStore) -> ConfigStore:
 
 def test_a_boot_refused_by_the_build_reaches_an_operator_carrying_none(
     unbuildable: ConfigStore,
+    restore_root_logger: None,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -1465,6 +1466,14 @@ def test_a_boot_refused_by_the_build_reaches_an_operator_carrying_none(
     refuses under a reload answers with a fixed sentence and logs the
     exception class alone, so the label never reaches that surface at
     all, which the assertion on the log below is the honest half of.
+
+    Two things follow from booting this far rather than entering the
+    lifespan. The root logger is given back afterwards, because `run`
+    configures logging as early as the configuration allows and that
+    takes the root logger over for the whole process. And from that
+    line on the log IS stderr, which is where the uvicorn records in
+    `printed.err` come from, so the two stream assertions are what
+    covers the run and `caplog` covers only what was written before it.
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
 
