@@ -733,6 +733,54 @@ def test_the_api_and_the_cli_name_nothing_verbatim(
     _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
 
 
+def test_a_successful_write_that_names_a_legacy_agent_carries_none(
+    historic: ConfigStore, client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The acknowledgement a device write answers with, which is built
+    from the row rather than from the request and therefore says a
+    stored name in a 200 (found by the sol round on PR #423).
+
+    This is the route a credential-bearing name reaches a write's answer
+    by, and the only one. Such a name holds a slash, so no path segment
+    addresses the row; a binding REFERENCES an agent rather than
+    creating one, checks it by membership and carries it in a JSON body,
+    where a slash is nothing.
+
+    Read off the parsed body, because the sentence is what an operator
+    sees and what a client writes into its own log.
+    """
+    with caplog.at_level(logging.DEBUG):
+        bound = client.put("/devices/11:22:33:44:55:66", json={"agents": [HISTORIC]})
+
+    assert bound.json()["wrote"] == f"device 11:22:33:44:55:66 bound to {HISTORIC_SHOWN}"
+    _carries_no_sentinel(bound.text, str(dict(bound.headers)), *_logged(caplog))
+
+
+def test_a_boot_refuses_an_unreadable_envelope_naming_neither_half(
+    historic: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`SecretLocation.describe`, which is the one string thirteen
+    encryption and decryption refusals and four acknowledgements are
+    built from, and which rendered both of its halves verbatim until the
+    sol round on PR #423.
+
+    Read out at startup rather than on demand: `verify_secrets` opens
+    every stored envelope, so an envelope that will not open puts its
+    entity and its slot on a boot's stderr. The fixture's envelope is
+    the planted one, whose provider name and whose slot are both the
+    historic identifier, so one sentence carries it twice.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as caught:
+        load_boot_config()
+
+    assert f"provider llm.{HISTORIC_SHOWN} {HISTORIC_SHOWN}: " in str(caught.value)
+    _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
 def test_two_historic_names_that_sanitize_alike_are_both_kept(
     store: ConfigStore,
 ) -> None:
