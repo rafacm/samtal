@@ -106,19 +106,38 @@ decision site and bounded again here":
   JSON parse, re-encoded. Raw request bytes are deliberately not
   retained: the parse is what bounds the shape (an object), and a
   body that did not parse is a different fact below.
-- **The exact transformation, at the decision site in `reply.py`**:
-  `json.JSONEncoder(ensure_ascii=True, separators=(",", ":"))`
-  driven through `iterencode`, accumulating chunks and **stopping as
-  soon as the accumulated length reaches the bound**, so the work and
-  the intermediate string are both O(bound) whatever the body's size.
-  `ensure_ascii=True` is the printability mechanism: every character
-  outside printable ASCII, control characters and lone surrogates
-  included, leaves as a `\uXXXX` escape, so the result is printable
-  by construction and no replacement pass exists to forget.
-  Non-finite numbers keep the encoder's default (`NaN`, `Infinity`,
+- **The exact transformation, at the decision site in `reply.py`**: an
+  **iterative capped serializer**, amended after acceptance and
+  recorded in the implementation doc's PR review round (#435). It walks
+  the parsed object with **its own explicit stack**, emitting compact
+  JSON tokens (`,` and `:`, no spaces) into an accumulator and
+  **stopping the step after the accumulation passes the bound**, and it
+  escapes a scalar string **in a slice**: at most the remaining
+  budget's worth of characters plus one, escaped with the `ensure_ascii`
+  rules and appended. So no intermediate allocation exceeds O(bound),
+  and depth costs a list entry rather than an interpreter frame.
+
+  This replaces the `iterencode` mechanism this plan first prescribed.
+  A second look in the PR round showed `iterencode` failing both
+  requirements this bullet exists to state: it yields a scalar string
+  as ONE chunk, so a ten-megabyte field is ten megabytes allocated
+  before any bound can bite, and it recurses once per level, so a body
+  `json.loads` accepted could still raise `RecursionError` through the
+  HTTP handler. The requirements were right and the named mechanism was
+  wrong, which is why the mechanism moved and the bound, the marker and
+  their arithmetic did not.
+
+  `ensure_ascii` escaping is the printability mechanism: every
+  character outside printable ASCII, control characters and lone
+  surrogates included, leaves as a `\uXXXX` escape, so the result is
+  printable by construction and no replacement pass exists to forget.
+  Non-finite numbers keep the encoder's spellings (`NaN`, `Infinity`,
   printable ASCII words): this is a diagnostic representation of what
   the parser accepted, not a JSON document anything re-parses, and
-  the policy is stated in the constant's comment.
+  the policy is stated in the constant's comment. **The walk is
+  total**: it represents everything a JSON parse can produce, and the
+  one `except` behind it maps anything else to the nullable body,
+  never to an exception on an unauthenticated path.
 - **The bound is `CHECK_IN_BODY_LIMIT = 8192` characters, final
   length included.** When the accumulation reaches it, the value is
   cut at `8192 - len(marker)` and the literal marker

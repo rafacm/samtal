@@ -32,8 +32,9 @@ then the tests, then the documents.
   six fields it names: `device`, `client`, `board`, `firmware`, the
   nullable `body`, and `said_device` as the rendered-only argument.
   `agents` and `unloaded` are deliberately absent, as the plan says.
-- **`ota/reply.py`** gains `bounded_body`, the bounded serializer, and
-  one unconditional emission after the four-way outcome chain.
+- **`ota/reply.py`** gains `bounded_body`, the bounded serializer (an
+  iterative capped walk after the review round below), and one
+  unconditional emission after the four-way outcome chain.
   `check_version` now calls `_json_object` directly and derives the
   empty mapping itself; `_read_json_object` is untouched and stays on
   the package's export surface. The `said` mapping is split in two:
@@ -83,18 +84,19 @@ Four, none of them a change of direction.
   that is plainly there. The negative half is still a substring hunt,
   which is what it has to be, and the sentinel spelling carries no
   backslash.
-- **The serializer's bound is on strictly more than the limit, and the
-  work is bounded per accumulated string rather than per chunk.**
+- **The cut is decided on strictly more than the limit**, so a body
+  ending exactly on the bound is whole rather than marked truncated.
+- **The serializer's work was bounded per accumulated string rather
+  than per chunk**, and this entry is kept as it was written because
+  the PR review round below is what came of it. It recorded that
   `iterencode` yields one chunk per string value, so a single enormous
-  string in the body is produced by the encoder as one chunk whatever
-  the loop does; what the loop bounds is the accumulation, the value
-  constructed, the copy every tap receives and everything downstream.
-  The plan's paragraph says "the work and the intermediate string are
-  both O(bound)"; the accurate statement is that the retained value and
-  the accumulation are, and that the one cost proportional to the body
-  is the parse, which exists today and does not grow. The `>` rather
-  than `>=` is so that a body ending exactly on the bound is whole
-  rather than marked truncated.
+  string was produced whole whatever the loop did, and narrowed the
+  plan's O(bound) claim to the accumulation and the retained value
+  instead of fixing the mechanism. The round's first P1 is that
+  narrowing refused: the requirement was the plan's and it was right,
+  so the mechanism moved. Nothing in this position is O(body) any more,
+  and the entry stands as the moment the defect was seen and priced
+  rather than removed.
 
 ### Discoveries
 
@@ -110,6 +112,78 @@ Four, none of them a change of direction.
 - **A check-in emits its outcome first and its body second**, so a
   reader at DEBUG is handed two events and the test picks the one it is
   about rather than assuming which arrived first.
+
+### PR review round
+
+PR #435. Three findings, all accepted, all fixed on the branch. Two of
+them are one defect seen from two sides, and the side they share is the
+plan's own prescribed mechanism, so the plan was amended rather than
+merely implemented differently.
+
+1. **P1: `bounded_body` allocated the body's size, not the bound's.**
+   It appended whole `iterencode` chunks and checked the limit
+   afterwards, and CPython emits a scalar string as ONE chunk, so an
+   eight-megabyte field was eight megabytes built and appended before
+   the bound could bite. On an unauthenticated endpoint that is a cost
+   a stranger picks.
+
+   *Resolution*: accepted. The serializer is now an explicit stack walk
+   emitting compact JSON tokens into a capped accumulator, escaping
+   scalar strings in slices of at most the remaining budget plus one
+   character. Measured: an eight-megabyte field peaks at about 25 KB of
+   traced allocation, a ratio of 0.003, and the test holds it under a
+   hundredth of the input.
+
+2. **P1: a body the parser accepted could `RecursionError` through the
+   handler.** `iterencode` recurses once per level and ran outside the
+   guarded thunk, so a deeply nested object that `json.loads` took
+   became a 500 with a library traceback and an aborted check-in.
+   Reproduced before the fix at 970 levels through `TestClient`, with
+   the traceback's deepest frames in `json/encoder.py:_iterencode_list`
+   and the parse having already succeeded; 970 to 995 all raised, 966
+   and below answered.
+
+   *Resolution*: accepted. The walk carries its own stack, so depth
+   costs a list entry and the input is handled by construction rather
+   than by a limit. `bounded_body` also keeps a one-line belt mapping
+   anything the walk cannot represent to the nullable body, retaining
+   nothing of the failure. The same depths that raised now answer 200.
+
+3. **P2: `docs/devices/README.md` blurred the two filters.** It said
+   the server "keeps all of it" and that the tail's `INFO` default is
+   "what the retained log carries"; retention follows
+   `server.log_level` independently, which is the distinction the plan
+   settled.
+
+   *Resolution*: accepted. The page now says the server emits the
+   event, that `--level DEBUG` is what makes a tail show it, and that
+   watching and keeping are separate settings, with a deployment at
+   `DEBUG` writing down a bounded copy whether or not anybody watches.
+
+**Plan amendment.** The plan's "exact transformation" bullet named
+`iterencode` and claimed O(bound) work; findings 1 and 2 are that
+mechanism failing both of the requirements the bullet exists to state.
+The requirements were right, so the bullet now prescribes the iterative
+capped serializer and says in one sentence why the first mechanism was
+withdrawn. The bound, the marker and their arithmetic did not move.
+
+**Consequences recorded elsewhere.** The nullable body gained a second
+meaning, "the serializer could not walk it" beside "the request carried
+no readable object", so the variant's field note and the call site's
+comment say both; both mean the one thing the field says, which is that
+this server has no representation of what the board sent.
+
+**Tests added.** The multi-megabyte field, asserting the value bounded
+with the marker and the traced peak under a hundredth of the input; the
+twenty-thousand-deep structure, built with a loop because `json.loads`
+cannot make one, asserting a bounded value and no exception; and a
+four-hundred-deep body through the handler, asserting an ordinary reply
+and the body carried whole. The deep case is pinned on the serializer
+rather than at the depth that reproduced the failure, deliberately: the
+parser and a recursive encoder spend the same interpreter stack from
+the same handler, so the band between them is a few dozen levels wide
+and moves with whatever is above them, and a test sitting in it would
+fail for the stack rather than for the thing it is about.
 
 ### What this milestone does not close
 
