@@ -471,6 +471,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   back shortened, since there is no closed set to list in their place
   and an operator with a typo has to be able to see it.
 
+- **The MCP build's two boot refusals name their entry where every other
+  location over one is composed** (#420). The egress declaration
+  `server.local_only` requires of every referenced entry, and the
+  refusal an entry that will not construct comes back as, each joined
+  `mcp_servers.` to a stored name by hand. That is the duplication #413
+  gave `entity_location` a home to end, and here it was visible inside
+  one sentence: an unset environment reference is reported as the outer
+  location wrapped around the inner one, and the inner one has been
+  composed by the helper since #414. Both halves now read it, once per
+  entry and shared, exactly as the provider build composes its label
+  once for its own two halves. Defence and one home rather than a leak
+  closed, which is measured rather than assumed: unlike a provider name,
+  an MCP entry name is checked against `[A-Za-z0-9_-]+` on every
+  composition and not only at write time, because the name becomes a
+  tool-name prefix, so a row stored before the URL rule refuses the
+  whole snapshot before a build exists and never reaches these
+  sentences. Every name that can reach them is printed exactly as it
+  was.
+
 ## 2026-09-05
 
 ### Added
