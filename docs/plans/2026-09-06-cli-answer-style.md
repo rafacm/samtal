@@ -209,9 +209,15 @@ nothing about them waits for an apply.
   client's words for each token (`pending, at the next
   `vinga apply`:` for reload, `pending, at the next server start:`
   for restart), from a table beside `INSTALLS` so the one command
-  keeps its one spelling. A token the client does not know heads its
-  group with the token itself, quoted, which is the unknown-state
-  rule in this rendering's terms.
+  keeps its one spelling. The table is total over `DiffApplies` and
+  a pin says so, the way the #386 plan pins its alias: a member
+  added to the alias without a head fails a test rather than
+  rendering a hole. There is no unknown-token arm here, because
+  there cannot be one: a diff's `applies` fields are scalar
+  `DiffApplies` literals, and `_declared`'s tolerance is for
+  tuple-valued token sets only, so an unknown scalar refuses the
+  whole answer with the fixed unreadable-answer sentence. That is
+  #386's settled behavior for this surface, and it does not move.
 - **A section appears only when it has content**: a non-empty name
   list or a true flag. Within a section, only the non-empty facts,
   joined on one line (`added: a, b; changed: c`). The agents'
@@ -333,9 +339,12 @@ question, not a rendering one.
   substitution, the way #386's did.
 - **Closed sets mapped to decision sites.** The diff group heads and
   the client boundary lines are keyed by `Applies` members; the
-  decision site is the answer's own `applies` field, read through
-  `_boundaries`; an absent, empty or unknown set takes the quoting
-  arm in every rendering. No new token, no new field.
+  decision site is the answer's own `applies` field. On the
+  acknowledgement surfaces the set is read through `_boundaries` and
+  an absent, empty or unknown set takes the quoting arm; on the diff
+  the field is a scalar `DiffApplies` and an unknown value refuses
+  the whole answer, which is the settled #386 split between the two
+  shapes. No new token, no new field.
 - **Honest seams.** No injectable dependency is added. The one
   server-side change is a new `Notice` instance; the producer-side
   pin (every `Notice.applies` member is an `Applies` member) covers
@@ -386,8 +395,10 @@ added where the other five live.
   that entry's server sentence; all-unchanged prints none. The diff:
   a one-change diff renders the group head once; an all-empty diff
   prints the nothing-pending sentence; the LiveKind sentence is
-  present in both; a diff whose `applies` value the client does not
-  know heads the group with the quoted token. The apply: success
+  present in both; the head table is total over `DiffApplies`; a
+  diff carrying an unknown `applies` value still refuses whole
+  through `Act.read()`, which is an existing assertion kept, not a
+  new arm. The apply: success
   line present on the happy path, absent on a refusal; no
   `NOTHING_CONFIGURED` in an apply with no MCP entries, still
   answered by `mcp-server status`. Info: zero kinds absent,
@@ -524,6 +535,16 @@ ready, pending the P1 amendments.
    answer, which is #386's settled behavior. The quoted-token head is
    unreachable, and quoting a token also contradicts the plan's own
    statement that an unknown token is never echoed.
+
+   *Resolution*: accepted in full; the quoted-head arm is withdrawn.
+   It was written against a reading of the diff the shapes refute:
+   `_declared`'s tolerance was deliberately scoped to sequences of
+   closed tokens by #386's own review round, and the scalar branch
+   refusing whole is recorded there as behavior that plan was not
+   allowed to change. The group-head table is instead pinned total
+   over `DiffApplies`, so the failure mode a widened alias would
+   create is a failing test, and the existing refuses-whole
+   assertion is named as kept rather than replaced.
 
 3. **P1: the single-write fallback prints an untrusted notice without
    a display door.** `_acknowledged` passes
