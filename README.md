@@ -119,24 +119,26 @@ Create the `.env` file that the vinga server and the CLI both read:
 
 # .env holds secrets, so create it readable only by you
 umask 077
-{
-  # The bearer token for the configuration API
-  echo "VINGA_API_SECRET=$(openssl rand -hex 32)"
+cat > .env <<EOF
+# The bearer token for the configuration API
+VINGA_API_SECRET=$(openssl rand -hex 32)
 
-  # Where the CLI reaches that API, which is this machine. Loopback
-  # because the token above grants every write, and plain http is
-  # allowed to a loopback address and to nothing else. Administering a
-  # deployment you do not host is https, and this is the line to change.
-  echo "VINGA_API_URL=http://127.0.0.1:8003/api"
+# Where the CLI reaches that API, which is this machine. Loopback
+# because the token above grants every write, and plain http is
+# allowed to a loopback address and to nothing else. Administering a
+# deployment you do not host is https, and this is the line to change.
+VINGA_API_URL=http://127.0.0.1:8003/api
 
-  # The secret that signs device tokens
-  echo "VINGA_AUTH_SECRET=$(openssl rand -hex 32)"
+# The secret that signs device tokens
+VINGA_AUTH_SECRET=$(openssl rand -hex 32)
 
-  # The address boards on your LAN reach this machine on.
-  # The server listens on 0.0.0.0 and cannot tell which interface that is.
-  echo "VINGA_SERVER__PUBLIC_URL=http://$LAN_IP:8003"
-} > .env
+# The address boards on your LAN reach this machine on.
+# The server listens on 0.0.0.0 and cannot tell which interface that is.
+VINGA_SERVER__PUBLIC_URL=http://$LAN_IP:8003
+EOF
 ```
+
+Those comments are written into the file, so `.env` still says what each line is for the next time you open it. The `EOF` is deliberately unquoted, which is what lets the shell resolve `openssl` and `$LAN_IP` while writing: the file holds finished values rather than expressions, because two parsers read it later and they disagree about expressions. Keep any comment you add on its own line for the same reason. A `#` after a value is a comment to the CLI and part of the value to Docker, which is how a board ends up dialing an address with an explanation glued onto the end of it.
 
 Start the server with:
 

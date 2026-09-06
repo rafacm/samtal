@@ -109,6 +109,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Step 1 writes its comments into `.env`, instead of dropping
+  them.** The block explained each variable in shell comments around
+  the `echo` lines that produced the file, so the explanations lived
+  in the README and the file the reader opens next month held four
+  bare assignments. It is one heredoc now, and the comments land in
+  the file. The delimiter is unquoted deliberately, so `openssl` and
+  `$LAN_IP` resolve while writing and the file holds finished values:
+  compose and the CLI both read it and they do not agree about
+  expressions. The same paragraph says to keep added comments on
+  their own line, since a `#` after a value is a comment to the CLI
+  and part of the value to Docker.
+
 - **Getting Started says how to see the loaded model, and how to pin
   it.** A pull puts a model on disk without loading it, and step 0's
   only answer to the five minute idle unload was an
