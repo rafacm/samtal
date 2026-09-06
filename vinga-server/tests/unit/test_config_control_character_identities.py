@@ -30,6 +30,7 @@ that says what a name may hold.
 import json
 import logging
 from collections.abc import Iterator
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -61,6 +62,7 @@ from vinga_server.config.models import (
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
+    encrypt,
     generate_key,
     load_keys,
 )
@@ -710,6 +712,58 @@ def test_a_boot_refuses_an_unreadable_envelope_naming_neither_half_raw(
 
     assert f"provider llm.{BOTH_SPOKEN} api_key\\x1b: " in str(caught.value)
     _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
+def test_a_payload_naming_a_kind_that_is_not_one_is_refused_and_bounded(
+    store: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of a location saying itself: what happens when the
+    location it is asked to say came out of a payload.
+
+    A payload's three fields are held to `isinstance(str)` and to
+    nothing else, so `kind` can be any word at all, while
+    `SecretLocation.kind` is a closed set of two and `describe` reads it
+    against the registry. A location built from a word that is not one
+    of them used to leave as a `KeyError` whose single argument is the
+    payload's own word, past the bounded handler in `serving.run`, so a
+    boot printed a traceback carrying decrypted bytes.
+
+    The envelope here is VALID: it is written by this module's own
+    `encrypt` under the configured key, so it decrypts, and what refuses
+    it is the mismatch check rather than anything about the ciphertext.
+    Its rogue kind carries both sentinels, because what a traceback
+    would have published is that word.
+
+    Driven through the entry point rather than through `decrypt`, since
+    what the finding is about is the boundary: the refusal has to be one
+    `serving.run` answers 1 to, with the sentence on stderr and no
+    traceback on either stream.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    _plant(store, "provider", ("llm", LAWFUL), ProviderConfig(type="mock"))
+    rogue = SecretLocation(
+        kind=cast("Any", f"pro{ESC}vider-{KEY_SENTINEL}"),
+        identity=f"llm.{LAWFUL}",
+        slot="api_key",
+    )
+    planted(
+        store,
+        schema.providers.update()
+        .where(schema.providers.c.name == LAWFUL)
+        .values(secrets={"api_key": encrypt(rogue, "the-secret", load_keys())}),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert serving.run(None) == 1
+
+    printed = capsys.readouterr()
+    assert f"provider llm.{LAWFUL} api_key: " in printed.err
+    assert "is not one of: mcp_server, provider" in printed.err
+    assert "Traceback" not in printed.out + printed.err
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
 
 
 def test_a_binding_to_a_legacy_agent_says_it_escaped(
