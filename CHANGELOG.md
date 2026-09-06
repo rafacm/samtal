@@ -117,6 +117,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `Board guides`, since everything in one is true of every unit of that
   model; the directory keeps its path, which 71 links point at.
 
+- **The NVS procedure matches the walkthrough again.** The common
+  board page still told a reader to run `nvs_partition_gen.py` from an
+  ESP-IDF checkout and `esptool.py write_flash`, neither of which is
+  how step 4 does it, and its example URL was the legacy device path
+  rather than the one `vinga info` prints. Both tools now run through
+  `uvx`, the address comes from `vinga info`, and the CSV carries WiFi
+  beside it, which is what lets a freshly flashed board skip its
+  captive portal. It also records the trap that a key is read out of a
+  namespace rather than by name: `password` exists twice, and a reader
+  that ignores the namespace index returns the wrong secret.
+
 - **The long pages say what is on them.** `vinga-server/README.md`
   ran to twenty-one sections with no way to see them short of
   scrolling, and the common board page and the flashing page had the

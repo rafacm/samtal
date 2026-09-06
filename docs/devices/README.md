@@ -110,25 +110,41 @@ device-facing route may never answer a board with a redirect, is in
 
 ### Writing the server's address into NVS
 
-Verified in hands-on use on the Touch-LCD-1.54 (2026-08-12/13). The
-partition lives at `0x9000`; its size is `0x4000` on the Touch-LCD-1.54
-and `0x6000` on the AMOLED-2.16 factory image, and the honest way to
-know is to read the partition table at `0x8000` of the image actually
-flashed on the board in front of you rather than assuming either.
+Verified in hands-on use on the Touch-LCD-1.54 (2026-08-12/13, and
+again on 2026-09-06 with the tooling below). The partition lives at
+`0x9000`; its size is `0x4000` on the Touch-LCD-1.54 and `0x6000` on
+the AMOLED-2.16 factory image, and the honest way to know is to read
+the partition table at `0x8000` of the image actually flashed on the
+board in front of you rather than assuming either.
+
+The address to write is the one `vinga info` prints, key and all,
+rather than a path typed by hand. WiFi credentials live in the same
+namespace, so a board that has just been flashed takes both in one
+write and never has to raise its captive portal:
 
 ```csv
-# nvs_input.csv
+# nvs_input.csv, which will hold a password: `umask 077` first
 key,type,encoding,value
 wifi,namespace,,
-ota_url,data,string,http://<server-ip>:8003/xiaozhi/ota/
+ssid,data,string,Your Network
+password,data,string,your-wifi-password
+ota_url,data,string,http://192.168.1.10:8003/x/AB2C4D5E/
 ```
 
 ```sh
-python nvs_partition_gen.py generate nvs_input.csv nvs_new.bin 0x4000
-esptool.py write_flash 0x9000 nvs_new.bin
+uvx --with esp-idf-nvs-partition-gen python -m esp_idf_nvs_partition_gen \
+    generate nvs_input.csv nvs_new.bin 0x4000
+
+uvx --from esptool esptool --chip esp32s3 --port /dev/cu.usbmodem1101 \
+    --baud 460800 write-flash 0x9000 nvs_new.bin
 ```
 
-Read the partition first (`read_flash 0x9000 0x4000`) if you want to
+Then delete the CSV. Neither tool is installed here: both are GPL, so
+this project shells out to them and `uvx` runs them from nowhere.
+[Flashing a board](flashing.md) has the serial gotchas they share,
+including why the baud rate is 460800 and how to find the port.
+
+Read the partition first (`read-flash 0x9000 0x4000`) if you want to
 preserve the existing device UUID (namespace `board`, key `uuid`).
 Regenerating replaces the whole partition, so carry over everything
 worth keeping: `wifi/ssid`, `wifi/password`, `board/uuid`,
@@ -137,6 +153,12 @@ dropped (the board recalibrates on the next boot and says so with a
 `phy_init: Saving new calibration data` line), and so can `websocket`,
 which the first OTA reply repopulates. Comparing the per-entry CRC32s
 before and after proves the carried values survived byte for byte.
+
+A key is read out of the namespace it is in, not by its name alone:
+`password` exists in `wifi` and again in `mqtt`, and a namespace is
+addressed by an index the partition assigns rather than by its name,
+so anything reading credentials back has to resolve that index first
+or it will hand you the wrong secret.
 
 ## Driving a board from a terminal session
 
