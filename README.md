@@ -181,7 +181,7 @@ vinga info
 #   default_agent: (none)
 ```
 
-It answers with the API it reached, which build is serving, the URL a board will be given in step 5, and the tally above: everything at zero, which is the shape step 3 fills in. Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
+It answers with the API it reached, which build is serving, the URL a board will be given in step 4, and the tally above: everything at zero, which is the shape step 3 fills in. Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
 
 **Step 3. Configure an agent**
 
@@ -255,9 +255,13 @@ vinga apply
 
 Importing is additive and never deletes, so the same document twice changes nothing and a section it does not name is left alone; editing later means editing the document and importing it again.
 
-**4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
+**Step 4. Set up the board**
 
-**5. Get the URL to type.** The server derives it from the file half and the device-auth secret, and answers it over the API along with which build is running, so this runs from the directory step 1 made like everything else.
+A board needs three things: firmware that speaks this protocol, your server's address, and your WiFi.
+
+**Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. A board already running a recent xiaozhi build can skip this, since a server's address is one key in the board's NVS rather than a property of its firmware. Flash anyway when you do not know what a board is running: what its buttons do, which wake word answers, and whether its portal can take a URL at all are properties of the build, and everything below assumes the prebuilt. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
+
+**Get the address to give it.** The server derives it and answers it over the API, so this runs from the directory step 1 made like everything else:
 
 ```bash
 vinga info
@@ -266,11 +270,13 @@ vinga info
 # http://192.168.1.10:8003/x/AB2C4D5E/
 ```
 
-The key at the end is derived from the device-auth secret, so a trial that turned device authentication off in step 1 has none and the URL ends at `/x/`; it serves the same activation flow either way. That key is why the read is behind the same token every other one is: it stands in front of the endpoint that issues device tokens, which is also why the server's own startup line names the origin without it. `docker compose exec vinga vinga-server doctor` says what a device would be told on that URL, or what is wrong, and runs where the server is because that is what it checks; no `--profile` is needed once the stack is up, since the profile decides what starts and this reaches a service that is already running. No cable is involved in any of it; the whole cable-free story is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
+**Give the board that URL, and your WiFi.** How they get there depends on the image your board runs, so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which says which button brings its portal up and also covers its wake word, its display, and the rest of its controls. Where the image's captive portal carries a Custom OTA URL field in its advanced section, that is the whole step and no cable is needed: join the board's access point and enter your WiFi and the URL together. Where it does not, and the Touch-LCD-1.54 image tested here is one that does not, write the URL into the board's NVS over USB first, by [the procedure on the common page](docs/devices/README.md#writing-the-servers-address-into-nvs), then provision WiFi from the portal. The whole cable-free story, where a board's image allows it, is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
 
-**6. Provision WiFi and give the board that URL.** How the URL gets there depends on the image your board runs, so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which says which button brings its portal up and also covers its wake word, its display, and the rest of its controls. Where the image's captive portal carries a Custom OTA URL field in its advanced section, that is the whole step and no cable is needed: join the board's access point and enter your WiFi and the URL together. Where it does not, and the Touch-LCD-1.54 image tested here is one that does not, write the URL into the board's NVS over USB first, by [the procedure on the common page](docs/devices/README.md#writing-the-servers-address-into-nvs), then provision WiFi from the portal.
+When a board does not turn up, `docker compose exec vinga vinga-server doctor` says what a device would be told on that URL, or what is wrong.
 
-**7. Talk.** Step 3 set a `default_agent`, so any board that reaches the server is covered: press the button and speak. Leave it unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
+**Step 5. Talk**
+
+Step 3 set a `default_agent`, so any board that reaches the server is covered: press the button and speak. Leave it unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
 
 ```bash
 vinga device pending list                     # which board is showing what
