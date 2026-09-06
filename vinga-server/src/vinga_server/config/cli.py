@@ -4614,8 +4614,17 @@ def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
     set, because the command that crosses one is a fact of this grammar
     and not of the server's (#386), and the server's own sentence
     wherever it does not.
+
+    Both leave through `printable`, and at different bounds, which is
+    the line that function draws.
     """
-    print(f"wrote {acknowledgement['wrote']}")
+    # At the default bound, which is the door `_entry_name` puts on the
+    # same value one level up: this line is a kind and an identity an
+    # operator chose, quoted inside a sentence of this client's own, and
+    # a bound is what a value like that is protected by. The unbounded
+    # rule below is for a boundary sentence, whose tail is the state it
+    # exists to state and which a cut would lose.
+    print(f"wrote {printable(str(acknowledgement['wrote']))}")
     # Flushed first, so the notice lands after the line it is about
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
