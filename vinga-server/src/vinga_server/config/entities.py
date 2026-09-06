@@ -253,7 +253,7 @@ SNAPSHOT_NOTICE = Notice(
 # The fifth, for a rename that moved a device binding or the default
 # agent with the agent it renamed. Two boundaries at once, exactly as
 # the binding above, and for a different pair of reasons: the stored
-# rows are live, so a device meets the moved binding at its next
+# rows are live, so a device meets the moved reference at its next
 # check-in, and the agent under its new name arrives at the install that
 # applies the stored configuration.
 #
@@ -262,6 +262,15 @@ SNAPSHOT_NOTICE = Notice(
 # moved several bindings and the default agent, none of which the
 # operator just wrote. This one is about what a rename is, which is why
 # it says the references rather than the binding.
+#
+# And it says a device that RESOLVES to the agent rather than one bound
+# to it, which is the difference the two live rows make. The default
+# agent covers the devices that have no binding of their own, so a
+# rename that moved the default alone moved the reference of precisely
+# the devices that are not bound to the agent, and a sentence naming a
+# bound device would be false of every device it was about. One
+# sentence for both arms, because a caller cannot act on the difference:
+# what is waiting is the same install either way.
 #
 # And which arm a rename lands on is decided by what its transaction
 # rewrote rather than by what the running server is serving, which is
@@ -277,8 +286,8 @@ RENAME_UNSERVED_NOTICE = Notice(
     sentence=(
         "The stored references moved with the agent, but this server is still serving "
         "it under the old name: the renamed agent arrives with the install that "
-        "applies the stored configuration, and a device bound to it reaches it at the "
-        "check-in after that."
+        "applies the stored configuration, and a device that resolves to it, by its "
+        "own binding or by the default agent, reaches it at the check-in after that."
     ),
 )
 
