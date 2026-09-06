@@ -905,7 +905,7 @@ docs/plans/2026-09-05-server-state-vocabulary.md:464  historical  vinga apply
 docs/plans/2026-09-05-server-state-vocabulary.md:464  historical  vinga diff
 docs/plans/2026-09-05-server-state-vocabulary.md:590  historical  vinga-server config openapi
 docs/plans/2026-09-06-cli-answer-style-implementation.md:417  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:457  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style-implementation.md:483  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style.md:17  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style.md:122  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style.md:129  historical  vinga apply
@@ -1532,7 +1532,7 @@ vinga-server/tests/unit/test_config_cli_info.py:152  respell  vinga list
 vinga-server/tests/unit/test_config_cli_onboarding.py:1  respell  config ota-url
 vinga-server/tests/unit/test_config_cli_onboarding.py:113  respell  vinga-server config ota-url
 vinga-server/tests/unit/test_config_cli_rendering.py:419  respell  config apply
-vinga-server/tests/unit/test_config_cli_rendering.py:922  respell  vinga apply
+vinga-server/tests/unit/test_config_cli_rendering.py:934  respell  vinga apply
 vinga-server/tests/unit/test_config_cli_respelling.py:28  historical  set-secret
 vinga-server/tests/unit/test_config_cli_respelling.py:95  historical  config set agent-defaults
 vinga-server/tests/unit/test_config_cli_respelling.py:95  historical  config agent-defaults set
