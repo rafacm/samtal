@@ -259,7 +259,7 @@ Importing is additive and never deletes, so the same document twice changes noth
 
 A board needs three things: firmware that speaks this protocol, your server's address, and your WiFi.
 
-**Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. A board already running a recent xiaozhi build can skip this, since a server's address is one key in the board's NVS rather than a property of its firmware. Flash anyway when you do not know what a board is running: what its buttons do, which wake word answers, and whether its portal can take a URL at all are properties of the build, and everything below assumes the prebuilt. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
+**Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. A board already running the xiaozhi app can skip this, stock firmware included, which is what vinga has been tested against: a server's address is one key in the board's NVS rather than a property of its firmware. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
 **Get the address to give it.** The server derives it and answers it over the API, so this runs from the directory step 1 made like everything else:
 

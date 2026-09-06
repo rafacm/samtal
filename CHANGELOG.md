@@ -114,12 +114,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   provisioning, three headings for one act performed with a board in
   hand. They are one step now, `Set up the board`, naming the three
   things a board needs at the top and doing them in order, and
-  `Talk` is step 5. The flash carries the reason it never had: a
-  server's address is one NVS key rather than a firmware property, so
-  a board already running a recent xiaozhi build can skip it, and the
-  reason to flash anyway is that the buttons, the wake word and the
-  portal's fields are properties of the build the rest of the page
-  assumes. Gone with the merge: a paragraph deriving the onboarding
+  `Talk` is step 5. The flash carries the reason it never had, and
+  says who can skip it: a server's address is one NVS key rather than
+  a firmware property, so a board already running the xiaozhi app
+  needs no new firmware, stock included, which is what vinga has been
+  tested against. Gone with the merge: a paragraph deriving the onboarding
   URL's key from the device-auth secret, which included a sentence
   about a trial that turned device authentication off, something step
   1 has never done.
