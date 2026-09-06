@@ -1250,19 +1250,40 @@ def test_the_name_the_agent_already_has_is_422(client: TestClient) -> None:
 
 
 def test_a_new_name_carrying_a_credential_is_refused_and_never_echoed(
-    client: TestClient, caplog: pytest.LogCaptureFixture
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The reachable no-leak case, on the door a paste actually lands
     in. The new name arrives in this request, so it is caller text and
-    is echoed nowhere: not in the body, not in a header, and not in a
-    log record in either format this server writes one in."""
+    is echoed nowhere.
+
+    Every surface the standard names, which is five rather than the two
+    a response has: the body, the headers, both process streams, and
+    every log record, read as the two renderings a deployment writes AND
+    as the record itself. The last of those is the one a rendering
+    cannot cover: a formatter prints the message, so a value that
+    reached a record as a stray attribute or as an unformatted argument
+    is invisible to both formatters and is still in the object a
+    third-party handler serializes whole.
+    """
     _pipeline(client)
+    capsys.readouterr()
 
     with caplog.at_level(logging.DEBUG):
+        caplog.clear()
         answer = _renamed_agent(client, new=PASTED_NAME)
 
+    printed = capsys.readouterr()
     assert answer.status_code == 422
-    for rendering in (answer.text, str(dict(answer.headers)), *_logged(caplog)):
+    surfaces = (
+        answer.text,
+        str(dict(answer.headers)),
+        printed.out,
+        printed.err,
+        *_logged(caplog),
+    )
+    for rendering in surfaces:
         assert PASTED not in rendering
         assert PASTED_NAME not in rendering
 
@@ -1298,14 +1319,29 @@ def test_the_line_strips_a_credential_out_of_a_stored_name() -> None:
 
 
 def _logged(caplog: pytest.LogCaptureFixture) -> list[str]:
-    """Every record written while a request ran, in both formats this
-    server writes one in: a value kept out of a response body and
-    written to a log line is not kept."""
+    """Every record written while a request ran, three ways.
+
+    Both formats this server writes one in, because a value kept out of
+    a response body and written to a log line is not kept; and then the
+    record itself, its whole attribute dictionary, its unformatted
+    arguments and whatever exception it carries. That third reading is
+    the one the two formatters cannot give: they print the message, so a
+    value that arrived as a stray attribute, as an argument no format
+    string consumed, or on an attached exception is invisible to both of
+    them and is still in the object any other handler serializes whole.
+    This is the walk the #381-era suites use, at the surface a rename's
+    caller text can reach.
+    """
     text = logging.Formatter(logs.TEXT_FORMAT)
     return [
         rendering
         for record in caplog.records
-        for rendering in (logs.JsonFormatter().format(record), text.format(record))
+        for rendering in (
+            logs.JsonFormatter().format(record),
+            text.format(record),
+            f"{record.getMessage()}\n{record.__dict__!r}\n{record.args!r}\n"
+            f"{record.exc_info!r}\n{record.exc_text!r}",
+        )
     ]
 
 
