@@ -158,10 +158,10 @@ README.md:173  respell  vinga info
 README.md:191  respell  vinga import
 README.md:243  respell  vinga device bind
 README.md:253  respell  vinga apply
-README.md:267  respell  vinga info
-README.md:280  respell  vinga device pending list
-README.md:281  respell  vinga device pending claim
-README.md:284  respell  vinga events
+README.md:276  respell  vinga info
+README.md:315  respell  vinga device pending list
+README.md:316  respell  vinga device pending claim
+README.md:319  respell  vinga events
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:157  historical  set-secret
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:214  historical  set-secret
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:291  historical  set-secret

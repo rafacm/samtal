@@ -134,6 +134,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Step 4 sets a board up over the cable, and nothing else.** The
+  step ended at a captive portal: join the board's access point from a
+  phone, type WiFi credentials into a page, then write the server's
+  address over USB anyway, because this board's portal has no field
+  for it. WiFi and that address live in the same partition, so they go
+  in together now, from a three-line CSV through
+  `esp-idf-nvs-partition-gen` and `esptool`, both run with `uvx` since
+  both are GPL and neither is a dependency of anything here. Walked
+  end to end on a Touch-LCD-1.54 on 2026-09-06: flashed, written,
+  reset, and connected to the server without the portal being raised
+  at all. The portal survives in the step as the alternative for
+  somebody who would rather not put a password in a file.
+
 - **The board is one step, and it says why it starts with a flash.**
   Getting Started's steps 4, 5 and 6 were a flash, a URL read and a
   provisioning, three headings for one act performed with a board in
