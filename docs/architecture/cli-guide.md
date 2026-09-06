@@ -754,9 +754,10 @@ silently missing would read as one with nothing to report.
 rule stops. `info` says `no devices` and `no default agent` rather than
 dropping them, because an unbound board reaching no agent is the fact an
 operator is hunting for rather than an empty field to hide. And the
-`(none)` in the memory and MCP status listings stays: each answers a
-per-row question somebody asked, rather than enumerating an empty change
-set.
+`(none)` in the `list` tree and in the MCP status blocks stays, as does
+the `-` a session or memory row prints for a field with nothing in it:
+each of those answers a per-row question somebody asked, rather than
+enumerating an empty change set.
 
 **Counterexample, historical** (#426). `vinga info` printed the tally as
 a block whatever was in it, so what a person got the first time they ran
