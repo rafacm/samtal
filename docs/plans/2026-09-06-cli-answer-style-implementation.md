@@ -345,3 +345,122 @@ the assertion: its two diff assertions read `cli.SERVING_THE_STORE` and
 empty, and an empty comparison has no list for the presence rule to
 read and no group for the ordering pin to order. Nothing on this path
 moves either sentence or the answer they are asserted against.
+## M3: an apply says what happened and that it worked
+
+### What was done
+
+`config/cli.py`. `_apply_listing` keeps its derived skeleton and gains
+the content rule: a section with something to say is a block, a section
+answered null keeps its `NOT_APPLIED` line, and within a block a list
+with names in it and a flag that is true. A true flag prints as its
+label alone, the way the comparison prints one, since `yes` after a
+label that already says what happened is a word about nothing.
+`APPLY_LABELS` sits beside `APPLY_SECTIONS` and maps (section, field) to
+the operator's phrase for that outcome, keyed by the pair because one
+field name means two things in two sections: a provider entry that was
+`reused` is an engine nothing rebuilt, and a filler that was `reused` is
+audio nothing sent to a voice. Each label is written from its own
+field's description in `responses.py`. `NOTHING_DIFFERED` is what an
+apply that moved nothing says, for the reason the comparison has a
+sentence of its own. The status block is asked for only where there are
+entries, and the blank line that separates it goes with it, so an answer
+without one ends on the line before rather than on whitespace.
+
+`_applied` is the apply's own render callable, wired as `APPLY.render`
+in place of `_printed(_apply_listing)`: the listing to stdout, a flush,
+then `INSTALLED` on stderr. Shaped like `_imported` and for the reason
+that renderer records, which the plan's review round made a finding of:
+`_printed` prints one string and knows nothing of a second stream, and
+stderr is unbuffered while stdout is not, so without the flush the
+success can land above the listing it is about.
+
+The pins. `test_config_cli_rendering.py`: the whole listing pinned byte
+for byte over an answer with every list filled and the flag true, which
+is where each label is held to what an operator reads; the label table
+equal to what the models declare, with the every-field-is-rendered
+assertion kept beside it; only-what-has-something-to-say as an equality
+over a one-outcome answer, which also pins that no trailing blank line
+survives an answer with no MCP entries; the nothing-differed sentence;
+no `NOTHING_CONFIGURED` in an apply with no entries while `mcp-server
+status` still answers it, asserted in one case so the two halves cannot
+drift; two renders as the same bytes per stream; the ordering over one
+shared buffer with a buffered stdout and an unbuffered stderr on it; the
+success line present on the happy path and absent from a refusal; and a
+started entry whose name carries an escape sequence arriving
+neutralized. `test_config_cli_progress.py`: the success line is the same
+bytes at a terminal and redirected. `test_config_reload.py`: the two
+filler outcomes it asserts through the rendering, in their labels.
+`tests/integration/test_cli_live.py`: the apply's stderr is the success
+sentence rather than empty.
+
+Documents. `vinga-server/README.md`'s apply transcript re-captured, with
+the paragraph under it saying what the new shape is and what has not
+moved, and the `instructions` paragraph naming both words for the one
+outcome it sends a reader to look for. `CHANGELOG.md` gained one
+`Changed` entry. `vinga-server/tests/unit/command-spellings.txt`
+regenerated through its own module. `docs/reference/cli.md` and
+`docs/reference/api-openapi.json` are byte-identical: no help row moved
+and no response model did.
+
+### Deviations from the plan
+
+Three, none changing what the milestone delivers.
+
+**Two labels are the field's own word.** The plan says the field names
+get operator labels, and `prompts.changed`, `agents.added` and
+`agents.removed` are already the operator's words for what happened to
+their own document. They are rows of the table all the same, because
+what the table buys is totality rather than novelty: the pin is keyed
+off the models, so a field added without a label fails whether or not
+its label would have been a new word.
+
+**The root README needed no reconciliation.** Step 3 runs `vinga apply`
+and says what it is for, what it costs the first time, and that
+importing is additive; nothing around it describes what the command
+prints. Recorded rather than silently skipped, since the plan's
+documentation footprint names it conditionally.
+
+**The status block's grant line moved in the transcript with the rest.**
+`_granted` sorts by agent name and the committed transcript listed
+`kids, house`, which no run produces. It is not a rendering this
+milestone touched; re-capturing the block around it was the moment the
+line stopped being wrong, and leaving it would have committed a
+transcript known not to be one.
+
+### What building it turned up
+
+Nothing new about the constant names: the M2 trap was checked for
+before either sentence was named, and `INSTALLED`, `NOTHING_DIFFERED`
+and `_applied` were unused in the module. The near miss was elsewhere:
+`tests/integration/test_cli_live.py` already has a module constant named
+`INSTALLED`, which is the document that lane imports, so the assertion
+there spells `cli.INSTALLED` and the two never meet.
+
+`ruff format` is not a gate in this repository and `cli.py` does not
+satisfy it today, at some forty sites that predate this milestone. Worth
+knowing before reading a `--check` run as a regression: `uv run ruff
+check .` is the lint lane, and it passes.
+
+### Verification
+
+Run from `vinga-server/` against a development Postgres.
+
+- `uv run ruff check .`: passed.
+- `uv run pytest tests/unit -q`: 5945 passed, 19 skipped (10m27s), with
+  the census manifest failing on the run before it was regenerated and
+  its own suite passing after (48 passed).
+- `uv run pytest tests/integration -q`: 245 passed (5m56s).
+- `uv run python -m tests.unit.test_command_spellings`: regenerated
+  after the last documentation edit. Compared ignoring line numbers, the
+  manifest gains exactly two spellings and loses none, both `historical`
+  and both this milestone's own documents: the CHANGELOG entry and this
+  section each name `vinga apply`.
+- `python scripts/check_doc_links.py .`: 211 files, 0 failures.
+- `docs/reference/cli.md` and `docs/reference/api-openapi.json`:
+  byte-identical to the branch base. No help row moved and no response
+  model did.
+
+The lanes above were run against the tree as it stands except for this
+section and the manifest, which followed them; the lanes do not read
+this section, and the census was regenerated and its own suite re-run
+afterwards.

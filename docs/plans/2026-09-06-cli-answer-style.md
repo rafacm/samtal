@@ -523,10 +523,11 @@ added where the other five live.
   manifest; `docs/reference/cli.md` asserted byte-identical, and the
   cli-guide's diff example arrives with M5's practices since the
   guide has no diff worked example today.
-- [ ] **M3: an apply says what happened and that it worked.** The
-  content rule, the label table with its completeness pin, the
-  apply-specific render callable (listing, flush, success sentence
-  on stderr) wired as `APPLY.render` with the ordering pin, the MCP
+- [x] **[M3: an apply says what happened and that it
+  worked](2026-09-06-cli-answer-style-implementation.md#m3-an-apply-says-what-happened-and-that-it-worked)**
+  (PR TBD). The content rule, the label table with its completeness
+  pin, the apply-specific render callable (listing, flush, success
+  sentence on stderr) wired as `APPLY.render` with the ordering pin, the MCP
   block only when entries exist; the apply pins re-cut; README
   step-3 prose checked against the new output; CHANGELOG;
   implementation doc. Design footprint: `_apply_listing`
