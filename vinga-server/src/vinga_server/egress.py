@@ -111,7 +111,7 @@ def _marking(label: str, config: ProviderConfig, provider: object) -> bool | Non
     return marking
 
 
-def check_mcp_server(name: str, entry: McpServerConfig) -> None:
+def check_mcp_server(label: str, entry: McpServerConfig) -> None:
     """Enforce server.local_only for one referenced MCP server (#30).
 
     Tool arguments carry conversation-derived data, and no transport
@@ -122,17 +122,25 @@ def check_mcp_server(name: str, entry: McpServerConfig) -> None:
     Called only when local_only is on, which is where the caller's guard
     stays: an entry that declares nothing is an ordinary entry in every
     other mode.
+
+    Handed the label rather than the name, exactly as `check_provider`
+    above is, and for the reason that made this the odd one of the two:
+    it joined `mcp_servers.` to the name itself, which is one location
+    spelled twice inside one build, since the caller composes the same
+    string for the refusal it raises beside this one. The caller
+    composes it once now, through `entity_location`, the one home for
+    where an entry is written (#420).
     """
     if entry.egress is False:
         return
     if entry.egress is None:
         raise EgressRefusal(
-            f"mcp_servers.{name}: server.local_only is on, and whether an MCP "
+            f"{label}: server.local_only is on, and whether an MCP "
             f"server sends session data off this network cannot be known from "
             f'its transport; declare "egress: false" on this entry to assert '
             f"that whatever its command or URL reaches stays local"
         )
     raise EgressRefusal(
-        f"mcp_servers.{name}: server.local_only is on, but this entry declares "
+        f"{label}: server.local_only is on, but this entry declares "
         f"that it sends session data off this network"
     )
