@@ -266,20 +266,21 @@ CLIENT_BOUNDS = Bounds(CLIENT_ID_LIMIT)
 # the value is far-side bytes from an unauthenticated request, so the
 # headroom is where the generosity stops.
 #
-# The decision site (`ota/reply.py`) produces the value with
-# `json.JSONEncoder(ensure_ascii=True, separators=(",", ":"))` driven
-# through `iterencode`, stopping as soon as the accumulation passes the
-# bound, so the accumulation and the retained value are both bounded
-# whatever the body's size. The one cost proportional to the body is
-# reading and parsing the request, which happens before this and exists
-# today. `ensure_ascii=True` is the printability mechanism
+# The decision site (`ota/reply.py`) walks the parsed object with its
+# own stack, emitting compact JSON tokens into a capped accumulator and
+# escaping each string in a slice of the remaining budget, so nothing
+# it allocates is bigger than this number and no nesting can exhaust an
+# interpreter stack. The one cost proportional to the body is reading
+# and parsing the request, which happens before that and exists today.
+#
+# The escaping is `ensure_ascii`, and it is the printability mechanism
 # rather than a formatting preference: every character outside printable
 # ASCII, control characters and lone surrogates included, leaves as a
 # `\uXXXX` escape, so the result is printable by construction and there
 # is no replacement pass to forget. Non-finite numbers keep the
-# encoder's default spellings (`NaN`, `Infinity`, printable ASCII
-# words): this is a diagnostic representation of what the parser
-# accepted, not a JSON document anything re-parses.
+# encoder's spellings (`NaN`, `Infinity`, printable ASCII words): this
+# is a diagnostic representation of what the parser accepted, not a JSON
+# document anything re-parses.
 CHECK_IN_BODY_LIMIT: Final = 8192
 
 # What a value cut at that bound ends with, so a truncated body is

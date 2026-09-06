@@ -38,6 +38,7 @@ truncation mechanism as well as the containment.
 
 import json
 import logging
+import tracemalloc
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -62,6 +63,7 @@ from vinga_server.events.live import Filters, LiveEvents, Streamed, Subscription
 from vinga_server.events.values import CHECK_IN_BODY_LIMIT, CHECK_IN_BODY_TRUNCATED
 from vinga_server.logs import JsonFormatter
 from vinga_server.ota import OTA_PATH
+from vinga_server.ota.reply import bounded_body
 
 # What the bound lets through: credential-shaped, printable, and short
 # enough for every limit here. Its presence is asserted, positively, in
@@ -553,6 +555,120 @@ def test_the_default_level_shows_neither_a_tail_nor_the_log(
             args=(),
         )
     )
+
+
+# --- ota.py: the two ways a stranger's body could have cost more ------
+#
+# Both are the PR review round's P1s (#435), and both are about the
+# serializer rather than about the value: what a bound is worth depends
+# on nothing bigger than the bound being built to reach it, and on the
+# building being possible at all for whatever a stranger nests.
+
+
+def test_a_multi_megabyte_field_costs_the_bound_and_not_the_body() -> None:
+    """The value is bounded, and so is the work that produced it.
+
+    The first half was already true of the `iterencode` version this
+    replaced; the second was not, because `iterencode` yields a scalar
+    string as one chunk, so an eight-megabyte field was eight megabytes
+    built and appended before any bound could bite. On an
+    unauthenticated endpoint that is the whole of the cost a stranger
+    controls, which is why it is asserted rather than reasoned about.
+
+    The threshold is what the claim is. A peak under a hundredth of the
+    input is far above what the walk actually costs (tens of kilobytes:
+    a slice of the budget, its escaping, and the join) and far below
+    what building the field would (the field itself), so it tells the
+    two apart with room for an unrelated allocation on the same lines
+    and no room at all for a regression to the old shape.
+
+    Measured around the serializer alone, deliberately. Reading and
+    parsing the request IS the body's size and always was; what this
+    pins is that nothing downstream of the parse adds a second copy.
+    """
+    field = "z" * (8 * 1024 * 1024) + REJECTED
+    reported = {**SYSTEM_INFO, "partitions": field}
+
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        body = bounded_body(reported)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert body is not None
+    assert len(body) == CHECK_IN_BODY_LIMIT
+    assert body.endswith(CHECK_IN_BODY_TRUNCATED)
+    assert REJECTED not in body
+    assert peak < len(field) // 100, f"peaked at {peak} bytes for a {len(field)}-character field"
+
+
+def test_a_body_nested_past_any_stack_is_a_value_rather_than_a_failure() -> None:
+    """Depth costs a list entry, so there is no nesting this refuses.
+
+    Driven on the serializer rather than through the handler, and that
+    is the honest place for it. The reported failure was a
+    `RecursionError` out of `json/encoder.py` on a body the parser had
+    already accepted, and the depth where that happened is a moving
+    target: the parser and the recursive encoder spend the same
+    interpreter stack from the same handler, so the band between "the
+    parse takes it" and "the encoder breaks" is a few dozen levels wide
+    and moves with whatever is above them. It was 970 levels here.
+
+    Pinning it where it is absolute instead: this structure is nested
+    twenty thousand deep, which no recursive encoder survives at any
+    sane limit and which `json.loads` cannot even build, so it is
+    assembled with a loop. The walk answers a bounded value.
+    """
+    nested: Any = "the innermost value, which the bound never reaches"
+    for _ in range(20_000):
+        nested = [nested]
+
+    body = bounded_body({"nest": nested})
+
+    assert body is not None
+    assert len(body) == CHECK_IN_BODY_LIMIT
+    assert body.endswith(CHECK_IN_BODY_TRUNCATED)
+    assert body.isprintable()
+
+
+def test_a_deeply_nested_body_is_answered_and_carried_whole(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """And the same shape through the handler, at a depth the parser
+    takes everywhere: an ordinary reply, an event, and the body on it.
+
+    Four hundred levels rather than the nine hundred and seventy that
+    reproduced the failure, because a test whose input sits a few dozen
+    levels under an interpreter limit fails for the stack above it
+    rather than for the thing it is about. What this holds is the end of
+    the path: a nested body is answered, not refused, and nothing about
+    it reaches the response.
+    """
+    reported = {**SYSTEM_INFO, "nest": _nested_list(400)}
+    text = json.dumps(reported, ensure_ascii=True)
+    # A precondition rather than an assertion about this server: what is
+    # being driven has to be a body a JSON parse accepts at all.
+    assert json.loads(text) == reported
+
+    with ota_client() as client, caplog.at_level(logging.DEBUG):
+        response = raw_check_in(client, text)
+
+    assert response.status_code == 200
+    assert response.json()["firmware"]["version"] == SYSTEM_INFO["application"]["version"]
+    body = fields_of(only(caplog, "ota_check_body"))["body"]
+    assert isinstance(body, str)
+    assert json.loads(body) == reported
+
+
+def _nested_list(depth: int) -> Any:
+    """A list nested `depth` deep around one number, built with a loop
+    because building it any other way is the thing under test."""
+    inner: Any = 0
+    for _ in range(depth):
+        inner = [inner]
+    return inner
 
 
 # --- ota.py: the Client-Id header a check-in carries ------------------
