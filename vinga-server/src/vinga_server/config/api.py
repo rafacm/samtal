@@ -628,6 +628,27 @@ _NO_RUNTIME_DIFF_DESCRIPTION = _description("no-runtime-diff")
 # invented would be a claim about a server that is not there.
 _NO_RUNTIME_INFO_DESCRIPTION = _description("no-runtime-info")
 
+# The rename's two, and both are about what a caller should DO next,
+# which is the half a shared sentence gets wrong here.
+#
+# The shared 409 says a request may be retried, because the three states
+# it lists all clear on their own: a held write lock, a claim in flight,
+# a reload already running. A rename adds a fourth that never clears by
+# itself, an occupied destination, and a client generator that put
+# "the request can be retried" in front of it would be describing a
+# retry loop that cannot terminate. So this sentence carries both and
+# says which is which, the way the reload's and the diff's do for the
+# same reason.
+_RENAME_OCCUPIED_DESCRIPTION = _description("rename-occupied")
+
+# And the shared 422 is about addressing, which is one of three things a
+# rename's own can mean: a new name this deployment cannot address, a
+# new name that is the one the agent already has, and a body of the
+# wrong shape. The middle one is the one no shared sentence can cover,
+# because it is a refusal about a request that addressed everything
+# correctly.
+_RENAME_REFUSED_DESCRIPTION = _description("rename-refused")
+
 # What the caller is told, which is not the shared sentence, for the
 # reason the diff's is not. Nothing of the deployment is named: what is
 # missing is the server, not something the caller asked for wrongly.
@@ -2361,7 +2382,17 @@ def _entity_writes(api: FastAPI) -> None:
     @api.post(
         "/agents/{name}/rename",
         response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
+        responses=_problems(
+            401,
+            404,
+            409,
+            422,
+            500,
+            instead={
+                409: _RENAME_OCCUPIED_DESCRIPTION,
+                422: _RENAME_REFUSED_DESCRIPTION,
+            },
+        ),
         openapi_extra=request_body(AgentRename),
     )
     def rename_agent(

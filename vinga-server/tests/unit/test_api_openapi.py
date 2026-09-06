@@ -423,6 +423,42 @@ def test_every_refusal_a_read_can_answer_with_is_described() -> None:
         assert schema == {"$ref": "#/components/schemas/Problem"}
 
 
+def test_the_rename_describes_which_of_its_refusals_a_retry_can_clear() -> None:
+    """The half a shared sentence gets wrong on this route, and the half
+    a client generator acts on.
+
+    The shared 409 says the request can be retried, which is true of
+    every state it lists and false of the one this route adds: a
+    destination already holding an agent, remembered facts or recorded
+    threads stays occupied however many times the request is made, so a
+    contract that promised a retry would be describing a loop that
+    cannot terminate. And the shared 422 is about addressing, which is
+    one of the three things this route's own can mean; the name the
+    agent already has is a refusal about a request that addressed
+    everything correctly, and no sentence about addressing can cover it.
+
+    A pin on the meaning rather than on the prose, which is why it reads
+    for the distinction rather than for the paragraph.
+    """
+    rename = json.loads(docgen.openapi())["paths"]["/agents/{name}/rename"]["post"]
+
+    occupied = rename["responses"]["409"]["description"]
+    assert "already taken" in occupied
+    assert "remembered facts" in occupied and "conversation threads" in occupied
+    # Both clocks, and which is which: the lock clears itself and the
+    # destination does not.
+    assert "clears on its own" in occupied
+    assert "does not clear" in occupied
+    # The shared sentence's promise, refused outright: it is what this
+    # route inherited, and the only way it comes back is unnoticed.
+    assert "the request can be retried" not in occupied
+
+    refused = rename["responses"]["422"]["description"]
+    assert "the name the agent already has" in refused
+    assert "slash or a control character" in refused
+    assert "Nothing sent is quoted back" in refused
+
+
 def test_every_refusal_in_the_document_offers_exactly_one_media_type() -> None:
     """Mechanically, over every operation, because the way this goes
     wrong is invisible in a review of the diff.
