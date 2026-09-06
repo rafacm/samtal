@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from vinga_server.build_info import in_container
+from vinga_server.config.entities import provider_label
 from vinga_server.config.models import PROVIDER_STAGES, Config, ProviderConfig
 from vinga_server.config.secrets import SecretStore, provider_identity
 from vinga_server.egress import EgressRefusal, check_provider
@@ -196,7 +197,12 @@ async def build_entry(
     a cancelled caller waits out the thread it started, closes what came
     back and then goes on being cancelled.
     """
-    label = f"providers.{stage}.{name}"
+    # What this build SAYS about the entry, which is not how it ADDRESSES
+    # one: the label is the store's own location for the row, through the
+    # strip every identity a refusal speaks goes through (#413), while
+    # the name below is the key a stored credential is filed under and is
+    # passed on exactly as it is stored.
+    label = provider_label(stage, name)
     constructing = asyncio.ensure_future(
         asyncio.to_thread(construct_provider, stage, name, config, secrets)
     )
