@@ -46,7 +46,7 @@ from typing import Literal
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
-from vinga_server.config.entities import provider_identity
+from vinga_server.config.entities import descriptor, entity_location, provider_identity
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import MASK, resolve_env_references
 
@@ -488,6 +488,11 @@ def resolve_mcp_values(
     with no key in the entity at all is added: a fragment cannot carry
     the value, so requiring it to carry a placeholder would mean
     inventing an environment variable nobody sets.
+
+    `server` is a stored name, and the location it goes into is what a
+    boot prints when a reference names a variable nobody set, so it is
+    composed by `entity_location` like every other location over a
+    stored identity rather than joined to its section here (#414).
     """
     stored: dict[str, str] = {}
     if store is not None:
@@ -499,7 +504,8 @@ def resolve_mcp_values(
             if secret is not None:
                 stored[key] = secret
     references = {key: value for key, value in values.items() if key not in stored}
-    resolved = resolve_env_references(f"mcp_servers.{server}.{group}", references)
+    written_at = entity_location(descriptor("mcp-server"), server)
+    resolved = resolve_env_references(f"{written_at}.{group}", references)
     resolved.update(stored)
     return resolved
 
