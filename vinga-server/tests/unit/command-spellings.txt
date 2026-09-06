@@ -223,17 +223,17 @@ docs/architecture/cli-guide.md:826  respell  vinga diff
 docs/architecture/cli-guide.md:831  respell  vinga apply
 docs/architecture/cli-guide.md:834  respell  vinga apply
 docs/architecture/cli-guide.md:875  respell  vinga apply
-docs/architecture/cli-guide.md:925  respell  vinga diff
-docs/architecture/cli-guide.md:932  respell  vinga apply
-docs/architecture/cli-guide.md:983  respell  vinga mcp-server status
-docs/architecture/cli-guide.md:990  respell  vinga apply
-docs/architecture/cli-guide.md:996  respell  vinga mcp-server set
-docs/architecture/cli-guide.md:1024  respell  vinga provider set llm claude
-docs/architecture/cli-guide.md:1038  respell  vinga ota-url
-docs/architecture/cli-guide.md:1045  respell  vinga info
-docs/architecture/cli-guide.md:1079  respell  vinga export
-docs/architecture/cli-guide.md:1080  respell  vinga import
-docs/architecture/cli-guide.md:1081  respell  vinga apply
+docs/architecture/cli-guide.md:934  respell  vinga diff
+docs/architecture/cli-guide.md:943  respell  vinga apply
+docs/architecture/cli-guide.md:994  respell  vinga mcp-server status
+docs/architecture/cli-guide.md:1001  respell  vinga apply
+docs/architecture/cli-guide.md:1007  respell  vinga mcp-server set
+docs/architecture/cli-guide.md:1035  respell  vinga provider set llm claude
+docs/architecture/cli-guide.md:1049  respell  vinga ota-url
+docs/architecture/cli-guide.md:1056  respell  vinga info
+docs/architecture/cli-guide.md:1090  respell  vinga export
+docs/architecture/cli-guide.md:1091  respell  vinga import
+docs/architecture/cli-guide.md:1092  respell  vinga apply
 docs/architecture/design-guide.md:196  respell  vinga-server config agent preview
 docs/architecture/observability-surfaces.md:35  respell  vinga session delete
 docs/architecture/observability-surfaces.md:35  respell  vinga session purge
@@ -927,23 +927,23 @@ docs/plans/2026-09-06-cli-answer-style-implementation.md:750  historical  vinga 
 docs/plans/2026-09-06-cli-answer-style-implementation.md:755  historical  vinga import
 docs/plans/2026-09-06-cli-answer-style-implementation.md:759  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style-implementation.md:764  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:829  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:829  historical  vinga diff
-docs/plans/2026-09-06-cli-answer-style-implementation.md:829  historical  vinga mcp-server set
-docs/plans/2026-09-06-cli-answer-style-implementation.md:845  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:845  historical  vinga diff
-docs/plans/2026-09-06-cli-answer-style-implementation.md:846  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:846  historical  vinga mcp-server set
-docs/plans/2026-09-06-cli-answer-style-implementation.md:846  historical  vinga mcp-server
+docs/plans/2026-09-06-cli-answer-style-implementation.md:831  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style-implementation.md:831  historical  vinga diff
+docs/plans/2026-09-06-cli-answer-style-implementation.md:831  historical  vinga mcp-server set
+docs/plans/2026-09-06-cli-answer-style-implementation.md:847  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style-implementation.md:847  historical  vinga diff
+docs/plans/2026-09-06-cli-answer-style-implementation.md:848  historical  vinga info
+docs/plans/2026-09-06-cli-answer-style-implementation.md:848  historical  vinga mcp-server set
+docs/plans/2026-09-06-cli-answer-style-implementation.md:848  historical  vinga mcp-server
 docs/plans/2026-09-06-cli-answer-style.md:17  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style.md:122  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style.md:129  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style.md:159  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style.md:160  historical  vinga diff
-docs/plans/2026-09-06-cli-answer-style.md:162  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style.md:220  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style.md:232  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style.md:262  historical  vinga diff
+docs/plans/2026-09-06-cli-answer-style.md:126  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style.md:133  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style.md:163  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style.md:164  historical  vinga diff
+docs/plans/2026-09-06-cli-answer-style.md:166  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style.md:224  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style.md:236  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style.md:266  historical  vinga diff
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:6678  generated  vinga ota-url
 docs/reference/api-openapi.json:7645  generated  vinga provider secret set
