@@ -51,6 +51,7 @@ from vinga_server.config.models import (
     DatabaseConfig,
     FileConfig,
     McpServerConfig,
+    PromptFragmentConfig,
     ProviderConfig,
     holds_control_character,
     spoken_identity,
@@ -577,7 +578,12 @@ def test_a_boot_refused_by_the_build_reaches_an_operator_escaped(
     _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
 
 
-# The one surface a request can reach, because this row is addressable
+# The surfaces a request can reach, because this row is addressable
+#
+# Every case here reads the sentence off the PARSED body rather than off
+# the text. JSON escapes a raw byte on its own, so an assertion over the
+# response text passes with the escape gone, and the sentence is what an
+# operator reads and what a client writes into its own log.
 
 
 def test_the_row_is_reachable_and_the_line_that_fixes_it_is_escaped(
@@ -587,26 +593,153 @@ def test_the_row_is_reachable_and_the_line_that_fixes_it_is_escaped(
     mark, driven end to end rather than argued.
 
     A control character percent-encodes losslessly, so unlike a
-    credential-bearing name this row can be fetched, renamed and
-    deleted over the API. The escaped spelling is what tells an operator
-    which byte to encode; a fixed mark would name the row without saying
-    what is in it, and would print two different broken names alike.
+    credential-bearing name this row can be fetched, renamed and deleted
+    over the API. The escaped spelling is what tells an operator which
+    byte to encode; a fixed mark would name the row without saying what
+    is in it, and would print two different broken names alike.
 
-    The acknowledgement is read off the parsed body rather than the
-    text, because JSON escapes a raw byte on its own and an assertion
-    over the text would pass with the escape gone.
+    The delete is of the planted row ITSELF rather than of the lawful
+    name a rename just gave it, which is what the sol round on PR #423
+    caught: a delete goes by membership, so the row that is deletable is
+    the one no write would accept, and renaming first is the one route
+    that never asks the delete to say the name.
+    """
+    _plant(store, "agent", (PLANTED,), AgentConfig(prompt="hi"))
+    _plant(store, "agent", (f"{PLANTED}-2",), AgentConfig(prompt="hi"))
+
+    with caplog.at_level(logging.DEBUG):
+        read = client.get(f"/agents/{ADDRESSED}")
+        deleted = client.delete(f"/agents/{ADDRESSED}")
+        renamed = client.post(f"/agents/{ADDRESSED}-2/rename", json={"to": LAWFUL})
+
+    assert read.status_code == 200
+    assert deleted.json()["wrote"] == f"agent {SPOKEN} deleted"
+    assert renamed.json()["wrote"] == f"agent {SPOKEN}-2 renamed to {LAWFUL}"
+    _carries_no_sentinel(
+        deleted.json()["wrote"],
+        renamed.json()["wrote"],
+        str(dict(deleted.headers)),
+        *_logged(caplog),
+    )
+
+
+def test_every_kind_says_its_own_name_escaped_when_it_is_deleted(
+    store: ConfigStore, client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The other three kinds a delete can name, since a delete is the
+    one write whose subject is a row that already exists and therefore
+    the one that can be handed a name a write would refuse.
+
+    A provider and an MCP server say what went with them, so their
+    sentences carry the name in front of a tail of their own.
+    """
+    _plant(store, "provider", ("llm", PLANTED), ProviderConfig(type="mock"))
+    _plant(
+        store, "prompt-fragment", (PLANTED,), PromptFragmentConfig(text="a fragment")
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        provider = client.delete(f"/providers/llm/{ADDRESSED}")
+        fragment = client.delete(f"/prompt-fragments/{ADDRESSED}")
+
+    assert provider.json()["wrote"] == (
+        f"provider llm.{SPOKEN} deleted, with its stored secrets"
+    )
+    assert fragment.json()["wrote"] == f"prompt-fragment {SPOKEN} deleted"
+    _carries_no_sentinel(
+        provider.json()["wrote"], fragment.json()["wrote"], *_logged(caplog)
+    )
+
+
+def test_a_stored_secrets_location_says_itself_escaped(
+    store: ConfigStore, client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`SecretLocation.describe` is the one string thirteen refusals and
+    four acknowledgements are built from, and both halves of it are
+    stored: a slot is held to the addressability rule at write time
+    only, exactly as a name is.
+
+    The slot here is planted with the byte in it as well, which is what
+    says the rule is on the location rather than on its entity half.
+    """
+    _plant(store, "provider", ("llm", PLANTED), ProviderConfig(type="mock"))
+    planted(
+        store,
+        schema.providers.update()
+        .where(schema.providers.c.name == PLANTED)
+        .values(secrets={f"api_key{ESC}": {"v": 1, "ct": "x", "key": "k"}}),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        wrote = client.put(
+            f"/providers/llm/{ADDRESSED}/secrets/api_key", json={"secret": "s"}
+        )
+        cleared = client.delete(f"/providers/llm/{ADDRESSED}/secrets/api_key%1B")
+
+    assert wrote.json()["wrote"] == f"secret for provider llm.{SPOKEN} api_key"
+    assert cleared.json()["wrote"] == (
+        f"secret for provider llm.{SPOKEN} api_key\\x1b cleared"
+    )
+    _carries_no_sentinel(
+        wrote.json()["wrote"], cleared.json()["wrote"], *_logged(caplog)
+    )
+
+
+def test_a_boot_refuses_an_unreadable_envelope_naming_neither_half_raw(
+    store: ConfigStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Where that location is actually read out: `verify_secrets` opens
+    every stored envelope at startup, so an envelope that will not open
+    puts its entity and its slot on a boot's stderr.
+
+    The planted envelope carries both rules' shapes at once, in the name
+    and in the slot, because either half alone would leave the other
+    passing.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    _plant(store, "provider", ("llm", BOTH), ProviderConfig(type="mock"))
+    planted(
+        store,
+        schema.providers.update()
+        .where(schema.providers.c.name == BOTH)
+        .values(secrets={f"api_key{ESC}": {"v": 1, "ct": "not-an-envelope", "key": "k"}}),
+    )
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as caught:
+        load_boot_config()
+
+    assert f"provider llm.{BOTH_SPOKEN} api_key\\x1b: " in str(caught.value)
+    _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
+def test_a_binding_to_a_legacy_agent_says_it_escaped(
+    store: ConfigStore, client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The acknowledgement built from the row rather than from the
+    request, which is what puts a stored name in a 200.
+
+    A binding REFERENCES an agent rather than creating one, so the name
+    is checked by membership and never by the addressability rule, and
+    it arrives in a JSON body where nothing about it has to survive a
+    path segment. That is the route by which a name no write would
+    accept reaches a successful answer.
     """
     _plant(store, "agent", (PLANTED,), AgentConfig(prompt="hi"))
 
     with caplog.at_level(logging.DEBUG):
-        read = client.get(f"/agents/{ADDRESSED}")
-        renamed = client.post(f"/agents/{ADDRESSED}/rename", json={"to": LAWFUL})
-        deleted = client.delete(f"/agents/{LAWFUL}")
+        bound = client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": [PLANTED]})
+        default = client.put("/default-agent", json={"name": PLANTED})
 
-    assert read.status_code == 200
-    assert renamed.json()["wrote"] == f"agent {SPOKEN} renamed to {LAWFUL}"
-    assert deleted.status_code == 200
-    _carries_no_sentinel(renamed.json()["wrote"], str(dict(renamed.headers)), *_logged(caplog))
+    assert bound.json()["wrote"] == f"device aa:bb:cc:dd:ee:ff bound to {SPOKEN}"
+    # The default agent is written rather than referenced, so the name
+    # goes through the addressability rule on the way in and this one
+    # answer cannot carry the byte at all. Asserted rather than assumed,
+    # because that is what says the strip on it is belt and braces.
+    assert default.status_code == 422
+    assert "contains a control character" in default.json()["detail"]
+    _carries_no_sentinel(
+        bound.json()["wrote"], default.json()["detail"], *_logged(caplog)
+    )
 
 
 # Where the rule stops, and why
