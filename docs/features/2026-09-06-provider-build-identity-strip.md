@@ -211,7 +211,7 @@ that renders it today; both callers take the name and discard it.
 
 - Lint: `uv run ruff check .` clean.
 - Unit, the shape CI runs: `uv run pytest tests/unit -q -n auto --dist
-  loadfile`, 5819 passed and 19 skipped, eight of them the cases added
+  loadfile`, 5821 passed and 19 skipped, ten of them the cases added
   here.
 - Integration: `uv run pytest tests/integration -q`, 245 passed.
 - All six committed-reference drift checks (domain config, server
@@ -233,6 +233,13 @@ that renders it today; both callers take the name and discard it.
   - The stamped identity, reverted: the event payload and the loopback
     warning both carried it.
   - The location, reverted: `provider_for_agent` answered with it.
+  - The model strip, reverted: the event payload reported the credential
+    as the model.
+  - The type refusal, reverted: the sentinel appeared on the entry
+    point's real stderr, which is the reproduction the P2's own fix made
+    visible.
+  - The option name's strip, reverted: the refusal listed the key
+    whole.
 
 ## Files modified
 
