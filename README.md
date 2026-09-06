@@ -172,16 +172,10 @@ Check the vinga server status with:
 ```bash
 vinga info
 # ...
-# configured:
-#   providers: 0
-#   mcp_servers: 0
-#   prompt_fragments: 0
-#   agents: 0
-#   devices: 0
-#   default_agent: (none)
+# configured: nothing yet
 ```
 
-It answers with the API it reached, which build is serving, the URL a board will be given in step 4, and the tally above: everything at zero, which is the shape step 3 fills in. Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
+It answers with the API it reached, which build is serving, the URL a board will be given in step 4, and the tally above, which is the whole of what there is to say about a deployment nothing has been written to: step 3 is what fills it in. Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
 
 **Step 3. Configure an agent**
 
@@ -275,7 +269,7 @@ uvx --from esptool esptool --chip esp32s3 --port /dev/cu.usbmodem1101 \
 ```bash
 vinga info
 # ...
-# the URL to type into a device's captive portal, from server.public_url:
+# onboarding URL (the address a device's captive portal asks for, labelled OTA there), from server.public_url:
 # http://192.168.1.10:8003/x/AB2C4D5E/
 ```
 
