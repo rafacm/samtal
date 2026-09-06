@@ -934,7 +934,9 @@ state.
 **Counterexample, historical** (#425). `vinga diff` labelled every kind
 with its own boundary and defined the vocabulary in a preamble printed
 on every run. The state Getting Started's step 3 leaves behind has three
-changes in it, and this is what they were answered with:
+changes in it, and this is what they were answered with, reconstructed
+by running the retired renderer over the fixture the merged pin uses for
+that state, so it can be re-derived rather than taken on trust:
 
 ```
 # what the stored configuration would change on the running server. `applies`

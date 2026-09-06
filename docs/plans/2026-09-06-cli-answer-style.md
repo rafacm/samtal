@@ -72,7 +72,11 @@ shape.
 Each becomes a section of `cli-guide.md`'s practices in M5, with the
 merged example the earlier milestones produce and a labelled
 counterexample (all four are **historical** by then: this
-repository's own pre-#426 renderings, quoted from the issues).
+repository's own pre-#426 renderings, quoted from the issues, or
+reconstructed by running the retired renderer over a merged fixture and
+said to be, which is the stronger provenance where a specimen can be
+re-derived: a reader can run it again, while a paste can only be
+believed).
 
 1. **An answer prints what has something to say.** An empty list, a
    false flag and a section of nothing are absent, not enumerated as
