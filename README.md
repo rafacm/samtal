@@ -245,7 +245,7 @@ default_agent: assistant
 EOF
 ```
 
-That went to the store in one transaction, ordered for you and refused whole rather than half written if anything in it will not resolve. Nothing is serving it yet, which is the other command: `apply` installs what is stored on the running server, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). This first one downloads the speech models, so it is the slow one.
+That saved the document as your configuration and left the running server alone. It is all or nothing: a mistake anywhere in it means nothing was saved, rather than half a deployment. `apply` is what puts it into service, [without a restart](vinga-server/README.md#applying-a-change-without-a-restart) and without cutting off a conversation in progress. Give this first one a few minutes, since it downloads the transcription and voice models.
 
 ```bash
 vinga apply
