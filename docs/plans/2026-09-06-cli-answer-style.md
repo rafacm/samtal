@@ -130,9 +130,18 @@ boundaries, and it is `vinga apply`. Both known sets ({reload} and
 {reload, check-in}) are waiting on that same install; the check-in
 half of the second is not actionable by any command, and for a whole
 document it is detail the single write's own answer carries better.
-When any entry carries an unknown or absent set, that entry's server
-sentence is quoted after the count line, deduplicated by sentence
-exactly as today: the mixed-version arm of #386's plan does not move.
+The mixed answer is specified rather than implied, because both
+halves must survive it. The count line always prints. The
+actionable-set clause rides it whenever any entry carries a set the
+client has a remedy for; both actionable sets share the one clause,
+per the collapse above, so the clause appears once however many
+entries carry either. After it, every entry whose set is
+non-actionable, absent or unknown contributes its server sentence,
+deduplicated by sentence exactly as today: the mixed-version arm of
+#386's plan does not move. So a document with one recognized entry
+and one from an older server prints the count line with the remedy
+clause and that older entry's sentence under it, and neither fact is
+lost.
 
 A document whose entries were all unchanged has no notices and gets
 no boundary line, which is today's behavior; its stdout lines say
@@ -418,9 +427,12 @@ added where the other five live.
   (the tally line).
 - **New pins.** The label completeness pin over `APPLY_SECTIONS`.
   The import collapse: a document whose entries carry {reload} and
-  {reload, check-in} prints one stderr line with the count; the same
-  document with one entry's set unknown prints the count line and
-  that entry's server sentence; all-unchanged prints none. The diff:
+  {reload, check-in} prints one stderr line with the count and the
+  remedy clause; a mixed document with at least one recognized entry
+  and one unknown-set entry prints the count line still carrying the
+  remedy clause plus that entry's server sentence, asserting both
+  facts survive and the unknown token itself is never printed;
+  all-unchanged prints none. The diff:
   a one-change diff renders the group head once; an all-empty diff
   prints the nothing-pending sentence; the LiveKind sentence is
   present in both; the head table is total over `DiffApplies`; a
@@ -628,6 +640,15 @@ ready, pending the P1 amendments.
    written, a mixed answer prints the count and the unknown entries'
    sentences; nothing says the known entries' remedy survives, which
    contradicts the plan's own boundary-survives decision.
+
+   *Resolution*: accepted in full. The mixed answer is now specified:
+   the count line always prints, the remedy clause rides it whenever
+   any entry carries an actionable set (once, since both actionable
+   sets share the one remedy), and every non-actionable, absent or
+   unknown set contributes its server sentence deduplicated by
+   sentence. The named test now requires at least one recognized and
+   one unknown entry and asserts both facts survive while the
+   unknown token is never printed.
 
 7. **P2: the determinism test the plan leans on does not exist for
    these renderers.** The named suites render each answer once and
