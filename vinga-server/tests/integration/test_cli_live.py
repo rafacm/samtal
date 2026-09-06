@@ -979,8 +979,7 @@ def test_info_names_the_deployment_it_reached(
     # server on an ephemeral port and not a default this test could have
     # guessed.
     assert f"configuration API: {deployed.api_url}" in said
-    assert f"server version: {installed_version()}" in said
-    assert f"server revision: {revision()}" in said
+    assert f"server: {installed_version()} ({revision()})" in said
     # The URL a board is onboarded at, alone on its line under a label
     # that carries the provenance whole. The lane boots with device auth
     # on and no public_url, so what it names is a guessed origin with a
@@ -989,7 +988,7 @@ def test_info_names_the_deployment_it_reached(
     label = next(
         index
         for index, line in enumerate(lines)
-        if line.startswith("the URL to type into a device's captive portal, ")
+        if line.startswith(f"{cli.ONBOARDING_URL_LABEL}, ")
     )
     assert "guessed from the listen address" in lines[label]
     # The whole sentence, not the head of one: the fix it ends with is
@@ -997,9 +996,15 @@ def test_info_names_the_deployment_it_reached(
     assert lines[label].endswith("set server.public_url to name this deployment exactly:")
     assert lines[label + 1].startswith("http")
     assert lines[label + 1].rstrip("/").rsplit("/", 2)[-2] == "x"
-    # And the counts, over the deployment this module wrote.
-    assert "  providers: 5" in said
-    assert "  agents: 1" in said
+    # And the tally, over the deployment this module wrote: one line, of
+    # the kinds that have something to say and no others.
+    tally = next(line for line in lines if line.startswith("configured: "))
+    assert "5 providers" in tally
+    assert "2 mcp-servers" in tally
+    assert "1 agent," in tally
+    # And nothing at zero, which is the half of the rule that what is
+    # present cannot show.
+    assert " 0 " not in tally
     # Nothing about the run, and nothing of the credential this lane
     # stored, on either stream.
     assert printed.err == ""

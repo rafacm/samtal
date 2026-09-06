@@ -593,8 +593,8 @@ def test_the_running_server_is_read_after_an_apply(run) -> None:
     # the server half anywhere near it.
     said = answered(run("info"), "info")
     assert said.startswith("vinga - Conversational AI. Sweded.\n")
-    assert "server revision: " in said
-    assert "  default_agent: " in said
+    assert "server: " in said
+    assert "configured: " in said
 
 
 def test_a_board_is_onboarded_by_the_code_on_its_screen(run, live: Live) -> None:
