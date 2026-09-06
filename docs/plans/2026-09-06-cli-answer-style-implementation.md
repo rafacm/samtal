@@ -719,6 +719,11 @@ command prints and when its write lands. The questions behind them keep
 their wording and their links and move down; the list runs to sixteen,
 and both counts in "On this page" say so.
 
+`docs/architecture/README.md` counted the checklist for a reader
+deciding whether to open the page ("as eleven questions at the top") and
+says sixteen now: the count has one home and a sentence elsewhere that
+repeats it is corrected in the change that moves it.
+
 `CHANGELOG.md` gained one `Changed` entry. No file under
 `vinga-server/src` changed, which is what a documentation milestone
 means here; the census manifest was regenerated, and `docs/reference/
@@ -830,17 +835,31 @@ before quoting one.
 
 Run from the repository root and from `vinga-server/`.
 
-- `python scripts/check_doc_links.py .`: 211 files, 0 failures, run
-  after each of the two guide commits, since the checklist links the
-  anchors the practices create.
+- `python scripts/check_doc_links.py .`: 211 files, 0 failures, re-run
+  after every commit, since the checklist links the anchors the
+  practices create.
 - `uv run python -m tests.unit.test_command_spellings`: regenerated
-  after the last documentation edit.
-- `uv run pytest tests/unit/test_command_spellings.py -q`: passed after
-  the regeneration.
-- `uv run ruff check .`: passed, and nothing under `vinga-server/src`
-  or `tests/` was edited by hand in this milestone.
-- `uv run pytest tests/unit -q`: run once at the end to show nothing
-  else moved.
+  after each documentation edit that moved a line. Compared ignoring
+  line numbers, the manifest gains exactly twenty spellings and loses
+  none: twelve in the guide, classified `respell` and every one of them
+  a command the tree has (`vinga apply` seven times, `vinga diff`
+  twice, `vinga info`, `vinga mcp-server set`, `vinga mcp-server
+  status`), and eight `historical` ones in this section.
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 48 passed.
+- `uv run ruff check .`: passed. Nothing under `vinga-server/src` was
+  touched at all, and the only file under `tests/` that moved is the
+  generated manifest.
+- `uv run pytest tests/unit -q`: 5957 passed, 19 skipped (10m37s), run
+  at the end to show nothing else moved. An earlier run was killed
+  rather than reported: it hit the census drift check while a
+  documentation edit was in flight beside it, which is what that check
+  is for.
 - `docs/reference/cli.md` and `docs/reference/api-openapi.json`:
   byte-identical to the branch base. No help row moved and no response
   model did.
+
+The order, since it decides what the lane saw. The unit lane ran against
+the tree as it stands apart from this section and the two documentation
+edits recorded above it, all three of which are Markdown; the only unit
+test that reads any of them is the census drift check, which was re-run
+after the manifest was regenerated and passes.

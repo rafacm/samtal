@@ -922,40 +922,19 @@ docs/plans/2026-09-06-cli-answer-style-implementation.md:483  historical  vinga 
 docs/plans/2026-09-06-cli-answer-style-implementation.md:621  historical  vinga info
 docs/plans/2026-09-06-cli-answer-style-implementation.md:656  historical  vinga list
 docs/plans/2026-09-06-cli-answer-style-implementation.md:664  historical  vinga list
-docs/plans/2026-09-06-cli-answer-style-implementation.md:740  historical  vinga info
 docs/plans/2026-09-06-cli-answer-style-implementation.md:745  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:750  historical  vinga import
-docs/plans/2026-09-06-cli-answer-style-implementation.md:754  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style-implementation.md:750  historical  vinga info
+docs/plans/2026-09-06-cli-answer-style-implementation.md:755  historical  vinga import
 docs/plans/2026-09-06-cli-answer-style-implementation.md:759  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga diff
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga mcp-server set
-docs/plans/2026-09-06-cli-answer-style-implementation.md:417  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:483  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:621  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:656  historical  vinga list
-docs/plans/2026-09-06-cli-answer-style-implementation.md:664  historical  vinga list
-docs/plans/2026-09-06-cli-answer-style-implementation.md:740  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:745  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:750  historical  vinga import
-docs/plans/2026-09-06-cli-answer-style-implementation.md:754  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:759  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga diff
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga mcp-server set
-docs/plans/2026-09-06-cli-answer-style-implementation.md:417  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:483  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:621  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:656  historical  vinga list
-docs/plans/2026-09-06-cli-answer-style-implementation.md:664  historical  vinga list
-docs/plans/2026-09-06-cli-answer-style-implementation.md:740  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:745  historical  vinga info
-docs/plans/2026-09-06-cli-answer-style-implementation.md:750  historical  vinga import
-docs/plans/2026-09-06-cli-answer-style-implementation.md:754  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:759  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga apply
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga diff
-docs/plans/2026-09-06-cli-answer-style-implementation.md:824  historical  vinga mcp-server set
+docs/plans/2026-09-06-cli-answer-style-implementation.md:764  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style-implementation.md:829  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style-implementation.md:829  historical  vinga diff
+docs/plans/2026-09-06-cli-answer-style-implementation.md:829  historical  vinga mcp-server set
+docs/plans/2026-09-06-cli-answer-style-implementation.md:845  historical  vinga apply
+docs/plans/2026-09-06-cli-answer-style-implementation.md:845  historical  vinga diff
+docs/plans/2026-09-06-cli-answer-style-implementation.md:846  historical  vinga info
+docs/plans/2026-09-06-cli-answer-style-implementation.md:846  historical  vinga mcp-server set
+docs/plans/2026-09-06-cli-answer-style-implementation.md:846  historical  vinga mcp-server
 docs/plans/2026-09-06-cli-answer-style.md:17  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style.md:122  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style.md:129  historical  vinga apply
