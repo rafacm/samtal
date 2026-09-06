@@ -167,3 +167,110 @@ Run from `vinga-server/` against a development Postgres.
 - `python scripts/check_doc_links.py .`: 211 files, 0 failures.
 - `docs/reference/cli.md` and `docs/reference/api-openapi.json`:
   unmodified, as the plan expects.
+
+## M2: a diff prints its changes, grouped by the boundary they wait at
+
+### What was done
+
+`config/cli.py`. `DIFF_INTRO` is gone and `HEADS` stands in its place,
+beside `INSTALLS` and reading it: one head per boundary, in this
+client's words, so the API's tokens are no longer printed by this
+command at all. `_diff_listing` groups rather than walks. It asks each
+kind what it has to say, tags every fact with the boundary that fact is
+waiting at, and prints one block per boundary present in the order
+`Applies` declares them, with one line per kind under the head and the
+kind's facts joined on it. `_diff_block` is `_diff_facts`, which returns
+facts rather than lines: a name list with names in it, a flag that is
+true, and the facts of the parts under a kind with the part's name in
+front of them. The three shape readers (`named_lists`, `flags`,
+`nested`) are untouched, so the contract-driven property is the one it
+was. Two fixed sentences join them: `SERVING_THE_STORE` for a comparison
+that found nothing, and `READ_AS_ASKED` after every comparison, saying
+why the two live kinds are never in a group.
+
+The pins. `test_config_cli_rendering.py`: the whole answer for Getting
+Started's state pinned byte for byte, the head printed once over a
+one-change diff and over a three-kind one, the nothing-pending sentence,
+the live-kinds sentence at the end of both and naming every `LiveKind`
+section, `HEADS` equal to `DiffApplies`, only-what-has-something-to-say,
+the agents' clocks as labelled facts of the agents line, two renders of
+one answer as one string, and a name carrying an escape sequence
+arriving neutralized through the act. The refuses-whole cases for an
+unknown `applies` value are unchanged, which is what the plan's review
+round settled: a diff's `applies` is a scalar and `Act.read()` refuses
+the whole answer before any rendering runs.
+
+Documents. `CHANGELOG.md` gained one `Changed` entry. The plan's M2
+bullet still listed "the unknown-token group-head case", which its own
+review round withdrew in finding 2; the tick corrects it to what the
+resolution settled, so the checklist and the resolution say one thing.
+`vinga-server/tests/unit/command-spellings.txt` regenerated through its
+own module. `docs/reference/cli.md` and `docs/reference/api-openapi.json`
+are byte-identical: no help row moved and no response model did.
+
+### Deviations from the plan
+
+Five, none changing what the milestone delivers.
+
+**`check-in` has a head, and it heads no group this server can send.**
+The plan says the table is total over `DiffApplies` and pinned so, and
+`check-in` is a `DiffApplies` member, so it has a line. It is unreachable
+today for the reason the plan gives: the two kinds carrying that token
+are `LiveKind`s, which name nothing, so they contribute no facts and
+therefore no group, and the fixed sentence answers them instead. The
+line exists so that a kind that ever carries `check-in` and does name
+something is headed rather than met with a `KeyError`.
+
+**The totality pin is an equality.** The plan asks that every
+`DiffApplies` member have a head. The pin asserts the keys are exactly
+that set, which adds the other direction: a head for a token no field
+can carry is a line nobody would ever read, and keying the assertion off
+the alias is what reports it.
+
+**A kind's facts join one line, sub-sections included.** The plan's
+example is `agents  prompt changed: kids`, which reads either as a line
+of its own or as one fact of the agents line. It is the second: an
+operator asks what moved about the agents and reads one line about the
+agents, so `agents  changed: sam; prompt changed: sam; filler changed:
+kids` is one line. Each fact is still tagged with its own part's
+boundary rather than with the kind's, so a part that ever waits
+somewhere else lands under its own head instead of under a wrong one.
+
+**The two columns are not `_table`.** The plan leaves the choice open.
+The left column is padded to the widest kind name printed anywhere in
+the answer, with a two-space gutter, so the columns line up across
+groups rather than per group, and a row exists only when it has facts,
+which is what keeps trailing whitespace impossible.
+
+**Two integration transcripts moved with the unit pins.** The plan's
+test section names unit suites only, but `tests/integration/
+test_cli_live.py` and `tests/integration/test_cli_wheel.py` each
+asserted the old per-kind label. The first now pins the nothing-pending
+and live-kinds sentences, which is what an applied deployment answers;
+the second pins the live-kinds sentence, which prints whatever the
+state, since that lane's claim is about a bare install rendering the
+answer at all.
+
+And one addition rather than a deviation: the diff had no
+steer-a-terminal case, because its rendering used to be read as names
+and closed tokens. The grouping moved every line of it, so the case the
+plan says to keep for the other surfaces is added here, driven through
+`Act.read()`: a name carrying an escape sequence arrives neutralized and
+not dropped.
+
+### What building it turned up
+
+The nothing-pending sentence was first called `NOTHING_PENDING`, which
+is the name of the sentence `device pending list` prints when no board
+is waiting to be claimed (`cli.py:458`). Python rebinds a module
+constant silently and `ruff` does not report it, so the module imported
+and linted clean while two commands answered one sentence: the device
+listing printed "nothing is pending: this server is serving what the
+store holds". Two suites caught it, which is what those pins are for.
+The comparison's sentence is `SERVING_THE_STORE` now. Worth recording
+because the file has 40-odd fixed sentences and nothing in the toolchain
+holds their names apart.
+
+### Verification
+
+Run from `vinga-server/` against a development Postgres.

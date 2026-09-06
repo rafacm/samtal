@@ -508,10 +508,13 @@ added where the other five live.
   (maintained map, carries the old two-voice transcript),
   `docs/architecture/cli-guide.md` (the practice its example
   falsifies), `CHANGELOG.md`, the census manifest.
-- [ ] **M2: a diff prints its changes, grouped by the boundary they
-  wait at** (#425). The grouped rendering, the content rule, the
+- [x] **[M2: a diff prints its changes, grouped by the boundary they
+  wait at](2026-09-06-cli-answer-style-implementation.md#m2-a-diff-prints-its-changes-grouped-by-the-boundary-they-wait-at)**
+  (#425, PR TBD). The grouped rendering, the content rule, the
   LiveKind sentence, the nothing-pending sentence, `DIFF_INTRO`
-  deleted, the diff pins re-cut, the unknown-token group-head case;
+  deleted, the diff pins re-cut, the head table pinned total over
+  `DiffApplies` with the existing refuses-whole case kept (review
+  finding 2 withdrew the unknown-token head this bullet used to name);
   CHANGELOG; implementation doc. Closes #425. Design footprint:
   `_diff_listing` re-cut around the boundary axis the answer already
   carries; the shape-reading helpers (`named_lists`, `flags`,

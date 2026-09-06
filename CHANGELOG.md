@@ -154,6 +154,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A comparison says what is pending, grouped by the boundary it waits
+  at.** `vinga diff` printed twenty-four lines to say three things: a
+  four-line preamble defining the API's boundary tokens, then all seven
+  kinds with all of their fields, `(none)` under every empty list and
+  `no` under every false flag, and four indented blocks under the agents
+  for parts that had nothing to say. It answers with what has something
+  to say now. One head per boundary rather than a label per kind, in
+  this client's words rather than in the API's token, so the head for a
+  reload names `vinga apply` and the token itself is no longer printed
+  anywhere; under it one line per kind that moved, its facts joined on
+  that line, with the agents' four
+  clocks flattened into labelled facts of the agents line. A kind with
+  an empty list and a false flag is not a line at all. What is left out
+  is a function of the two worlds being compared, so two reads of one
+  pair are still the same bytes. Two sentences are fixed: a comparison
+  that found nothing says so rather than printing nothing, and every
+  comparison ends by saying why device bindings and the default agent
+  are never in the list, which is that they are read as a device asks
+  for them. The preamble is gone with the tokens it defined; the
+  vocabulary keeps the homes it already had, the generated API document
+  and this command's own help row, and neither moved.
+
 - **A write is answered in one voice, and an import in one line.** The
   boundary a write is waiting at was printed twice: the server's
   sentence, and this client's advice about the same boundary under it.
