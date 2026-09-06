@@ -2295,7 +2295,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "description": "Either the new name is already taken somewhere this rename would write, by an agent, by remembered facts or by recorded conversation threads, or the configuration database's write lock is held by another request. A rename may never merge two pasts into one, which is why an occupied destination is refused rather than merged. Nothing was changed and neither name is quoted back. The held lock clears on its own and the request can be made again; an occupied destination does not clear, and what clears it is choosing another name or taking away what is filed under this one.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2305,7 +2305,7 @@
             }
           },
           "422": {
-            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "description": "The new name is not one this deployment can address, being empty once the surrounding whitespace is taken off, or holding a slash or a control character; or it is the name the agent already has once both are stripped, which is nothing to rename; or the body is not a JSON object with exactly one key, `to`, holding a string. Nothing sent is quoted back, which on this endpoint covers the new name in every refusal it can meet. Nothing was changed, and none of these clears on its own: each is answered by sending a different name or a different body.",
             "content": {
               "application/problem+json": {
                 "schema": {
