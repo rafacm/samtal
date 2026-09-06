@@ -22,10 +22,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests.support.leaks import renderings
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
 from tests.support.stores import holding_the_write_lock, the_lock_held
-from vinga_server import logs
 from vinga_server.config import entities
 
 # `_renamed` is the acknowledgement's line composer, reached by its own
@@ -1281,7 +1281,7 @@ def test_a_new_name_carrying_a_credential_is_refused_and_never_echoed(
         str(dict(answer.headers)),
         printed.out,
         printed.err,
-        *_logged(caplog),
+        *renderings(caplog),
     )
     for rendering in surfaces:
         assert PASTED not in rendering
@@ -1316,33 +1316,6 @@ def test_the_line_strips_a_credential_out_of_a_stored_name() -> None:
     # the last `@` goes, which is the strip's own rule rather than this
     # composer's.
     assert line == "agent https://example.invalid/agent renamed to poet"
-
-
-def _logged(caplog: pytest.LogCaptureFixture) -> list[str]:
-    """Every record written while a request ran, three ways.
-
-    Both formats this server writes one in, because a value kept out of
-    a response body and written to a log line is not kept; and then the
-    record itself, its whole attribute dictionary, its unformatted
-    arguments and whatever exception it carries. That third reading is
-    the one the two formatters cannot give: they print the message, so a
-    value that arrived as a stray attribute, as an argument no format
-    string consumed, or on an attached exception is invisible to both of
-    them and is still in the object any other handler serializes whole.
-    This is the walk the #381-era suites use, at the surface a rename's
-    caller text can reach.
-    """
-    text = logging.Formatter(logs.TEXT_FORMAT)
-    return [
-        rendering
-        for record in caplog.records
-        for rendering in (
-            logs.JsonFormatter().format(record),
-            text.format(record),
-            f"{record.getMessage()}\n{record.__dict__!r}\n{record.args!r}\n"
-            f"{record.exc_info!r}\n{record.exc_text!r}",
-        )
-    ]
 
 
 # Shared prompt fragments
