@@ -275,7 +275,7 @@ read-once fold. The deletion test keeps the value type in
 
 ## Milestones
 
-- [x] [**M1: the event, its value, its docs**](2026-09-06-checkin-body-event-implementation.md#m1-the-event-its-value-its-docs) (PR TBD). The value type
+- [x] [**M1: the event, its value, its docs**](2026-09-06-checkin-body-event-implementation.md#m1-the-event-its-value-its-docs) (PR #435). The value type
   with its bound and this plan's reasoning beside it; the variant at
   DEBUG with the `said` fields and the nullable body; the emission
   and the read-once fold in `check_version`; the sentinel, carried,
