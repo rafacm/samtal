@@ -199,6 +199,24 @@ def test_the_import_count_line_is_the_same_bytes_either_way(
     assert at_a_terminal[0] == piped[0]
 
 
+def test_the_apply_success_line_is_the_same_bytes_either_way(run) -> None:
+    """The other sentence #426 put on this stream, held to the same
+    licence: the affordance re-presents what the non-terminal path
+    delivers and changes none of it, so what is left on the screen once
+    the line has erased itself is the sentence and nothing else.
+
+    One store and two runs, unlike the import's case above: an apply
+    installs the same stored world however many times it is run, so the
+    two runs are comparable without a second database.
+    """
+    piped = _captured(run, ("apply",), terminal=False)
+    at_a_terminal = _captured(run, ("apply",), terminal=True)
+
+    assert piped[1] == cli.INSTALLED + "\n"
+    assert _after_the_line(at_a_terminal[1]) == cli.INSTALLED + "\n"
+    assert at_a_terminal[0] == piped[0]
+
+
 @pytest.mark.parametrize("verb", ["import", "apply"])
 def test_the_line_takes_itself_back_off_the_screen(run, document: Path, verb: str) -> None:
     """What the erase is for: whatever prints next prints into an empty
