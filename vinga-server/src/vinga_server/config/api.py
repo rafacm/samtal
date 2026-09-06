@@ -78,6 +78,7 @@ from vinga_server.config.docgen import API_OPTIONS_NOTE
 from vinga_server.config.entities import (
     BINDING_NOTICE,
     BINDING_UNSERVED_NOTICE,
+    DEFAULT_AGENT_UNSERVED_NOTICE,
     RENAME_UNSERVED_NOTICE,
     RESTART_NOTICE,
     SNAPSHOT_NOTICE,
@@ -2654,7 +2655,11 @@ def _writes(api: FastAPI) -> None:
         pending.retire_all()
         return _acknowledge(
             f"default agent {spoken_identity(name)}",
-            _binding_notice(_unloaded([name], loaded), snapshot_only),
+            _binding_notice(
+                _unloaded([name], loaded),
+                snapshot_only,
+                unserved=DEFAULT_AGENT_UNSERVED_NOTICE,
+            ),
         )
 
     @api.delete(
@@ -2801,10 +2806,24 @@ def _applied_notice(
     entry: Applied, loaded: Collection[str], snapshot_only: bool
 ) -> entities.Notice:
     """When one applied entry takes effect: the settings' notice where
-    it depends on the running server, and the kind's own otherwise."""
+    it depends on the running server, and the kind's own otherwise.
+
+    The two settings are asked the same two questions the routes that
+    write them ask, and told apart by the section, because the sentence
+    an unloaded agent earns is about the row that named it: an imported
+    `default_agent` entry was answered with the binding sentence, and a
+    document that bound no device was told about a binding it never
+    contained (#424). This is the path that specimen came down, so the
+    branch is here as well as at the route.
+    """
     if entry.section in _SECTION_NOTICE:
         return _SECTION_NOTICE[entry.section]
-    return _binding_notice(_unloaded(entry.agents, loaded), snapshot_only)
+    unloaded = _unloaded(entry.agents, loaded)
+    if entry.section == "default_agent":
+        return _binding_notice(
+            unloaded, snapshot_only, unserved=DEFAULT_AGENT_UNSERVED_NOTICE
+        )
+    return _binding_notice(unloaded, snapshot_only)
 
 
 def _acknowledge(what: str, notice: entities.Notice = RESTART_NOTICE) -> dict[str, Any]:
@@ -2850,9 +2869,12 @@ def _bound_agents(agents: Sequence[str]) -> str:
 
 
 def _binding_notice(
-    unloaded: Sequence[str] = (), snapshot_only: bool = False
+    unloaded: Sequence[str] = (),
+    snapshot_only: bool = False,
+    unserved: entities.Notice = BINDING_UNSERVED_NOTICE,
 ) -> entities.Notice:
-    """When a device write takes effect, which depends on two things.
+    """When a write to one of the two live rows takes effect, which
+    depends on two things and a half.
 
     The binding itself is live. The agent it names may not be: a server
     builds an agent's pipeline when it installs a world, so a binding to
@@ -2872,10 +2894,18 @@ def _binding_notice(
     says. Written here rather than at the five call sites because this
     is where a device write's answer is decided, and there is no second
     write path that decides it.
+
+    `unserved` is the half, and it is the caller's because it is the one
+    thing this function cannot ask: which of the two live rows was
+    written. The two questions above are the same for both, and the
+    sentence an unloaded agent earns is not, because a default agent is
+    not a binding (#424). A parameter rather than a second copy of this
+    decision beside it, so the two rows cannot come to disagree about
+    when a write lands.
     """
     if snapshot_only:
         return SNAPSHOT_NOTICE
-    return BINDING_UNSERVED_NOTICE if unloaded else BINDING_NOTICE
+    return unserved if unloaded else BINDING_NOTICE
 
 
 def _rename_notice(renamed: Renamed, snapshot_only: bool) -> entities.Notice:

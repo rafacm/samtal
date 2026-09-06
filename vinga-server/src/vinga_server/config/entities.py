@@ -155,15 +155,15 @@ class Notice:
     sentence: str
 
 
-# When a write takes effect. Six notices, because there are six
+# When a write takes effect. Seven notices, because there are seven
 # answers, and each is a fact of what was written rather than of the
 # route or the command that wrote it: the descriptors below name one
 # each, and the three write paths choose between them where the answer
 # depends on something a kind cannot know (`api._binding_notice`, which
-# asks whether the agent a binding names is being served,
-# `api._rename_notice`, which asks what a rename's transaction moved,
-# and `cli._secret_notice`, which asks which kind a credential hangs
-# on).
+# asks whether the agent a live row names is being served and which of
+# the two live rows was written, `api._rename_notice`, which asks what a
+# rename's transaction moved, and `cli._secret_notice`, which asks which
+# kind a credential hangs on).
 
 # The whole of what a running server still reads once and never again,
 # which is the file half: the port, the directories, the limits, the
@@ -212,7 +212,8 @@ BINDING_NOTICE = Notice(
 # server and travels beside the sentence as `applies`; which command
 # crosses that boundary is a fact of a client's grammar, and a client
 # is a program this one neither ships nor versions. So the sentence
-# states, and the client advises out of `cli.REMEDIES`.
+# states, and a client that knows the set speaks in its own words
+# instead, out of `cli.SPOKEN`; one that does not quotes this.
 APPLY_NOTICE = Notice(
     applies=(Applies.RELOAD,),
     sentence=(
@@ -289,6 +290,29 @@ RENAME_UNSERVED_NOTICE = Notice(
         "it under the old name: the renamed agent arrives with the install that "
         "applies the stored configuration, and a device that resolves to it, by its "
         "own binding or by the default agent, reaches it at the check-in after that."
+    ),
+)
+
+# The sixth, for the default agent naming an agent this server is not
+# serving yet. Same two boundaries as the binding above and for the same
+# pair of reasons: the stored row is live, so a device meets it at its
+# next check-in, and the agent it names arrives at the install that adds
+# it.
+#
+# It cannot borrow `BINDING_UNSERVED_NOTICE` either, and for a reason
+# that reached an operator (#424): "The binding" names a row a
+# `write_device` just wrote, and a document that set a default agent and
+# bound no device contains no binding at all, so the sentence was about
+# something the operator had never written. What this one says instead is
+# what a default agent is, which is the fact the binding sentence has no
+# room for: it covers every device that no binding of its own claims, so
+# the devices it is true of are precisely the ones nobody named.
+DEFAULT_AGENT_UNSERVED_NOTICE = Notice(
+    applies=(Applies.RELOAD, Applies.CHECK_IN),
+    sentence=(
+        "The default agent covers every device that has no binding of its own, and "
+        "this server is not serving the agent it names yet: the agent arrives with "
+        "the install that adds it, and a device reaches it at the check-in after that."
     ),
 )
 
@@ -905,6 +929,7 @@ __all__ = [
     "API_OPTIONS_NOTE",
     "BINDING_NOTICE",
     "BINDING_UNSERVED_NOTICE",
+    "DEFAULT_AGENT_UNSERVED_NOTICE",
     "CONFIG_FILE",
     "ENTITIES",
     "EXAMPLES",
