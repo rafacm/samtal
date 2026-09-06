@@ -68,6 +68,7 @@ from vinga_server.config.models import (
     ProvidersConfig,
     check_mcp_entry_names,
     check_references,
+    holds_control_character,
     is_env_name,
     is_secret_option,
     is_valid_fragment_name,
@@ -141,12 +142,6 @@ _NOT_AN_MCP_SLOT = (
     + ", for example headers.Authorization, which is where the value would "
     "otherwise have been written as a $VAR reference"
 )
-
-# What no identity may carry: the C0 and C1 control characters and DEL.
-# A slash is refused separately, because a slash is the one character
-# whose presence changes what a path means rather than what it looks
-# like.
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 # An HTTP header name, RFC 9110's token production. The key half of a
 # `headers.` slot names the header a request would carry, so what a
@@ -2274,7 +2269,16 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
     """The entity exists and the slot is one it can have. Slots are
     defined, not arbitrary: a provider's is a secret-shaped option name,
     an MCP server's is a dotted env or headers path, which is where the
-    value would otherwise have been written as a $VAR reference."""
+    value would otherwise have been written as a $VAR reference.
+
+    Every one of these three refusals names the entity the slot hangs
+    on, and it names it through `entity_location` rather than by joining
+    the section to the identity here. Each of them is reached only after
+    `_entry` has found the row, so the name in them is a STORED one and
+    can hold what a write refuses today; a location spelled by hand is
+    how one entry comes to be named two ways, which is the duplication
+    #413 gave `entity_location` a home to end (#414).
+    """
     descriptor = _HOLDER_OF[location.kind]
     identity = addressed(descriptor, location.identity)
     if location.kind == "provider":
@@ -2287,11 +2291,12 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
             raise ConfigError(_NOT_A_PROVIDER_SLOT)
         # A slot is addressed in a path of its own, so it obeys the same
         # rule a name does.
-        _check_addressable(f"providers.{stage}.{name}", "slot", location.slot)
+        _check_addressable(entity_location(descriptor, stage, name), "slot", location.slot)
         return
 
     if _entry(domain, descriptor, identity) is None:
         raise UnknownEntityError(_missing(descriptor))
+    written_at = entity_location(descriptor, *identity)
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:
         raise ConfigError(_NOT_AN_MCP_SLOT)
@@ -2301,13 +2306,13 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
     # slot addressable.
     if group == "env" and not is_env_name(key):
         raise ConfigError(
-            f"mcp_servers.{location.identity}: the key after env. has to be the name "
+            f"{written_at}: the key after env. has to be the name "
             f"of an environment variable, since that is what the value would "
             f"otherwise have referenced, for example env.API_ACCESS_TOKEN"
         )
     if group == "headers" and not _HEADER_TOKEN_RE.match(key):
         raise ConfigError(
-            f"mcp_servers.{location.identity}: the key after headers. has to be an "
+            f"{written_at}: the key after headers. has to be an "
             f"HTTP header name, since that is the header the request would carry, "
             f"for example headers.Authorization"
         )
@@ -2728,6 +2733,12 @@ def _check_addressable(location: str, what: str, value: str) -> None:
     by this check. The refusal names the rule and the kind of character,
     never the value: what lands in a slot argument by mistake is a
     credential.
+
+    Which is why the control-character half asks
+    `models.holds_control_character` rather than a class of its own: the
+    same set is what `models.spoken_identity` escapes out of a row this
+    check never saw, and a write refusing a set a refusal did not escape
+    would be one rule written down twice (#414).
     """
     if "/" in value:
         raise ConfigError(
@@ -2735,7 +2746,7 @@ def _check_addressable(location: str, what: str, value: str) -> None:
             f"segment, which is how it is addressed over the configuration API. "
             f"Spaces, percent signs and characters outside ASCII are fine"
         )
-    if _CONTROL_RE.search(value):
+    if holds_control_character(value):
         raise ConfigError(
             f"{location}: the {what} contains a control character, and it has to be "
             f"one URL path segment, which is how it is addressed over the "
