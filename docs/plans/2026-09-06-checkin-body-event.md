@@ -194,3 +194,70 @@ read-once fold. The deletion test keeps the value type in
   Documentation footprint: `docs/devices/README.md` (maintained board
   procedures), `docs/reference/events.md` (generated, through its
   generator), `CHANGELOG.md`, the census manifest.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, 2026-09-06,
+against commit `201e3739`; the reviewer ran 5m25s. Verdict: not
+ready, pending the P1 amendments.
+
+1. **P1: the proposed quiet path is not quiet and performs
+   attacker-sized work.** `ServerEvents.emit` always invokes the
+   closure and dispatches to every tap; dispatch deep-copies the
+   payload before `LiveEvents` rejects it by level, and
+   `bounded_descriptor` scans its whole input before slicing. An
+   unauthenticated caller could force a second attacker-sized
+   representation plus copies on every request with no DEBUG
+   subscriber. The plan must bound the serialization work itself and
+   price the per-request cost honestly, or name an emitter-level
+   interest gate and everything needed to make it correct.
+
+2. **P1: the truncation and sanitization mechanism described does
+   not exist.** `Descriptor` rejects rather than sanitizes;
+   `bounded_descriptor` removes unprintables and slices silently.
+   The plan must specify the exact transformation, the literal
+   truncation marker, whether the limit includes it, how the
+   decision site and the value class each enforce the bound, and
+   tests asserting the marker, the maximum final length,
+   printability and absence of material past the cut.
+
+3. **P1: the event's catalog identity is unresolved.** Every variant
+   belongs to a named declaration; joining `OTA_CHECK` would emit two
+   records under one name and break single-record assertions. The
+   plan must choose a separate event code and name the declaration
+   constant, variant class, exact template, exact `ARGS`, carried
+   fields and exports.
+
+4. **P2: the event-baseline inventory work is missing.** The
+   repository requires a driver per emit path and a `CARRIED` row per
+   driver, with a driver-count pin; the four current `check_version`
+   paths are inventoried and the fifth must be.
+
+5. **P2: the plain-log assertion cannot pass as described.** The text
+   formatter renders only the message; structured fields reach the
+   JSON formatter alone. Positive assertions belong on the payload,
+   the JSON formatter, an attached tap and the live stream; the text
+   formatter and message arguments get negative assertions.
+
+6. **P2: the documented capture procedure is ordered so the event can
+   be missed.** The live stream retains nothing; the tail must be
+   started and connected before the board is reset.
+
+7. **P2: DEBUG is not one off-switch across surfaces.** Live
+   filtering is per subscription after dispatch; retained-log
+   filtering is `server.log_level`. A deployment already running at
+   DEBUG starts retaining every check-in body at upgrade, and every
+   attached tap receives the emission before its own filtering. The
+   plan must distinguish the two filters, price the upgrade behavior,
+   and stop claiming the event "reaches nobody".
+
+8. **P2: folding away `_read_json_object` changes a deliberately
+   preserved import surface.** The OTA package re-exports it as part
+   of what stayed importable across the package split; a silent
+   removal must not ride this feature.
+
+9. **P3: "the body as sent" overstates parse-and-reserialize.**
+   Escapes and numbers normalize, `ensure_ascii` applies, duplicate
+   keys collapse to the last. Call it a compact serialization of the
+   parsed object preserving surviving key insertion order, and state
+   the `ensure_ascii` and non-finite-number policy.
