@@ -25,6 +25,13 @@ renderings over those. The export is the one where stripping changes an
 outcome rather than a rendering, so it has cases of its own: a document
 exported from a store holding such a row used to be one its own import
 path refused whole.
+
+Two later sections carry the rule past the displays, because the same
+row is spoken as well as shown. A refusal says a stored identity on a
+server's stderr as it fails to start (#382), and the build that runs
+after the composition says one again in a vocabulary of its own: the
+label every provider refusal names an entry by, and the identity every
+event about that provider carries (#413).
 """
 
 import json
@@ -39,10 +46,13 @@ from pydantic import BaseModel
 from sqlalchemy import insert
 
 from tests.support.config_cli import chain, document, runner
+from tests.support.events import both_formats, fields_of, only
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs, serving
-from vinga_server.config import entities, views
+from vinga_server.app import StartupFailed, create_app, startup_failure
+from vinga_server.build_info import CONTAINER_ENV
+from vinga_server.config import Config, entities, views
 from vinga_server.config.api import build_api
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.loader import ConfigError, StorageError, compose_config
@@ -58,6 +68,8 @@ from vinga_server.config.models import (
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key, load_keys
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
+from vinga_server.events import assembly
+from vinga_server.providers import ProviderError, build_entry, build_world
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -1141,3 +1153,243 @@ def test_the_cli_refuses_such_a_key_on_both_streams(
     printed = capsys.readouterr()
     assert 'a key in "mcp_servers.fresh.env"' in printed.err
     _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
+
+
+# The provider build, which names an entry after the composition rather
+# than inside it
+#
+# The refusals above are the composition's own: they are raised while a
+# snapshot is being turned into a `Config`, by the renderer #382
+# converged. What runs next is the build, and it names the same stored
+# entries again in a vocabulary of its own: the label every refusal
+# about one provider entry carries (`providers.<stage>.<name>`), the
+# sentence an agent missing a stage is refused with, the location
+# `provider_for_agent` composes, and the identity every provider event
+# is stamped with. None of those went through the strip, so a legacy
+# name reached them whole (#413).
+#
+# The surfaces are traced rather than assumed, and they are not the
+# composition's. A build refusal at boot is carried out of the lifespan
+# as its sentence and printed to stderr by the entry point; a build
+# refusal during an APPLY is deliberately not, since `_built` answers a
+# failed apply with a fixed sentence and logs the exception class alone;
+# and the stamped identity leaves through the events, in the payload
+# every provider event carries.
+
+# A lawful entry name, for the control below: what these renderings say
+# about an entry a write would accept has to be exactly what they said
+# before the strip was on them.
+LAWFUL = "claude"
+
+THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+
+def world_named(name: str, llm_type: str = "mock", **stages: str) -> Config:
+    """A one-agent configuration whose llm entry and whose agent both
+    carry `name`, composed the way a stored snapshot is: the domain half
+    as a mapping through `compose_config`, which is the route a boot
+    takes from the database to a `Config`.
+
+    `stages` is whatever the agent should say about its own, so a case
+    about a stage nothing names leaves that stage out rather than
+    restating the world around it, and `llm_type` is what the entry
+    claims to be, so a case about a build that refuses says so here.
+    """
+    return compose_config(
+        FileConfig(),
+        {
+            "providers": {
+                "llm": {name: {"type": llm_type}},
+                "asr": {"ears": {"type": "mock"}},
+                "tts": {"voice": {"type": "mock"}},
+                "vad": {"gate": {"type": "mock"}},
+            },
+            "agents": {
+                name: {
+                    "prompt": "hi",
+                    "asr": "ears",
+                    "tts": "voice",
+                    "vad": "gate",
+                    **stages,
+                }
+            },
+            "default_agent": name,
+        },
+        "the test's database",
+    )
+
+
+async def test_the_build_of_a_stored_entry_names_it_without_its_credential(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The label every refusal about one entry is built from, which is
+    composed where a provider is constructed and handed to every factory
+    and every option reader under it: an unknown type, a bad option, a
+    missing extra and a library that would not start all name the entry
+    through this one string."""
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as caught:
+        await build_entry("llm", HISTORIC, ProviderConfig(type="no-such-type"))
+
+    assert f"providers.llm.{HISTORIC_SHOWN}: unknown llm provider type" in str(caught.value)
+    _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
+async def test_the_owner_refusing_after_construction_names_it_the_same_way(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the label, and the reason there is one string
+    and not two: the checks that run once an object exists are the
+    owner's rather than the constructor's, so `build_entry` composes the
+    label again for the egress rule it applies. An entry refused by one
+    half and an entry refused by the other are the same entry, and have
+    to be named alike."""
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as caught:
+        await build_entry("llm", HISTORIC, ProviderConfig(type="mock", egress=False))
+
+    assert f'providers.llm.{HISTORIC_SHOWN}: "egress" is decided' in str(caught.value)
+    _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
+async def test_an_agent_with_no_provider_for_a_stage_is_named_without_its_credential(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The build's own sentence about an agent, which the composition
+    cannot say: a stage naming nothing anywhere resolves to None rather
+    than to a reference that does not exist, so `check_references` has
+    nothing to refuse and the world refuses it instead."""
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as caught:
+        await build_world(world_named(HISTORIC))
+
+    assert f"agents.{HISTORIC_SHOWN}: no llm provider is named" in str(caught.value)
+    _carries_no_sentinel(chain(caught.value), *_logged(caplog))
+
+
+def test_the_location_a_stage_resolves_through_carries_no_credential() -> None:
+    """What `provider_for_agent` answers beside the name: the layer the
+    stage came from, which its docstring calls what an error message
+    quotes. No caller renders it today, which is what makes the strip
+    here defence rather than a fix of a reachable leak; it is the
+    composition every one of those messages would be built from."""
+    config = world_named(HISTORIC, llm=HISTORIC)
+
+    assert config.provider_for_agent(HISTORIC, "llm") == (
+        HISTORIC,
+        f"agents.{HISTORIC_SHOWN}.llm",
+    )
+
+
+async def test_every_event_about_a_built_entry_names_it_without_its_credential(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The identity the build stamps onto every provider it makes, which
+    is the one thing a session holds instead of the configuration the
+    provider came from. It reaches the payload of every provider event,
+    and an event is written to a log, to whatever collects one, to the
+    live stream and into the conversation's own record.
+
+    The agent this event is about is a lawful name deliberately. An
+    agent's own name reaches this same payload from the session that
+    emitted it rather than from anything the provider build composed,
+    as it does every event in the runtime that names one, and that is a
+    surface of its own rather than a consequence of this one.
+    """
+    provider = await build_entry("llm", HISTORIC, ProviderConfig(type="mock"))
+    try:
+        payload = assembly.provider_failure(
+            LAWFUL, THREAD, "llm", provider, ConnectionRefusedError(), 0.5
+        ).payload()
+    finally:
+        await provider.close()
+
+    assert payload["provider"] == HISTORIC_SHOWN
+    _carries_no_sentinel(_rendered(payload), *_logged(caplog))
+
+
+async def test_the_container_warning_names_the_entry_without_its_credential(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The one event the build emits itself, which names the entry twice
+    over: in the sentence an operator reads and in the structured field
+    beside it (#340)."""
+    monkeypatch.setenv(CONTAINER_ENV, "1")
+    entry = ProviderConfig.model_validate(
+        {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:11434/v1",
+            "model": "qwen3:8b",
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        provider = await build_entry("llm", HISTORIC, entry)
+    await provider.close()
+
+    record = only(caplog, "provider_reaches_loopback")
+    assert fields_of(record)["provider"] == HISTORIC_SHOWN
+    assert f"providers.llm.{HISTORIC_SHOWN}" in record.getMessage()
+    _carries_no_sentinel(both_formats(caplog))
+
+
+def test_a_boot_refused_by_the_build_reaches_an_operator_carrying_none(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Where a build refusal is actually met: the lifespan catches it,
+    records the sentence and raises `StartupFailed`, and `serving.run`
+    prints exactly that sentence to stderr and leaves with 1.
+
+    An apply is deliberately not a second case here. A build that
+    refuses under a reload answers with a fixed sentence and logs the
+    exception class alone, so the label never reaches that surface at
+    all, which the assertion on the log below is the honest half of.
+    """
+    app = create_app(world_named(HISTORIC, llm_type="no-such-type", llm=HISTORIC))
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(StartupFailed):
+        with TestClient(app):
+            pass
+
+    failure = startup_failure(app)
+    assert failure is not None
+    assert f"providers.llm.{HISTORIC_SHOWN}: unknown llm provider type" in failure
+    _carries_no_sentinel(failure, *_logged(caplog))
+
+
+async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The control. `url_credential` answers None to a name that is not
+    a URL carrying one, so every rendering above is byte-identical to
+    what it was before the strip was put on it."""
+    monkeypatch.setenv(CONTAINER_ENV, "1")
+    with pytest.raises(ProviderError) as unknown:
+        await build_entry("llm", LAWFUL, ProviderConfig(type="no-such-type"))
+    with pytest.raises(ProviderError) as declared:
+        await build_entry("llm", LAWFUL, ProviderConfig(type="mock", egress=False))
+    with pytest.raises(ProviderError) as unnamed:
+        await build_world(world_named(LAWFUL))
+    with caplog.at_level(logging.WARNING):
+        provider = await build_entry(
+            "llm",
+            LAWFUL,
+            ProviderConfig.model_validate(
+                {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:11434/v1",
+                    "model": "qwen3:8b",
+                }
+            ),
+        )
+    payload = assembly.provider_failure(
+        LAWFUL, THREAD, "llm", provider, ConnectionRefusedError(), 0.5
+    ).payload()
+    await provider.close()
+
+    assert str(unknown.value).startswith(f"providers.llm.{LAWFUL}: unknown llm provider type")
+    assert str(declared.value).startswith(f'providers.llm.{LAWFUL}: "egress" is decided')
+    assert str(unnamed.value).startswith(f"agents.{LAWFUL}: no llm provider is named")
+    assert payload["provider"] == LAWFUL
+    assert fields_of(only(caplog, "provider_reaches_loopback"))["provider"] == LAWFUL
+    assert world_named(LAWFUL, llm=LAWFUL).provider_for_agent(LAWFUL, "llm") == (
+        LAWFUL,
+        f"agents.{LAWFUL}.llm",
+    )
