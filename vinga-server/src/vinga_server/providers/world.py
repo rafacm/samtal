@@ -244,12 +244,24 @@ async def build_entry(
     # about this provider calls it, and an event is written to a log, to
     # whatever collects one, to the live stream and into the
     # conversation's own record (#413).
+    #
+    # Two of the five go through it and three cannot need it. The name
+    # is a stored identity. The model is a stored option, free text a
+    # vendor names, and the URL rule is write-time only, so a row
+    # written before it can hold `model:
+    # https://user:password@host/m` and still build; what the entry RUNS
+    # is `provider.model` and is untouched, because that string is what
+    # goes into the request. The stage is one of four words this
+    # repository chose, the type is one of the table's own keys, since a
+    # type that is not is refused before anything is built, and the host
+    # is `urlsplit().hostname`, which has no userinfo in it by
+    # construction.
     identity = ProviderIdentity(
         stage=stage,
         name=without_url_credential(name),
         type=config.type,
         host=provider.host,
-        model=provider.model,
+        model=None if provider.model is None else without_url_credential(provider.model),
     )
     provider.identity = identity
     _loopback_inside_a_container(identity)
