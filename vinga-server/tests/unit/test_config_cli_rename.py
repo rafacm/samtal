@@ -165,19 +165,16 @@ def test_a_rename_that_moved_the_row_alone_advises_the_install(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Nothing live moved, so the rename waits where every other write
-    of this kind waits, and what an operator reads is two voices in two
-    lines: the server's sentence about the write, and this client's
-    advice about the boundary it states."""
+    of this kind waits, and what an operator reads is the one line this
+    client has for that boundary: the state the rename is in, and the
+    command that ends it."""
     pipeline(run)
 
     code, printed, err = out(run, capsys, "agent", "rename", "sam", "poet")
 
     assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
     assert boundaries(err) == {RELOAD}
-    assert err.splitlines() == [
-        entities.APPLY_NOTICE.sentence,
-        cli.REMEDIES[frozenset({Applies.RELOAD})],
-    ]
+    assert err.splitlines() == [cli.SPOKEN[frozenset({Applies.RELOAD})]]
 
 
 @pytest.mark.parametrize("live", ["binding", "default"])
@@ -185,9 +182,14 @@ def test_a_rename_that_moved_a_live_reference_advises_both_boundaries(
     run, capsys: pytest.CaptureFixture[str], live: str
 ) -> None:
     """A row a running server re-reads as a device asks moved with the
-    agent, so the rename is waiting at two boundaries at once and the
-    sentence is the one written for a rename rather than the one
-    written for a binding."""
+    agent, so the rename is waiting at two boundaries at once, and this
+    client has a line for that pair: the agent is not serving yet, the
+    install is what ends that, and the device follows at its check-in.
+
+    The sentence the server composed for a rename is the one an old
+    client would have printed here, and `boundaries` reads the pair off
+    either voice.
+    """
     pipeline(run)
     if live == "binding":
         assert run("device", "bind", BOARD, "sam") == 0
@@ -199,9 +201,9 @@ def test_a_rename_that_moved_a_live_reference_advises_both_boundaries(
     assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
     assert boundaries(err) == {RELOAD, CHECK_IN}
     assert err.splitlines() == [
-        entities.RENAME_UNSERVED_NOTICE.sentence,
-        cli.REMEDIES[frozenset({Applies.RELOAD, Applies.CHECK_IN})],
+        cli.SPOKEN[frozenset({Applies.RELOAD, Applies.CHECK_IN})]
     ]
+    assert entities.RENAME_UNSERVED_NOTICE.sentence not in err
 
 
 def test_a_rename_against_a_handed_configuration_prints_the_sentence_alone(
@@ -211,10 +213,10 @@ def test_a_rename_against_a_handed_configuration_prints_the_sentence_alone(
     rename's: nothing this server serves reads the store, so what the
     write can promise is that the rows are stored.
 
-    One line and not two, and that is the client's half of the same
-    rule: no command of this grammar crosses a store boot, so there is
-    nothing to advise and the server's sentence stands alone rather
-    than being guessed at.
+    The server's own sentence and not this client's, which is the
+    client's half of the same rule: no command of this grammar crosses a
+    store boot, so there is nothing this side can say instead, and the
+    sentence is quoted rather than guessed at.
     """
     pipeline(run)
     run.runtime["snapshot_only"] = True

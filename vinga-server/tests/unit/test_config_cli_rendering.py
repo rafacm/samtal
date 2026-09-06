@@ -36,7 +36,6 @@ import pytest
 from tests.support.config_cli import SECRET, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
-from tests.support.notices import RELOAD, boundaries
 from vinga_server.config import Config, cli, entities, printing
 from vinga_server.config.cli import (
     APPLY_SECTIONS,
@@ -927,6 +926,12 @@ def test_an_import_says_what_the_write_is_waiting_on(
     nothing is installed, so the boundary it is waiting at is the
     operator's to know.
 
+    One line for the whole document since #426, and it is this client's
+    own: the act that was typed, what it wrote, and the state the write
+    is in with the command that ends it. Pinned as bytes rather than
+    through `boundaries`, because the line's whole point is that it
+    replaces the sentence that reading looks for.
+
     One request, which is the other half of the claim: there is no
     second act behind this one to quieten or to turn off.
     """
@@ -934,7 +939,7 @@ def test_an_import_says_what_the_write_is_waiting_on(
 
     printed = capsys.readouterr()
     assert printed.out.splitlines() == [WROTE]
-    assert boundaries(printed.err) == {RELOAD}
+    assert printed.err.splitlines() == [f"imported 1 entry, {cli.NOT_SERVING_YET}"]
     assert len(run.clients) == 1
 
 
@@ -984,9 +989,9 @@ def test_what_an_import_wrote_is_read_before_the_boundary_under_it(run) -> None:
 
     Two streams reach one terminal and only one of them is buffered, so
     what an operator reads in is flush order rather than write order.
-    The lines saying what was written go to stdout and the sentence
-    saying what they are waiting on goes to stderr, and a sentence that
-    arrived above the lines it is about would be a boundary attached to
+    The lines saying what was written go to stdout and the line saying
+    what they are waiting on goes to stderr, and a line that arrived
+    above the entries it counts would be a boundary attached to
     nothing.
 
     Asserted over one shared buffer with two wrappers on it, a buffered
@@ -1005,7 +1010,7 @@ def test_what_an_import_wrote_is_read_before_the_boundary_under_it(run) -> None:
         written = shared.getvalue().decode("utf-8")
 
     assert WROTE in written
-    assert written.index(WROTE) < written.index(entities.APPLY_NOTICE.sentence)
+    assert written.index(WROTE) < written.index(cli.NOT_SERVING_YET)
 
 
 def test_a_refused_document_is_the_whole_answer(
@@ -1144,11 +1149,17 @@ def test_an_imported_notice_arrives_neutralized_rather_than_dropped(
     rendering writes a far side's sentence to: what a notice loses is
     the characters that steer a terminal, and it keeps the words. A
     sentence dropped whole would be a boundary an operator was never
-    told about."""
+    told about.
+
+    Quoted at all because the entry names no boundary set this client
+    knows, which is the arm a server's sentence still reaches: a set it
+    does know is answered in this client's own words, and a hostile
+    sentence behind one is never printed at all.
+    """
     cli._imported(cli.IMPORT.read({"entries": [_entry(notice=f"wait{STEERING}")]}))
 
     written = capsys.readouterr().err
-    assert written.startswith("wait?")
+    assert written.splitlines()[-1].startswith("wait?")
     assert STEERING not in written
 
 
@@ -1321,23 +1332,24 @@ def test_an_unknown_boundary_is_never_printed(
 
 # And what this client says about a boundary it does know
 #
-# The other half of #386. The server states what is true of the write
-# and this client names the command that crosses the boundary it states,
-# so what reaches an operator is two voices in two lines: the sentence
-# the server composed, and the advice this grammar has about it.
+# The other half of #386, completed by #426. The server states what is
+# true of the write and this client names the command that crosses the
+# boundary it states, and since the token is what travels, whichever
+# side can say the whole of it says it once: where this client knows the
+# set, its own line REPLACES the sentence rather than following it.
 #
-# The advice is printed for a set this client knows and has something to
-# run about, and for nothing else. A set with no command to cross it, an
-# absent set and a set carrying a token this client cannot name all
-# print the sentence alone, which is the same rule the reading keeps one
-# level down: an unknown state is quoted, never guessed at.
+# The replacement happens for a set this client knows and has something
+# to run about, and for nothing else. A set with no command to cross it,
+# an absent set and a set carrying a token this client cannot name all
+# print the server's sentence alone, which is the same rule the reading
+# keeps one level down: an unknown state is quoted, never guessed at.
 
-# The advice a write waiting at a reload is answered with, read from the
-# table rather than written out again: what this asserts is that the
-# client's half is printed, and what it says is the table's business.
-RELOAD_REMEDY = cli.REMEDIES[frozenset({Applies.RELOAD})]
+# What a write waiting at a reload is answered with, read from the table
+# rather than written out again: what this asserts is which voice is
+# printed, and what it says is the table's business.
+RELOAD_LINE = cli.SPOKEN[frozenset({Applies.RELOAD})]
 
-ADVISED = [
+SPOKEN_FOR = [
     ("a set this client knows", [Applies.RELOAD.value], True),
     ("a set with no command that crosses it", [Applies.CHECK_IN.value], False),
     ("no applies at all, from a server older than the field", None, False),
@@ -1347,72 +1359,115 @@ ADVISED = [
 
 
 @pytest.mark.parametrize(
-    ("applies", "advised"),
-    [(applies, advised) for _, applies, advised in ADVISED],
-    ids=[what for what, _, _ in ADVISED],
+    ("applies", "spoken"),
+    [(applies, spoken) for _, applies, spoken in SPOKEN_FOR],
+    ids=[what for what, _, _ in SPOKEN_FOR],
 )
-def test_a_write_is_advised_where_this_client_knows_the_boundary(
-    applies: list[str] | None, advised: bool, capsys: pytest.CaptureFixture[str]
+def test_a_write_is_answered_in_this_clients_words_where_it_knows_the_boundary(
+    applies: list[str] | None, spoken: bool, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """One write acknowledged, through the act that reads the body.
 
-    The server's sentence first and always, because an old client
-    printing it verbatim is what makes a state sentence safe; the
-    client's line under it only where this grammar has something to
-    cross that boundary with.
+    One line either way, and which side wrote it is the whole of what
+    changes: this client's where it can name the state and the command
+    that ends it, and the server's verbatim where it cannot, because an
+    old client printing a state sentence unchanged is what makes a state
+    sentence safe.
     """
     body = ACKNOWLEDGED if applies is None else ACKNOWLEDGED | {"applies": applies}
 
     cli._acknowledged(cli.BIND_DEVICE.read(body))
 
     printed = capsys.readouterr()
-    assert printed.err.splitlines() == [APPLY_NOTICE.sentence] + (
-        [RELOAD_REMEDY] if advised else []
-    )
-    assert (cli.INSTALLS in printed.err) is advised
+    assert printed.err.splitlines() == [RELOAD_LINE if spoken else APPLY_NOTICE.sentence]
+    assert (cli.INSTALLS in printed.err) is spoken
 
 
 @pytest.mark.parametrize(
-    ("applies", "advised"),
-    [(applies, advised) for _, applies, advised in ADVISED],
-    ids=[what for what, _, _ in ADVISED],
+    ("applies", "spoken"),
+    [(applies, spoken) for _, applies, spoken in SPOKEN_FOR],
+    ids=[what for what, _, _ in SPOKEN_FOR],
 )
-def test_an_imported_entry_is_advised_where_this_client_knows_the_boundary(
-    applies: list[str] | None, advised: bool, capsys: pytest.CaptureFixture[str]
+def test_an_imported_entry_is_answered_by_the_side_that_knows_the_boundary(
+    applies: list[str] | None, spoken: bool, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """And the same five states one level down, where the boundaries
-    arrive inside a list of entries rather than beside one write."""
+    arrive inside a list of entries rather than beside one write.
+
+    A document's answer is the count line and what it could not say
+    itself: the set this client knows rides the count line, and each set
+    it does not contributes the server's sentence under it.
+    """
     entry = _entry() if applies is None else _entry(applies=applies)
 
     cli._imported(cli.IMPORT.read({"entries": [entry]}))
 
     printed = capsys.readouterr()
-    assert printed.err.splitlines() == [APPLY_NOTICE.sentence] + (
-        [RELOAD_REMEDY] if advised else []
+    counted = f"imported 1 entry, {cli.NOT_SERVING_YET}" if spoken else "imported 1 entry"
+    assert printed.err.splitlines() == [counted] + (
+        [] if spoken else [APPLY_NOTICE.sentence]
     )
-    assert (cli.INSTALLS in printed.err) is advised
+    assert (cli.INSTALLS in printed.err) is spoken
 
 
-def test_two_entries_waiting_at_one_boundary_are_advised_once(
+def test_a_document_waiting_on_one_install_says_so_once(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The dedupe, on the half that is doing the work.
+    """The collapse, over both sets there is something to run about.
 
     A document that wrote nine entities is waiting on one apply, not on
-    nine, and the advice under the sentence is one thing to do rather
-    than nine. Keyed on the boundary set, so a prose edit that reached
-    one sentence and not another could not split it into two.
+    nine and not on two: `{reload}` and `{reload, check-in}` are waiting
+    on the same install, which is the fact the one command above
+    `INSTALLS` states. So the answer is the act, the count, and the one
+    clause, whatever mixture of the two known sets the entries carried.
     """
     entries = [
         _entry(identity="sam", applies=[Applies.RELOAD.value]),
         _entry(identity="alex", applies=[Applies.RELOAD.value]),
+        _entry(
+            section="devices",
+            identity="aa:bb:cc:dd:ee:ff",
+            notice=entities.BINDING_UNSERVED_NOTICE.sentence,
+            applies=[Applies.RELOAD.value, Applies.CHECK_IN.value],
+        ),
     ]
 
     cli._imported(cli.IMPORT.read({"entries": entries}))
 
     printed = capsys.readouterr()
-    assert printed.out.splitlines() == ["agents.sam: wrote", "agents.alex: wrote"]
-    assert printed.err.splitlines() == [APPLY_NOTICE.sentence, RELOAD_REMEDY]
+    assert printed.out.splitlines() == [
+        "agents.sam: wrote",
+        "agents.alex: wrote",
+        "devices.aa:bb:cc:dd:ee:ff: wrote",
+    ]
+    assert printed.err.splitlines() == [f"imported 3 entries, {cli.NOT_SERVING_YET}"]
+
+
+def test_an_unchanged_entry_is_counted_by_neither_half(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """What the count counts is what this command wrote.
+
+    An entry the store already said is not something the import did, so
+    it is on stdout as its own outcome and nowhere in the line about
+    what is waiting. A document of nothing but those has no line at all,
+    which is what an import that changed nothing has to say about a
+    boundary: there is nothing waiting.
+    """
+    unchanged = _entry(identity="alex", outcome="unchanged", notice=None)
+    entries = [_entry(identity="sam", applies=[Applies.RELOAD.value]), unchanged]
+
+    cli._imported(cli.IMPORT.read({"entries": entries}))
+
+    printed = capsys.readouterr()
+    assert printed.out.splitlines() == ["agents.sam: wrote", "agents.alex: unchanged"]
+    assert printed.err.splitlines() == [f"imported 1 entry, {cli.NOT_SERVING_YET}"]
+
+    cli._imported(cli.IMPORT.read({"entries": [unchanged]}))
+
+    all_unchanged = capsys.readouterr()
+    assert all_unchanged.out.splitlines() == ["agents.alex: unchanged"]
+    assert all_unchanged.err == ""
 
 
 def test_the_boundaries_are_read_as_a_set_and_not_as_a_sequence(
@@ -1423,11 +1478,10 @@ def test_the_boundaries_are_read_as_a_set_and_not_as_a_sequence(
     JSON has no set, so `applies` arrives as a list and the order is
     whatever the server that built it happened to produce; a token
     listed twice is the same answer as a token listed once. Neither is
-    a fact about the write, so neither may reach the remedy lookup or
-    the dedupe: two entries waiting at a reload and a check-in are one
-    line whichever way round each of them arrived, and both of them
-    read the sentence this client has for that pair rather than one of
-    them falling back to the server's sentence alone.
+    a fact about the write, so neither may reach the table lookup: three
+    entries waiting at a reload and a check-in are answered by the one
+    clause whichever way round each of them arrived, rather than one of
+    them falling back to the server's sentence beneath it.
     """
     unserved = entities.BINDING_UNSERVED_NOTICE
     both = [Applies.RELOAD.value, Applies.CHECK_IN.value]
@@ -1440,24 +1494,22 @@ def test_the_boundaries_are_read_as_a_set_and_not_as_a_sequence(
     cli._imported(cli.IMPORT.read({"entries": entries}))
 
     printed = capsys.readouterr()
-    assert printed.err.splitlines() == [
-        unserved.sentence,
-        cli.REMEDIES[frozenset({Applies.RELOAD, Applies.CHECK_IN})],
-    ]
+    assert printed.err.splitlines() == [f"imported 3 entries, {cli.NOT_SERVING_YET}"]
+    assert unserved.sentence not in printed.err
 
 
 def test_two_entries_from_an_older_server_keep_both_sentences(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The mixed-version arm, and why the key is not the set alone.
+    """The mixed-version arm, and why the dedupe is by sentence.
 
     Every entry from a server older than the vocabulary carries the same
     empty set, so a boundary-only key would collapse an ordinary stored
     entry and a device binding, which are two different sentences, into
     one and tell an operator half of what they are waiting on. With no
     set to key on, the sentence is what is left, and both are printed
-    with nothing under either: this client cannot advise about a
-    boundary that was never stated.
+    under a count line carrying no clause: this client cannot say what
+    to run about a boundary that was never stated.
     """
     entries = [
         _entry(identity="sam"),
@@ -1472,7 +1524,136 @@ def test_two_entries_from_an_older_server_keep_both_sentences(
 
     printed = capsys.readouterr()
     assert printed.err.splitlines() == [
+        "imported 2 entries",
         APPLY_NOTICE.sentence,
         entities.BINDING_NOTICE.sentence,
     ]
     assert cli.INSTALLS not in printed.err
+
+
+def test_a_mixed_document_keeps_the_remedy_and_the_quoted_sentence(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The answer both halves have to survive.
+
+    One entry this client can speak for and one from a server whose
+    boundary it cannot name: the collapse may not swallow the sentence
+    it did not compose, and the quoting may not cost the operator the
+    one command there is to run. So the clause rides the count line and
+    the unreadable entry's sentence goes under it, and the token this
+    client could not read reaches neither stream.
+    """
+    entries = [
+        _entry(identity="sam", applies=[Applies.RELOAD.value]),
+        _entry(
+            section="devices",
+            identity="aa:bb:cc:dd:ee:ff",
+            notice=entities.BINDING_NOTICE.sentence,
+            applies=[UNKNOWN_BOUNDARY],
+        ),
+    ]
+
+    cli._imported(cli.IMPORT.read({"entries": entries}))
+
+    printed = capsys.readouterr()
+    assert printed.err.splitlines() == [
+        f"imported 2 entries, {cli.NOT_SERVING_YET}",
+        entities.BINDING_NOTICE.sentence,
+    ]
+    assert UNKNOWN_BOUNDARY not in printed.out + printed.err
+
+
+def test_one_answer_renders_the_same_bytes_twice(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Determinism, on the surface this milestone re-cut, and on each
+    stream separately: what is printed is a function of the answer, so
+    two renderings of one answer are the same bytes on stdout and the
+    same bytes on stderr.
+
+    The answer carries both arms, because the one thing here that is not
+    a fixed string is the dedupe, and a dedupe over an unordered
+    container is where a rendering comes to differ between two runs of
+    one program.
+    """
+    answer = {
+        "entries": [
+            _entry(identity="sam", applies=[Applies.RELOAD.value]),
+            _entry(identity="alex", notice=entities.BINDING_NOTICE.sentence),
+            _entry(identity="kim", applies=[UNKNOWN_BOUNDARY]),
+        ]
+    }
+
+    cli._imported(cli.IMPORT.read(answer))
+    first = capsys.readouterr()
+    cli._imported(cli.IMPORT.read(answer))
+    second = capsys.readouterr()
+
+    assert first.out == second.out
+    assert first.err == second.err
+    # And it really is the answer this case is about rather than an
+    # empty one compared with itself twice.
+    assert first.err.splitlines()[0] == f"imported 3 entries, {cli.NOT_SERVING_YET}"
+
+
+# What a single write's own answer may put where a sentence belongs
+#
+# The import surface's cases above, on the surface that gained the same
+# door in #426: a write's acknowledgement carries a sentence a server of
+# any age composed, and the arm that quotes one is the arm a hostile or
+# broken far side reaches. What replaces a sentence is this module's own
+# text and can hold nothing, so the cases plant the boundary states the
+# quoting arm is taken on.
+
+
+def test_a_write_rendering_does_not_let_a_notice_steer_a_terminal(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Read through the act rather than handed a dictionary, so what is
+    exercised is the shape this client insists on and then the renderer
+    it feeds, which is the path an answer really takes."""
+    body = ACKNOWLEDGED | {"notice": f"wait{STEERING}"}
+
+    cli._acknowledged(cli.BIND_DEVICE.read(body))
+
+    printed = capsys.readouterr()
+    written = printed.out + printed.err
+    assert STEERING not in written
+    # Neutralized rather than dropped: a sentence dropped whole would be
+    # a boundary an operator was never told about.
+    assert printed.err.startswith("wait?")
+
+
+def test_an_unprintable_notice_never_leaves_as_an_exception() -> None:
+    """The failure a stream assertion cannot see: `print` encodes, and a
+    lone surrogate raises `UnicodeEncodeError` from inside it, which
+    leaves this boundary as a traceback carrying the value.
+
+    Written to a real encoding rather than to pytest's capture, because
+    what raises is the encoder and a buffer that never encodes cannot
+    raise.
+    """
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+    body = ACKNOWLEDGED | {"notice": f"wait{SURROGATE}"}
+
+    with contextlib.redirect_stderr(stream):
+        cli._acknowledged(cli.BIND_DEVICE.read(body))
+
+    stream.flush()
+    written = stream.buffer.getvalue().decode("utf-8")
+    assert "wait" in written
+    assert SURROGATE not in written
+
+
+def test_no_refused_acknowledgement_is_retained_on_its_chain() -> None:
+    """The half no assertion about a stream can make: a validation error
+    retains the input it rejected, and the input here is an
+    acknowledgement carrying a pasted credential in both the fields a
+    body composes."""
+    body = {"wrote": {"agent": SECRET}, "notice": SECRET, "applies": []}
+
+    with pytest.raises(ConfigError) as caught:
+        cli.BIND_DEVICE.read(body)
+
+    assert str(caught.value) == cli.UNREADABLE_WRITE
+    assert SECRET not in _chain(caught.value)

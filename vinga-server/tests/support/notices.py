@@ -14,11 +14,12 @@ to a notice that keeps its boundary keeps every one of them green.
 
 What it no longer does is guess. A body carries `applies` beside the
 sentence, so the boundary is read off the field where there is a body;
-what a command printed is matched against the sentences this server
-composes, each of which carries its own boundaries
-(`entities.Notice`). Neither is a table of phrases kept by hand beside
-the real one, which is what this module used to be and what a prose
-edit could silently move.
+what a command printed is matched against the lines either side
+composes, each of which carries its own boundaries (`entities.Notice`
+for the server's, `cli.SPOKEN` for the ones the client says instead of
+one). Neither is a table of phrases kept by hand beside the real one,
+which is what this module used to be and what a prose edit could
+silently move.
 
 The four, and why they are four rather than two:
 
@@ -39,7 +40,7 @@ once, which is why the answer is a set rather than a token.
 
 from collections.abc import Mapping
 
-from vinga_server.config import entities
+from vinga_server.config import cli, entities
 from vinga_server.config.responses import Applies
 
 CHECK_IN = Applies.CHECK_IN
@@ -62,17 +63,36 @@ _COMPOSED: tuple[entities.Notice, ...] = (
     entities.DEFAULT_AGENT_UNSERVED_NOTICE,
 )
 
+# And what the CLI says INSTEAD of one of those, for the boundary sets
+# it knows (#426). A rendering prints one voice or the other, so a
+# reader of output that knew only the server's would answer "no
+# boundary at all" for every write whose set this client can name, which
+# is most of them. Read off `cli.SPOKEN` rather than restated here, for
+# the reason the sentences above are read off `entities`: a table of
+# phrases kept by hand beside the real one is what this module used to
+# be, and what a prose edit could silently move.
+#
+# The import's count line is deliberately not here. Its clause is one
+# clause for both known sets, so it cannot say which of the two an
+# answer carried, and a reading that guessed would be this module
+# asserting less than it claims. The import surface's own suites pin
+# that line as bytes instead.
+_ANNOUNCED: tuple[tuple[str, tuple[Applies, ...]], ...] = (
+    *((notice.sentence, notice.applies) for notice in _COMPOSED),
+    *((line, tuple(applies)) for applies, line in cli.SPOKEN.items()),
+)
+
 
 def boundaries(answer: Mapping[str, object] | str) -> frozenset[Applies]:
     """Which boundaries one write is waiting at.
 
     Given a body (an acknowledgement, or one entry of an applied
     document), the field is the answer and nothing is inferred. Given
-    what a command printed, the answer is the boundaries of every
-    sentence this server composes that the output carries, which is how
-    a rendering is held to the same fact its body states: the CLI prints
-    the sentence whole, so a printed notice is one of the five or the
-    output is not a notice at all.
+    what a command printed, the answer is the boundaries of every line
+    either side composes that the output carries, which is how a
+    rendering is held to the same fact its body states: each is printed
+    whole, so a printed notice is one of them or the output is not a
+    notice at all.
 
     An output naming no boundary at all is the failure this raises on:
     it would leave an operator with a write and no idea when it lands,
@@ -85,9 +105,9 @@ def boundaries(answer: Mapping[str, object] | str) -> frozenset[Applies]:
     else:
         found = frozenset(
             boundary
-            for notice in _COMPOSED
-            if notice.sentence in answer
-            for boundary in notice.applies
+            for line, applies in _ANNOUNCED
+            if line in answer
+            for boundary in applies
         )
     assert found, f"the answer names no boundary at all: {answer!r}"
     return found
