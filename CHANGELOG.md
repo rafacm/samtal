@@ -118,7 +118,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   says who can skip it: a server's address is one NVS key rather than
   a firmware property, so a board already running the xiaozhi app
   needs no new firmware, stock included, which is what vinga has been
-  tested against. Gone with the merge: a paragraph deriving the onboarding
+  tested against. The step says which board and which app version it
+  was walked on, the way the page says which operating system and
+  shell it was walked on. Gone with the merge: a paragraph deriving the onboarding
   URL's key from the device-auth secret, which included a sentence
   about a trial that turned device authentication off, something step
   1 has never done.

@@ -257,7 +257,7 @@ Importing is additive and never deletes, so the same document twice changes noth
 
 **Step 4. Set up the board**
 
-A board needs three things: firmware that speaks this protocol, your server's address, and your WiFi.
+A board needs three things: firmware that speaks this protocol, your server's address, and your WiFi. This step was walked on a Waveshare ESP32-S3-Touch-LCD-1.54 running the xiaozhi app it shipped with, version 1.0.0.
 
 **Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. A board already running the xiaozhi app can skip this, stock firmware included, which is what vinga has been tested against: a server's address is one key in the board's NVS rather than a property of its firmware. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
