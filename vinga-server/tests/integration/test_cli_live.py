@@ -935,11 +935,12 @@ def test_the_running_server_is_read_after_an_apply(
 
     # And the third read of the process: what the store still holds
     # that this server is not serving, which after the apply above is
-    # nothing to name.
+    # nothing to name. Which is a sentence rather than an empty answer
+    # (#425), with the live kinds' own sentence under it.
     assert run("diff") == 0
     compared = capsys.readouterr().out
-    assert "providers: applies at reload" in compared
-    assert "devices: applies at check-in" in compared
+    assert compared.startswith(cli.SERVING_THE_STORE + "\n")
+    assert compared.endswith(cli.READ_AS_ASKED + "\n")
 
     assert run("mcp-server", "status") == 0
     running = capsys.readouterr().out

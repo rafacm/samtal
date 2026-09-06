@@ -3283,19 +3283,16 @@ def _apply_listing(applied: Mapping[str, Any]) -> str:
 
 # What the database holds that the running server is not serving
 #
-# One block per kind, in the order the domain declares them, and every
-# kind printed: a kind silently missing from the output would read as a
-# kind with nothing pending rather than as one this read does not
-# compare. What each block can say is read off its own model, so a field
-# added to the comparison is a field this prints, and a field shaped
-# like none of the three rules below is a failing test rather than
-# output nobody notices is gone.
+# What each kind can say is read off its own model, so a field added to
+# the comparison is a field this prints, and a field shaped like none of
+# the three rules below is a failing test rather than output nobody
+# notices is gone.
 #
 # Three shapes and no fourth. A list of names is a list of names; a
 # yes-or-no is a kind there is one of, which has nothing to name; a
 # nested model is one kind's answer broken into the moments a
-# conversation meets each part at, and it is printed as its own indented
-# block for the reason the outer ones are.
+# conversation meets each part at, and each of those moments is a
+# labelled fact of the kind that holds it.
 
 
 def named_lists(section: type[BaseModel]) -> tuple[str, ...]:
@@ -3420,54 +3417,126 @@ def _announced(sentence: str, applies: frozenset[Applies]) -> str:
     return SPOKEN.get(applies, sentence)
 
 
-# What the label on a block means, said once at the head rather than
-# per block: three boundaries and no fourth, and which one a kind's
-# changes converge at is the answer's own.
+# What this client heads a group of pending kinds with
 #
-# The labels are the API's tokens and stay spelled as the API spells
-# them, `reload` included: it names the mechanism truthfully, and a
-# client generated from the contract reads the same word this does
-# (#371). What the head explains is which command crosses each of them,
-# and the one command there is comes from the constant above rather
-# than from a second spelling written out here.
-DIFF_INTRO = (
-    "# what the stored configuration would change on the running server. `applies`\n"
-    f"# says when a change of that kind reaches a conversation: `reload` when `{INSTALLS}`\n"
-    "# next installs the stored configuration, `check-in` as a device next asks, and\n"
-    "# `restart` at the next server start."
+# One head per boundary rather than a label per kind (#425): every kind
+# under a head is waiting at the same boundary, and saying so once over
+# the group is the whole of what the label said ten times. The words are
+# this client's, for the reason `INSTALLS` above states: what an
+# operator does about `reload` is run a command, and the command belongs
+# to this side's grammar. So the tokens themselves stop being printed,
+# and the vocabulary keeps the homes it already has, the generated
+# document and this command's own help row.
+#
+# Total over `DiffApplies`, which is what a pin asserts: a member added
+# to that alias without a line here would head its group with nothing,
+# and a hole in an answer is worse than a failing test. `check-in` has
+# its line for exactly that reason and heads no group this server can
+# send, because the two kinds carrying it are `LiveKind`s, which name
+# nothing and are answered by the sentence below instead.
+HEADS: dict[Applies, str] = {
+    Applies.RESTART: "pending, at the next server start:",
+    Applies.RELOAD: f"pending, at the next `{INSTALLS}`:",
+    Applies.CHECK_IN: "stored, and in effect at each device's next check-in:",
+}
+
+# What a comparison that found nothing says. A sentence rather than no
+# output at all: a command that printed nothing would read as one that
+# failed to answer, and what this answers is that the two worlds agree.
+SERVING_THE_STORE = "nothing is pending: this server is serving what the store holds."
+
+# Why two of the kinds are never in a group above, said on every
+# comparison because it is a question about every comparison rather than
+# about this one's state. It is `LiveKind`'s docstring out loud: what is
+# stored for a binding or for the default agent is served by the entity
+# reads and is in effect by that device's next check-in, so nothing
+# about them can be pending against an apply. The two names in it are
+# the `LiveKind` sections of the comparison, which a pin holds it to.
+READ_AS_ASKED = (
+    "devices and default_agent are read as a device asks for them, so nothing about "
+    "them waits for an apply."
 )
 
 
 def _diff_listing(body: Mapping[str, Any]) -> str:
-    """The comparison, kind by kind.
+    """The comparison, grouped by the boundary its changes wait at.
+
+    One head per boundary present, in the order `Applies` declares them,
+    and under each head one line per kind that has something to say
+    (#425): an empty list and a false flag are absent rather than
+    enumerated, because absence is absence and what an operator is
+    reading for is what moved. What is filtered is a function of the
+    two worlds being compared, so two reads of one pair of worlds are
+    still the same bytes.
 
     Names and labels and nothing else, which is what the shape carries:
     no bodies, no values, no masks and no secret marks cross this
-    surface, so there is nothing here to filter.
+    surface, so there is nothing here to filter. The names go through
+    `_names` all the same; the heads and the two sentences are this
+    module's own words.
     """
-    lines = [DIFF_INTRO]
+    said: dict[Applies, dict[str, list[str]]] = {}
     for section, shape in DIFF_SECTIONS.items():
-        lines += _diff_block(section, shape, body[section], "")
-    return "\n".join(lines) + "\n"
-
-
-def _diff_block(
-    name: str, shape: type[BaseModel], body: Mapping[str, object], indent: str
-) -> list[str]:
-    """One kind's block, and the blocks of the parts under it."""
-    lines = [f"{indent}{name}: applies at {printable(str(body['applies']))}"]
-    lines += [
-        f"{indent}  {listed}: " + (_names(body[listed]) or "(none)")
-        for listed in named_lists(shape)
-    ]
-    lines += [
-        f"{indent}  {flag}: {'yes' if body[flag] else 'no'}" for flag in flags(shape)
-    ]
-    for under in nested(shape):
-        lines += _diff_block(
-            under, _section(shape.model_fields[under].annotation), body[under], indent + "  "
+        for boundary, fact in _diff_facts(shape, body[section]):
+            said.setdefault(boundary, {}).setdefault(section, []).append(fact)
+    # Two columns, so the answer is read down the left kind by kind,
+    # padded to the widest kind printed anywhere in it rather than per
+    # group, so that the columns line up across the heads as well. A
+    # line exists only where there are facts to put on it, which is what
+    # makes trailing whitespace impossible rather than avoided.
+    column = max((len(kind) for kinds in said.values() for kind in kinds), default=0)
+    blocks: list[str] = []
+    for boundary in Applies:
+        if boundary not in said:
+            continue
+        blocks.append(
+            "\n".join(
+                [HEADS[boundary]]
+                + [
+                    f"  {kind.ljust(column)}  {'; '.join(facts)}"
+                    for kind, facts in said[boundary].items()
+                ]
+            )
         )
-    return lines
+    return "\n\n".join((blocks or [SERVING_THE_STORE]) + [READ_AS_ASKED]) + "\n"
+
+
+def _diff_facts(
+    shape: type[BaseModel], body: Mapping[str, object]
+) -> list[tuple[Applies, str]]:
+    """What one kind of the comparison has to say, each fact tagged with
+    the boundary it is waiting at.
+
+    Tagged rather than returned under the kind's own boundary, because a
+    kind's parts do not have to share one: the four under `agents` carry
+    their own token each, and a fact belongs in the group of the
+    boundary it is actually waiting at. Today they all say `reload` and
+    every fact of a kind lands on one line; the day one of them does
+    not, it lands under its own head instead of under a wrong one.
+
+    The parts flatten into labelled facts of the kind that holds them
+    (`prompt changed: kids`) rather than into indented blocks of their
+    own, which is what most of a comparison used to be.
+    """
+    boundary = cast(Applies, body["applies"])
+    facts = [
+        (boundary, f"{listed}: {named}")
+        for listed in named_lists(shape)
+        if (named := _names(body[listed]))
+    ]
+    # A flag says its own name and nothing after it: a kind there is one
+    # of has nothing to name, so `changed` is the whole fact, and `no` is
+    # a line that is not printed at all.
+    facts += [(boundary, flag) for flag in flags(shape) if body[flag]]
+    for under in nested(shape):
+        facts += [
+            (token, f"{under} {fact}")
+            for token, fact in _diff_facts(
+                _section(shape.model_fields[under].annotation),
+                cast(Mapping[str, object], body[under]),
+            )
+        ]
+    return facts
 
 
 def _identity_block(info: Mapping[str, object]) -> str:

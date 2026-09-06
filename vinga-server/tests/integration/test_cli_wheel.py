@@ -581,7 +581,10 @@ def test_the_running_server_is_read_after_an_apply(run) -> None:
     assert "You are Sam." in previewed
     assert "The bins go out on Tuesday." in previewed
 
-    assert "applies at " in answered(run("diff"), "diff")
+    # Grouped by the boundary its changes wait at since #425, so what a
+    # bare install answers whatever the state is the live kinds'
+    # sentence: it says why two of the seven are never in the list.
+    assert cli.READ_AS_ASKED in answered(run("diff"), "diff")
     assert "house" in answered(run("mcp-server", "status"), "mcp-server", "status")
 
     # And the read that says which deployment answered at all. From the
