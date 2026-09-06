@@ -120,13 +120,47 @@ is drawn under, which is what the case is about. It needs two stores
 rather than two runs against one, because an import against the store
 its own first run wrote answers `unchanged` and has no count to print.
 
+### The review round
+
+Backend codex, against PR #428. One P1, accepted: the door this
+milestone added covered `notice` and not `wrote`, so an acknowledgement
+carrying an escape sequence or a lone surrogate in the line saying what
+was written could still steer stdout or raise `UnicodeEncodeError` out
+of `print`, which carries the whole line past the boundary that turns a
+failure into a sentence. The gap predates the milestone on that field;
+what the milestone did was close half of it and say so.
+
+`wrote` now leaves through `printable` at the DEFAULT bound, which is
+the deliberate difference from the reviewer's suggestion of the
+unbounded rule. `_entry_name` is the same value's door one level up and
+uses the same bound: what that line names is a kind and an identity an
+operator chose, quoted inside a sentence of this client's own, and a
+bound is what protects a value like that. The unbounded rule is for a
+boundary sentence, whose tail is the state it exists to state, and its
+comment in `printing.py` says as much. No merged acknowledgement is
+near the bound: the longest in the committed transcript is 59
+characters against 120, and no `wrote` byte moved, which the respelling
+differential confirms by passing unchanged.
+
+The cases the finding asks for join the notice-side ones in
+`test_config_cli_rendering.py`, driven through `Act.read()`: an escape
+sequence and a lone surrogate in `wrote`, each arriving neutralized on
+stdout, and the encoder case written to a real encoding with a pasted
+credential behind the surrogate, asserting nothing reaches an exception
+chain. The credential itself does reach stdout, deliberately and for
+the reason the import cases record: what `wrote` names is a row as the
+store holds it.
+
 ### Verification
 
 Run from `vinga-server/` against a development Postgres.
 
 - `uv run ruff check .`: passed.
-- `uv run pytest tests/unit -q`: 5930 passed, 19 skipped.
-- `uv run pytest tests/integration -q`: 245 passed.
+- `uv run pytest tests/unit -q`: 5930 passed, 19 skipped, and 5933
+  passed with the review round's three cases.
+- `uv run pytest tests/integration -q`: 245 passed. Not re-run for the
+  review round, which touches one rendering and its own suite and
+  nothing that lane covers.
 - `uv run python -m tests.unit.test_command_spellings`: regenerated
   after the last documentation edit; the manifest's diff is line
   numbers only, no spelling gained or lost.

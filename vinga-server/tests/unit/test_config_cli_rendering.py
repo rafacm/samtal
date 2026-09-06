@@ -1596,22 +1596,57 @@ def test_one_answer_renders_the_same_bytes_twice(
     assert first.err.splitlines()[0] == f"imported 3 entries, {cli.NOT_SERVING_YET}"
 
 
-# What a single write's own answer may put where a sentence belongs
+# What a single write's own answer may put where text belongs
 #
 # The import surface's cases above, on the surface that gained the same
-# door in #426: a write's acknowledgement carries a sentence a server of
-# any age composed, and the arm that quotes one is the arm a hostile or
-# broken far side reaches. What replaces a sentence is this module's own
-# text and can hold nothing, so the cases plant the boundary states the
-# quoting arm is taken on.
+# door in #426. Both strings an acknowledgement carries are far-side
+# text: `wrote` is a line composed around a kind and an identity an
+# operator chose, and `notice` is a sentence a server of any age
+# composed. Neither is a closed token, so what a hostile or broken far
+# side can put in either is whatever it likes.
+#
+# The two go through different bounds, which is the line `printable`
+# draws and not a difference between the surfaces: what `wrote` says is
+# a location, which a bound protects, and what `notice` says ends in the
+# state it exists to state, which a cut would lose. The notice cases
+# plant the boundary states the quoting arm is taken on, since a set
+# this client knows is answered in its own words and a hostile sentence
+# behind one never reaches a stream at all.
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        pytest.param(STEERING, id="an escape sequence"),
+        pytest.param(SURROGATE, id="a lone surrogate"),
+    ],
+)
+def test_a_write_rendering_does_not_let_what_it_wrote_steer_a_terminal(
+    planted: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The line saying what was written, on the stream it goes to.
+
+    Read through the act rather than handed a dictionary, so what is
+    exercised is the shape this client insists on and then the renderer
+    it feeds, which is the path an answer really takes.
+    """
+    body = ACKNOWLEDGED | {"wrote": f"agent sam{planted}"}
+
+    cli._acknowledged(cli.BIND_DEVICE.read(body))
+
+    printed = capsys.readouterr()
+    written = printed.out + printed.err
+    assert planted not in written
+    # And the line is still the answer to what was asked, so what
+    # happened to the character is neutralizing rather than dropping the
+    # output it was in.
+    assert printed.out.startswith("wrote agent sam?")
 
 
 def test_a_write_rendering_does_not_let_a_notice_steer_a_terminal(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Read through the act rather than handed a dictionary, so what is
-    exercised is the shape this client insists on and then the renderer
-    it feeds, which is the path an answer really takes."""
+    """The same rule on the other string, and the other stream."""
     body = ACKNOWLEDGED | {"notice": f"wait{STEERING}"}
 
     cli._acknowledged(cli.BIND_DEVICE.read(body))
@@ -1622,6 +1657,39 @@ def test_a_write_rendering_does_not_let_a_notice_steer_a_terminal(
     # Neutralized rather than dropped: a sentence dropped whole would be
     # a boundary an operator was never told about.
     assert printed.err.startswith("wait?")
+
+
+def test_an_unprintable_line_never_leaves_as_an_exception() -> None:
+    """`print` encodes, and a lone surrogate raises `UnicodeEncodeError`
+    from inside it, which leaves this boundary as a traceback carrying
+    the value: the failure a stream assertion cannot see, on the field
+    the door was missing from.
+
+    The planted value is a pasted credential with the surrogate behind
+    it, which is the pair that makes the claim worth making. The
+    credential reaches stdout, deliberately and for the reason the
+    import cases record: what `wrote` names is a row as the store holds
+    it, and a rendering that hid one would hide what the store holds.
+    What may never happen is the raise, because an exception from the
+    encoder carries the whole line out past the boundary that turns a
+    failure into a sentence.
+    """
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+    body = ACKNOWLEDGED | {"wrote": f"agent {SECRET}{SURROGATE}"}
+    leaked = ""
+
+    with contextlib.redirect_stdout(stream):
+        try:
+            cli._acknowledged(cli.BIND_DEVICE.read(body))
+        except UnicodeEncodeError as raised:  # pragma: no cover - the door keeps this empty
+            leaked = _chain(raised)
+
+    assert leaked == ""
+    assert SECRET not in leaked
+    stream.flush()
+    written = stream.buffer.getvalue().decode("utf-8")
+    assert written.startswith(f"wrote agent {SECRET}?")
+    assert SURROGATE not in written
 
 
 def test_an_unprintable_notice_never_leaves_as_an_exception() -> None:
