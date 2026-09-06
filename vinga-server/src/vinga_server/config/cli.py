@@ -639,7 +639,14 @@ CONTACTED = "configuration API"
 # selects whole. The provenance travels with it for the reason the
 # banner and `ota-url` carry it: two of the three sources it can come
 # from are inferences.
-ONBOARDING_URL_LABEL = "the URL to type into a device's captive portal"
+#
+# It leads with this codebase's own name for the value, so that the line
+# and the noun an operator reads everywhere else are the same word, and
+# names the device's word for it in the parenthetical, because the field
+# it is typed into is labelled that and nothing else on the board is.
+ONBOARDING_URL_LABEL = (
+    "onboarding URL (the address a device's captive portal asks for, labelled OTA there)"
+)
 
 # And what stands there instead when the answer says onboarding is off.
 # The path devices are configured at is named and never printed: it is
@@ -651,9 +658,22 @@ ONBOARDING_OFF_HERE = (
     "which is not printed here, since it is this deployment's secret."
 )
 
-# The heading over the count per kind. A count and not the tree: what
-# `info` answers is orientation, and `vinga list` is the tree.
+# The label in front of the build that answered. One line and not two:
+# a version and the revision it was cut from are one fact about one
+# process, and a reader who has the first without the second has half an
+# answer either way.
+BUILD = "server"
+
+# The prefix on the one line the stored half is told in. A count and not
+# the tree: what `info` answers is orientation, and `vinga list` is the
+# tree.
 CONFIGURED = "configured:"
+
+# And what stands after that prefix when there is nothing to count. An
+# empty line would read as a command that failed to answer, and the
+# deployment this is true of is precisely the one an operator is looking
+# at while they follow Getting Started's step 2.
+NOTHING_YET = "nothing yet"
 
 # The two values an identity answer carries that are printed whole
 #
@@ -3657,17 +3677,23 @@ def _identity_block(info: Mapping[str, object]) -> str:
     """What `info` prints of the server's own answer: which build is
     running, and the URL a board is onboarded at.
 
-    Every line is made printable, like every other value an answer
+    Every value is made printable, like every other value an answer
     carries: what is on the other end of `--api-url` is not this
-    command's to vouch for. The build's two lines are bounded as well;
+    command's to vouch for. The build's two values are bounded as well;
     the URL and its provenance are not, and the note on `UNBOUNDED`
     above says why.
+
+    The build is one line, because a version and the revision it was cut
+    from are one fact about one process: which build answered. Reading
+    them a line apart never told anyone anything the pair did not.
 
     The URL lands on a line with nothing in front of it, and its
     provenance goes on the label line above it. A terminal wraps a long
     line wherever it happens to run out, and a URL broken across two
     rows is one an operator mistypes; a label in front of it would only
-    make it happen sooner. With onboarding off there is no URL at all,
+    make it happen sooner. That is why the label was compacted and the
+    line break was not: the label may wrap and lose nothing, and the
+    line under it may not. With onboarding off there is no URL at all,
     and the sentence that stands there says which switch decides it.
 
     Everything goes to stdout, this block included. That is not the
@@ -3676,9 +3702,7 @@ def _identity_block(info: Mapping[str, object]) -> str:
     caller can capture, never the one a terminal scrolls past.
     """
     lines = [
-        "",
-        f"server version: {printable(str(info['version']))}",
-        f"server revision: {printable(str(info['revision']))}",
+        f"{BUILD}: {printable(str(info['version']))} ({printable(str(info['revision']))})",
         "",
     ]
     # Asked of the flag, which is the field whose job the question is.
@@ -3834,21 +3858,38 @@ def _counted(section: Mapping[str, object], kind: entities.EntityDescriptor) -> 
 
 
 def _configured_counts(document: Mapping[str, object]) -> str:
-    """What `info` prints of the stored half: how many of each kind
-    there are, and which agent an unbound board reaches.
+    """What `info` prints of the stored half: how much of each kind
+    there is, and which agent an unbound board reaches.
 
-    A count and not the tree. The question this command answers is
-    orientation, so what belongs here is the shape of the deployment and
-    not its contents, and `vinga list` prints the contents already.
+    One line, and only of what has something to say. A kind nothing was
+    written of is absent rather than printed as a zero: a column of
+    zeroes is a tally an operator has to read to learn nothing, and the
+    question this command answers is orientation. A count and not the
+    tree, for the same reason: `vinga list` prints the contents.
 
-    The kinds and their order come from the registry, so a kind added
-    there is counted here by existing. A kind addressed by no segment is
-    the singleton, which there is exactly one of and no count to give;
-    one addressed by two is nested a level deeper, which is the same
-    fact its URL states. The devices and the default agent are written
-    out for the reason `_summary` writes them out: neither is an entity,
-    and forcing them into a kind's shape would be inventing a
-    generalization rather than finding one.
+    The kinds, their order and their nouns come from the registry, so a
+    kind added there is counted here by existing and named here in the
+    word its own command is spelled with. The plural is that noun with
+    an `s`, which is derived rather than listed because it is what every
+    merged kind's plural is; a kind whose plural is not would be a kind
+    whose command noun this rule has to learn about, and it would say so
+    in the first render. A kind addressed by no segment is the
+    singleton, which there is exactly one of and so no count to give:
+    what is worth saying about it is whether anything is set. One
+    addressed by two is nested a level deeper, which is the same fact
+    its URL states.
+
+    The devices and the default agent are written out for the reason
+    `_summary` writes them out: neither is an entity, and forcing them
+    into a kind's shape would be inventing a generalization rather than
+    finding one. Both say what is true of nothing rather than being
+    dropped when they hold nothing, because an unbound board reaching
+    no agent is the fact an operator is looking for, not an empty field
+    to hide.
+
+    A deployment with nothing at all says exactly that. Empty output
+    would read as a command that failed to answer, and this is the state
+    a person is in the first time they run it.
 
     The document is read as its shapes before any of it is counted, by
     the same two steps the tree reads it with: see the notes above
@@ -3856,14 +3897,28 @@ def _configured_counts(document: Mapping[str, object]) -> str:
     """
     config, _ = _halves(document)
     read = _sections(config)
-    lines = ["", CONFIGURED]
-    for kind in entities.ENTITIES:
-        if not kind.addressing:
-            continue
-        lines.append(f"  {kind.moved_key}: {_counted(read[kind.moved_key], kind)}")
-    lines.append(f"  devices: {len(read['devices'])}")
-    lines.append(f"  default_agent: {_default_agent(read['default_agent'])}")
-    return "\n".join(lines) + "\n"
+    counted = [
+        f"{count} {kind.name}" if count == 1 else f"{count} {kind.name}s"
+        for kind in entities.ENTITIES
+        if kind.addressing and (count := _counted(read[kind.moved_key], kind))
+    ]
+    # The singletons after the counted kinds, in the registry's order
+    # within each half, which is the order the plan states and not the
+    # order a single pass would happen to produce.
+    counted += [
+        f"{kind.moved_key} set"
+        for kind in entities.ENTITIES
+        if not kind.addressing and read[kind.moved_key]
+    ]
+    devices = len(read["devices"])
+    named = read["default_agent"]
+    if not counted and not devices and not named:
+        return f"\n{CONFIGURED} {NOTHING_YET}\n"
+    counted.append(
+        f"{devices} device{'' if devices == 1 else 's'} bound" if devices else "no devices"
+    )
+    counted.append(f"default agent {printable(named)}" if named else "no default agent")
+    return f"\n{CONFIGURED} " + ", ".join(counted) + "\n"
 
 
 def _summary(document: Mapping[str, object]) -> str:
@@ -3928,20 +3983,13 @@ def _summary(document: Mapping[str, object]) -> str:
         for mac, bound in read["devices"].items()
     ] or ["  (none)"]
 
-    lines.append(f"default_agent: {_default_agent(read['default_agent'])}")
+    # The tree's word for an unset default agent is the tree's `(none)`,
+    # which is the answer every other row of it gives to the same
+    # question. `info` says it in a sentence instead, because there it
+    # is one clause of one line rather than the foot of a list.
+    named = read["default_agent"]
+    lines.append(f"default_agent: {printable(named) if named else '(none)'}")
     return "\n".join(lines) + "\n"
-
-
-def _default_agent(named: str | None) -> str:
-    """The default agent as either rendering names it: the one printable
-    line of it, or the word for nothing set.
-
-    One function because the two renderings are one sentence about the
-    deployment, and an unset default agent that read as `(none)` in the
-    tree and as an empty line in the counts would be the same fact told
-    two ways.
-    """
-    return printable(named) if named else "(none)"
 
 
 # How one entry of each kind reads in that tree, after its name: which

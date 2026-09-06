@@ -139,24 +139,22 @@ def test_info_prints_the_deployment_from_end_to_end(
     lines = printed.out.splitlines()
     assert lines[0] == "vinga - Conversational AI. Sweded."
     assert lines[1].startswith("configuration API: http://127.0.0.1:")
-    assert "server version: 0.1.0" in lines
-    assert "server revision: v0.1.0-3-gdeadbee" in lines
+    # Which build answered, in one line: a version and the revision it
+    # was cut from are one fact about one process.
+    assert lines[2] == "server: 0.1.0 (v0.1.0-3-gdeadbee)"
     # The URL alone on its line, with its provenance on the label above
     # it: a terminal wraps a long line wherever it runs out, and this is
     # a value an operator retypes by hand.
-    label = lines.index(
-        f"the URL to type into a device's captive portal, {info.onboarding_provenance}:"
-    )
+    label = lines.index(f"{cli.ONBOARDING_URL_LABEL}, {info.onboarding_provenance}:")
+    assert lines[label].startswith("onboarding URL (")
     assert lines[label + 1] == info.onboarding_url
-    # And the counts, which are the shape of the deployment rather than
-    # its contents: `vinga list` prints the contents.
-    assert "configured:" in lines
-    assert "  providers: 2" in lines
-    assert "  mcp_servers: 1" in lines
-    assert "  prompt_fragments: 1" in lines
-    assert "  agents: 2" in lines
-    assert "  devices: 1" in lines
-    assert "  default_agent: sam" in lines
+    # And the tally, which is the shape of the deployment rather than
+    # its contents: `vinga list` prints the contents. One line, and only
+    # of what has something to say.
+    assert (
+        "configured: 2 providers, 1 mcp-server, 1 prompt-fragment, 2 agents, "
+        "1 device bound, default agent sam" in lines
+    )
     # Nothing about the run, because none of this is about the run.
     assert printed.err == ""
 
@@ -181,7 +179,7 @@ def test_info_says_which_switch_turned_onboarding_off(
     printed = capsys.readouterr().out
     assert "server.onboarding.enabled is false" in printed
     assert "server.ota_path" in printed
-    assert "the URL to type into" not in printed
+    assert "onboarding URL" not in printed
 
 
 def test_a_long_url_is_printed_whole_and_still_on_one_line(
@@ -237,7 +235,7 @@ def test_a_server_that_answers_the_first_act_and_refuses_the_second(
 
     printed = capsys.readouterr()
     assert "vinga - Conversational AI. Sweded." in printed.out
-    assert "server version: 0.1.0" in printed.out
+    assert "server: 0.1.0 (v0.1.0-3-gdeadbee)" in printed.out
     assert "could not be reached" in printed.err
     assert "configured:" not in printed.out
 
@@ -346,7 +344,7 @@ def test_a_configuration_a_count_cannot_walk_is_quoted_nowhere(
 
     printed = capsys.readouterr()
     # The first act rendered, which is the multi-act contract.
-    assert "server version: 0.1.0" in printed.out
+    assert "server: 0.1.0 (v0.1.0-3-gdeadbee)" in printed.out
     assert cli.UNRECOGNIZED_ANSWER in printed.err
     assert "Traceback" not in printed.err
     assert "configured:" not in printed.out
@@ -381,9 +379,127 @@ def test_a_default_agent_is_bounded_and_made_printable(
     assert run("info") == 0
 
     printed = capsys.readouterr().out
-    assert "  default_agent: sa?[31mmxxx" in printed
+    assert "default agent sa?[31mmxxx" in printed
     assert "\x1b" not in printed
     assert len(printed.splitlines()[-1]) < 200
+
+
+# The one line the stored half is told in
+#
+# What an answer prints is what has something to say, so most of what
+# these cases are about is what is NOT on the line. Each composes a
+# document and reads back the one line it produced, because the claim is
+# about the whole line rather than about a substring of it: a fact that
+# survived as a fragment of another one would pass a containment check
+# and read as nonsense on a terminal.
+
+
+def tally(run, monkeypatch: pytest.MonkeyPatch, capsys, **sections: object) -> str:
+    """The `configured:` line of one `info` run, over a document this
+    case composed."""
+    run.runtime["identity"] = identity(monkeypatch)
+    answering_config(monkeypatch, document(**sections))
+    capsys.readouterr()
+    assert run("info") == 0
+    printed = capsys.readouterr().out
+    return next(line for line in printed.splitlines() if line.startswith(cli.CONFIGURED))
+
+
+def test_a_kind_nothing_was_written_of_is_absent(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A zero is not a fact about a deployment, it is the absence of
+    one, and a column of them is a tally read to learn nothing.
+
+    The whole line, so that what is asserted is that four of the five
+    kinds are gone rather than that one of them is present.
+    """
+    assert (
+        tally(run, monkeypatch, capsys)
+        == "configured: 1 provider, no devices, no default agent"
+    )
+
+
+@pytest.mark.parametrize(
+    ("section", "entries", "expected"),
+    [
+        pytest.param("agents", {"sam": {}}, "1 agent", id="one-agent"),
+        pytest.param("agents", {"sam": {}, "kid": {}}, "2 agents", id="two-agents"),
+        # A kind whose command noun is hyphenated, because the plural is
+        # the noun with an `s` on it rather than a word written down
+        # anywhere: nothing would notice a rule that only worked on the
+        # one-word kinds.
+        pytest.param("mcp_servers", {"house": {}}, "1 mcp-server", id="one-mcp-server"),
+        pytest.param(
+            "mcp_servers", {"house": {}, "shed": {}}, "2 mcp-servers", id="two-mcp-servers"
+        ),
+    ],
+)
+def test_a_count_of_one_says_the_kind_and_any_other_count_says_the_plural(
+    section: str,
+    entries: dict[str, object],
+    expected: str,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The noun is the descriptor's own, which is the word the command
+    that writes one is spelled with, and the plural is that noun with an
+    `s`: derived from the registry rather than listed beside it, so a
+    kind added there is named here by existing."""
+    assert expected in tally(run, monkeypatch, capsys, **{section: entries}).split(", ")
+
+
+def test_a_deployment_with_nothing_in_it_says_so(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every kind absent, no board bound and no default agent, which is
+    the state a person is in the first time they run this.
+
+    An empty line, or a line of nothing but `no devices`, would read as
+    a command that failed to answer rather than as a deployment waiting
+    to be configured.
+    """
+    assert (
+        tally(run, monkeypatch, capsys, providers={}) == f"configured: {cli.NOTHING_YET}"
+    )
+
+
+def test_the_singleton_is_named_only_when_something_is_set_in_it(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one kind there is exactly one of, so the one with no count to
+    give: what is worth saying about it is whether it holds anything,
+    and an empty one has nothing to say at all."""
+    assert "agent_defaults set" not in tally(run, monkeypatch, capsys)
+    assert "agent_defaults set" in tally(
+        run, monkeypatch, capsys, agent_defaults={"llm": "brain"}
+    ).split(", ")
+
+
+def test_two_runs_against_one_state_are_the_same_bytes(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What is filtered off the line is a function of the stored state,
+    so filtering is not a determinism violation: two runs against one
+    state answer the same bytes.
+
+    Both streams, because the claim is about the invocation rather than
+    about the artifact, and stderr's half of it is that `info` writes
+    nothing there at all: none of what this command answers is about the
+    run.
+    """
+    run.runtime["identity"] = identity(monkeypatch)
+    configured(run)
+    capsys.readouterr()
+
+    assert run("info") == 0
+    first = capsys.readouterr()
+    assert run("info") == 0
+    second = capsys.readouterr()
+
+    assert first.out == second.out
+    assert first.err == second.err == ""
 
 
 # What the URL must not reach
