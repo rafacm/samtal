@@ -222,9 +222,9 @@ wants an interactive terminal). The port was `/dev/cu.usbmodem101` at
   and the agent the server resolved the device to.
 - **Read the whole of what the board reports**, without repointing it at
   a listener. A check-in is the one moment a board describes itself, and
-  the server keeps all of it on one `DEBUG` event, `ota_check_body`: the
-  partition table, the flash size and the display block that no other
-  surface keeps. That is what to read when the board is one nobody here
+  the server emits all of it on one `DEBUG` event, `ota_check_body`: the
+  partition table, the flash size and the display block that reach no
+  other surface. That is what to read when the board is one nobody here
   has seen before.
 
   Start the tail first and wait for it to be connected, and only then
@@ -241,10 +241,18 @@ wants an interactive terminal). The port was `/dev/cu.usbmodem101` at
       --after hard_reset read_mac
   ```
 
-  `--level DEBUG` is the whole of the asking: the tail defaults to
-  `INFO`, which is what the retained log carries, so a deployment nobody
-  has asked shows nothing and keeps nothing. Add `--device <MAC>` when
-  more than one board is checking in.
+  `--level DEBUG` is what makes the tail show it: the tail filters per
+  subscription and defaults to `INFO`. Add `--device <MAC>` when more
+  than one board is checking in.
+
+  **Watching it and keeping it are separate settings.** What a tail
+  shows is the `--level` above; what the log on disk keeps is
+  `server.log_level`, and the two do not consult each other. A
+  deployment at the default level never writes this event down however
+  many people are tailing it, and a deployment configured at `DEBUG`
+  writes down a bounded copy of every check-in body whether or not
+  anybody is watching. That second one is a choice worth making
+  deliberately on a server boards check in to.
 
 ## Talking to the device itself
 
