@@ -216,24 +216,24 @@ docs/architecture/cli-guide.md:593  respell  vinga device pending
 docs/architecture/cli-guide.md:663  respell  vinga apply
 docs/architecture/cli-guide.md:664  respell  vinga diff
 docs/architecture/cli-guide.md:675  respell  vinga apply
-docs/architecture/cli-guide.md:761  respell  vinga info
-docs/architecture/cli-guide.md:795  respell  vinga apply
-docs/architecture/cli-guide.md:824  respell  vinga apply
-docs/architecture/cli-guide.md:825  respell  vinga diff
-docs/architecture/cli-guide.md:830  respell  vinga apply
-docs/architecture/cli-guide.md:833  respell  vinga apply
-docs/architecture/cli-guide.md:874  respell  vinga apply
-docs/architecture/cli-guide.md:924  respell  vinga diff
-docs/architecture/cli-guide.md:931  respell  vinga apply
-docs/architecture/cli-guide.md:982  respell  vinga mcp-server status
-docs/architecture/cli-guide.md:989  respell  vinga apply
-docs/architecture/cli-guide.md:995  respell  vinga mcp-server set
-docs/architecture/cli-guide.md:1023  respell  vinga provider set llm claude
-docs/architecture/cli-guide.md:1037  respell  vinga ota-url
-docs/architecture/cli-guide.md:1044  respell  vinga info
-docs/architecture/cli-guide.md:1078  respell  vinga export
-docs/architecture/cli-guide.md:1079  respell  vinga import
-docs/architecture/cli-guide.md:1080  respell  vinga apply
+docs/architecture/cli-guide.md:762  respell  vinga info
+docs/architecture/cli-guide.md:796  respell  vinga apply
+docs/architecture/cli-guide.md:825  respell  vinga apply
+docs/architecture/cli-guide.md:826  respell  vinga diff
+docs/architecture/cli-guide.md:831  respell  vinga apply
+docs/architecture/cli-guide.md:834  respell  vinga apply
+docs/architecture/cli-guide.md:875  respell  vinga apply
+docs/architecture/cli-guide.md:925  respell  vinga diff
+docs/architecture/cli-guide.md:932  respell  vinga apply
+docs/architecture/cli-guide.md:983  respell  vinga mcp-server status
+docs/architecture/cli-guide.md:990  respell  vinga apply
+docs/architecture/cli-guide.md:996  respell  vinga mcp-server set
+docs/architecture/cli-guide.md:1024  respell  vinga provider set llm claude
+docs/architecture/cli-guide.md:1038  respell  vinga ota-url
+docs/architecture/cli-guide.md:1045  respell  vinga info
+docs/architecture/cli-guide.md:1079  respell  vinga export
+docs/architecture/cli-guide.md:1080  respell  vinga import
+docs/architecture/cli-guide.md:1081  respell  vinga apply
 docs/architecture/design-guide.md:196  respell  vinga-server config agent preview
 docs/architecture/observability-surfaces.md:35  respell  vinga session delete
 docs/architecture/observability-surfaces.md:35  respell  vinga session purge
