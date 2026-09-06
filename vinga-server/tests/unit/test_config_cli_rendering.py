@@ -30,6 +30,7 @@ import io
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
@@ -51,7 +52,9 @@ from vinga_server.config.responses import (
     AgentsReload,
     Applies,
     ConfigReloadResult,
+    DiffApplies,
     FillersReload,
+    LiveKind,
     McpReloadResult,
     PromptsReload,
     ProvidersReload,
@@ -688,9 +691,13 @@ def test_apply_prints_nothing_from_an_answer_of_the_wrong_shape(
 #
 # Names and closed tokens by construction: no bodies, no values, no
 # masks and no secret marks cross this surface, which is what makes its
-# no-leak claim structural. What is left to check is that every kind is
-# printed and that every field of every kind is printed, because a kind
-# or a field that dropped out would read as one with nothing pending.
+# no-leak claim structural. What is left to check is that every field of
+# every kind can be said, because a field the rendering has no rule for
+# would drop out of an answer nobody could tell was short, and that what
+# is printed is what has something to say: since #425 a kind with an
+# empty list and a false flag is absent rather than enumerated, so the
+# pins are about which lines appear rather than about all of them
+# appearing.
 
 DIFF_EMPTY: dict[str, object] = {
     "providers": {"applies": "reload", "added": [], "removed": [], "changed": []},
@@ -712,54 +719,169 @@ DIFF_EMPTY: dict[str, object] = {
 }
 
 
-def test_the_comparison_prints_every_kind_and_its_boundary() -> None:
-    """Every kind, including the ones with nothing to name.
+# The state Getting Started's step 2 leaves behind: four providers, an
+# agent and the shared defaults written to the store and none of them
+# installed. It is the answer #425 counted twenty-four lines of, and the
+# case below is what those lines became.
+DIFF_PENDING: dict[str, object] = {
+    **DIFF_EMPTY,
+    "providers": {
+        "applies": "reload",
+        "added": ["asr.whisper", "llm.local", "tts.voice", "vad.ears"],
+        "removed": [],
+        "changed": [],
+    },
+    "agent_defaults": {"applies": "reload", "changed": True},
+    "agents": {**DIFF_EMPTY["agents"], "added": ["assistant"]},  # type: ignore[dict-item]
+}
 
-    A kind silently missing from the output would read as a kind with
-    nothing pending rather than as one this read reports without lists,
-    and which of those it is is exactly what the label says.
+PENDING = """\
+pending, at the next `vinga apply`:
+  providers       added: asr.whisper, llm.local, tts.voice, vad.ears
+  agent_defaults  changed
+  agents          added: assistant
+
+devices and default_agent are read as a device asks for them, so nothing about \
+them waits for an apply.
+"""
+
+
+def test_the_comparison_groups_what_is_pending_under_one_head() -> None:
+    """The whole answer, byte for byte.
+
+    Three kinds waiting at one boundary, said once over the group rather
+    than once per kind (#425): the head names the command an operator
+    runs, each line under it says what moved about one kind, and a kind
+    with nothing to say is not a line at all. The two columns are what
+    makes it readable down the left, so the padding is part of the pin.
     """
+    assert cli._diff_listing(DIFF_PENDING) == PENDING
+
+
+def test_the_comparison_heads_a_group_once_however_many_kinds_wait() -> None:
+    """The head is over the group, which is a claim about a diff with
+    one change in it as much as about one with three: the boundary is
+    stated once per run either way, and a second head would be the
+    per-kind label under another name."""
+    one = {**DIFF_EMPTY, "agent_defaults": {"applies": "reload", "changed": True}}
+
+    rendered = cli._diff_listing(one)
+
+    assert rendered.count(cli.HEADS[Applies.RELOAD]) == 1
+    assert cli._diff_listing(DIFF_PENDING).count(cli.HEADS[Applies.RELOAD]) == 1
+    assert "  agent_defaults  changed\n" in rendered
+
+
+def test_the_comparison_says_so_when_nothing_is_pending() -> None:
+    """A sentence rather than no output at all: a command that printed
+    nothing would read as one that failed to answer, and what this
+    answers is that the two worlds agree."""
     rendered = cli._diff_listing(DIFF_EMPTY)
 
-    for kind in DIFF_SECTIONS:
-        assert f"{kind}: applies at " in rendered
-    assert "devices: applies at check-in" in rendered
-    assert "providers: applies at reload" in rendered
+    assert rendered.startswith(cli.SERVING_THE_STORE + "\n")
+    assert cli.HEADS[Applies.RELOAD] not in rendered
 
 
-def test_the_comparison_head_names_the_command_that_crosses_each_label(
-) -> None:
-    """The labels are the API's tokens and stay spelled as the API
-    spells them, `reload` included: it names the mechanism truthfully,
-    and a client generated from the contract reads the same word.
+def test_the_comparison_says_why_two_kinds_are_never_pending() -> None:
+    """Printed on every comparison, because "why is my device not in
+    this list" is a question about every comparison rather than about
+    this one's state. And it names the kinds it is true of: the sentence
+    is fixed text, so the pin is what holds it to the shapes."""
+    live = [kind for kind, shape in DIFF_SECTIONS.items() if shape is LiveKind]
 
-    What the head has to say is which command an operator runs to cross
-    one, and for `reload` that command is `vinga apply` (#371). The
-    per-kind assertions above read only the labels, so the mapping
-    between a kept token and the verb that moved needs a pin of its own.
+    assert live
+    for kind in live:
+        assert kind in cli.READ_AS_ASKED
+    assert cli._diff_listing(DIFF_EMPTY).endswith(cli.READ_AS_ASKED + "\n")
+    assert cli._diff_listing(DIFF_PENDING).endswith(cli.READ_AS_ASKED + "\n")
+
+
+def test_every_boundary_a_comparison_can_name_has_a_head() -> None:
+    """The named failure to test for: a boundary added to the alias the
+    diff's fields are declared with, and not to the table, would head
+    its group with a `KeyError` or with nothing.
+
+    Both directions, keyed off the alias rather than listed here: a
+    member without a head is the hole, and a head for a token no field
+    can carry is a line nobody will ever read.
     """
-    rendered = cli._diff_listing(DIFF_EMPTY)
+    assert set(cli.HEADS) == set(get_args(DiffApplies))
 
-    head = rendered.split("\n\n")[0]
-    assert "`reload`" in head
-    assert f"`{cli.PROGRAM} apply`" in head
+
+def test_the_comparison_prints_only_what_has_something_to_say() -> None:
+    """An empty list and a false flag are absent rather than enumerated
+    (#425): absence is absence, and what an operator is reading for is
+    what moved. What is filtered is a function of the two worlds, so
+    two reads of one pair of worlds are still the same bytes, which the
+    case further down pins."""
+    rendered = cli._diff_listing(DIFF_PENDING)
+
+    assert "(none)" not in rendered
+    assert "removed" not in rendered
+    # The kinds with nothing to say are not lines, and the ones with
+    # something to say name only the facts they have.
+    assert "mcp_servers" not in rendered
+    assert "prompt_fragments" not in rendered
+    assert "  agents          added: assistant\n" in rendered
 
 
 def test_the_comparison_names_what_moved_and_where_it_reaches() -> None:
-    """The four clocks an agent's entry has, each printed under the
-    agent kind that holds them."""
+    """The four clocks an agent's entry has, flattened into labelled
+    facts of the agent line that holds them rather than into four
+    indented blocks of their own, which is what most of the answer #425
+    counted was.
+
+    Two facts about one kind join on one line, in the order the model
+    declares them: what an operator asks is what moved about the agents,
+    and the answer is one line about the agents.
+    """
     body = {**DIFF_EMPTY}
     body["agents"] = {
         **DIFF_EMPTY["agents"],  # type: ignore[dict-item]
         "changed": ["sam"],
         "prompt": {"applies": "reload", "changed": ["sam"]},
+        "filler": {"applies": "reload", "changed": ["kids"]},
     }
 
     rendered = cli._diff_listing(body)
 
-    assert "  changed: sam" in rendered
-    assert "  prompt: applies at reload" in rendered
-    assert "    changed: sam" in rendered
+    assert "  agents  changed: sam; prompt changed: sam; filler changed: kids\n" in rendered
+
+
+def test_the_comparison_renders_the_same_answer_as_the_same_bytes() -> None:
+    """Determinism, said as bytes rather than as a style. What the
+    rendering leaves out is a function of the answer alone, so two
+    renders of one answer are one string; a set iterated somewhere in
+    the grouping is where that would stop being true."""
+    assert cli._diff_listing(DIFF_PENDING) == cli._diff_listing(DIFF_PENDING)
+
+
+def test_the_comparison_does_not_let_a_name_steer_a_terminal(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one thing a comparison carries that a far side wrote: the
+    names, which are the rows as the store holds them.
+
+    The grouping moved every line of this rendering, so the door the
+    names go through is worth pinning where it now stands rather than
+    where it used to. Neutralized rather than dropped, for the reason
+    the import cases give: a name that vanished would be a pending
+    change an operator was never told about.
+    """
+    body = {**DIFF_EMPTY}
+    body["providers"] = {
+        "applies": "reload",
+        "added": [f"llm.local{STEERING}"],
+        "removed": [],
+        "changed": [],
+    }
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("diff") == 0
+
+    printed = capsys.readouterr().out
+    assert STEERING not in printed
+    assert "llm.local" in printed
 
 
 def test_the_comparison_renders_every_field_of_every_kind() -> None:
@@ -779,8 +901,8 @@ def test_the_comparison_renders_every_field_of_every_kind() -> None:
         unwalked += [
             cli._section(shape.model_fields[name].annotation) for name in nested(shape)
         ]
-        # `applies` is the label on the block's own heading rather than
-        # a line under it, which is the one field the three rules do not
+        # `applies` is which group a kind's facts land in rather than a
+        # fact of its own, which is the one field the three rules do not
         # claim and this pin states.
         assert set(shape.model_fields) - rendered == {"applies"}
 
