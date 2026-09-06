@@ -448,9 +448,15 @@ added where the other five live.
   cases, `test_command_spellings.py`'s guard (the new sentences that
   name commands are `respell`-class spellings in `cli.py`, already
   inside its reach).
-- Determinism: the byte-equality style of case the suite already uses
-  (two renders of one answer) covers the filtered renderings by
-  re-pinning them.
+- Determinism: no existing case renders these answers twice, so each
+  milestone adds one rather than leaning on a style: two renders of
+  one answer compared as bytes, per surface (import, diff, apply,
+  info), with stdout and stderr captured separately where a surface
+  writes both. The two commands with new fixed stderr sentences
+  (import's count line, apply's success line) also run once at a
+  pseudo-terminal and once redirected and compare the redirected
+  bytes, which is #297's both-ways shape holding the new sentences
+  to the affordance licence.
 
 ## Risks
 
@@ -655,3 +661,9 @@ ready, pending the P1 amendments.
    compare fields or substrings; no case renders twice and compares
    bytes, and no case compares the terminal and redirected paths of
    the new fixed sentences.
+
+   *Resolution*: accepted in full; the plan no longer claims the
+   style exists. Each milestone adds an explicit byte-equality case
+   for its surface, streams captured separately where both are
+   written, and the two new fixed stderr sentences get the
+   terminal-versus-redirected comparison in #297's both-ways shape.
