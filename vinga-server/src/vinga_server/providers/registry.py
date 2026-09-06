@@ -22,6 +22,7 @@ from types import ModuleType
 from pydantic import BaseModel
 
 from vinga_server.config import ConfigError
+from vinga_server.config.entities import provider_label
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import (
     PROVIDER_TYPES,
@@ -271,7 +272,12 @@ def construct_provider(
     the one place that knows the stage and the name a stored credential
     is keyed by, so it is where the entry's secrets are put in force for
     the construction call."""
-    label = f"providers.{stage}.{name}"
+    # The same two readings of one entry the owner keeps: the label is
+    # what every refusal below names it, said through the strip (#413),
+    # and `name` is what the stored credential is filed under, which is
+    # why the secrets below are put in force with it rather than with
+    # what the label shows.
+    label = provider_label(stage, name)
     entry = registration(stage, config.type)
     if entry is None:
         known = ", ".join(sorted(_registrations()[stage]))
