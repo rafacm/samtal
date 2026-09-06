@@ -158,8 +158,15 @@ that renders it today; both callers take the name and discard it.
 
 - Lint: `uv run ruff check .` clean.
 - Unit, the shape CI runs: `uv run pytest tests/unit -q -n auto --dist
-  loadfile`.
-- Integration: `uv run pytest tests/integration -q`.
+  loadfile`, 5819 passed and 19 skipped, eight of them the cases added
+  here.
+- Integration: `uv run pytest tests/integration -q`, 245 passed.
+- All six committed-reference drift checks (domain config, server
+  config, conversations schema, events, OpenAPI, CLI reference) diff
+  empty; `uv run mypy` over the events package clean;
+  `scripts/check_doc_links.py .` checked 207 files with 0 failures. The
+  census manifest is regenerated: the changelog entry moved the line
+  numbers under it and nothing else.
 - Every leak was reproduced before it was fixed, by writing the case
   first and watching the planted name appear whole, and every fix was
   then proven to bite by reverting it in place, watching the case fail
