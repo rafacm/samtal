@@ -20,7 +20,7 @@ is specific to its own board.
 - [What the device listens to, and when](#what-the-device-listens-to-and-when): the three listening modes, which boards use which, and what the microphone is doing between conversations.
 - [Networks](#networks): the WiFi rules every board shares, including the 5 GHz trap that catches most provisioning.
 - [Getting a board onto your server](#getting-a-board-onto-your-server): the one URL that ties a board to a backend, and the two ways it gets there.
-- [Driving a board from a terminal session](#driving-a-board-from-a-terminal-session): resetting, reading the boot log and reading NVS back, with the reset behavior that is not what the usual advice says.
+- [Driving a board from a terminal session](#driving-a-board-from-a-terminal-session): resetting, reading the boot log, reading NVS back and reading the whole of what a board reports at check-in, with the reset behavior that is not what the usual advice says.
 - [Talking to the device itself](#talking-to-the-device-itself): the controls a board publishes as tools, so an agent can turn it down.
 - [What the wake word does, and does not, do](#what-the-wake-word-does-and-does-not-do): what waking is, what it is not, and why it never picks an agent.
 
@@ -220,6 +220,31 @@ wants an interactive terminal). The port was `/dev/cu.usbmodem101` at
   only on a PWR press or the wake word, so that one step cannot be
   scripted. Everything up to it can be: reset, boot log, the OTA exchange,
   and the agent the server resolved the device to.
+- **Read the whole of what the board reports**, without repointing it at
+  a listener. A check-in is the one moment a board describes itself, and
+  the server keeps all of it on one `DEBUG` event, `ota_check_body`: the
+  partition table, the flash size and the display block that no other
+  surface keeps. That is what to read when the board is one nobody here
+  has seen before.
+
+  Start the tail first and wait for it to be connected, and only then
+  reset the board. The live stream retains nothing, so an event emitted
+  before a reader attached is gone, and a boot check-in can finish
+  before a tail that was started afterwards has connected:
+
+  ```sh
+  # First, in one terminal, and leave it running:
+  vinga events tail --level DEBUG --follow
+
+  # Then, in another, once the tail is connected:
+  esptool.py --chip esp32s3 --port /dev/cu.usbmodem101 \
+      --after hard_reset read_mac
+  ```
+
+  `--level DEBUG` is the whole of the asking: the tail defaults to
+  `INFO`, which is what the retained log carries, so a deployment nobody
+  has asked shows nothing and keeps nothing. Add `--device <MAC>` when
+  more than one board is checking in.
 
 ## Talking to the device itself
 

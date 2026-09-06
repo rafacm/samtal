@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 65 events in 94 variants. What was
+This document is that surface written down: 66 events in 95 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -232,6 +232,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `filler_played` | `vinga_server.session` | INFO | 1 |
 | `reply_fallback` | `vinga_server.session` | INFO | 2 |
 | `ota_check` | `vinga_server.ota` | INFO, WARNING | 4 |
+| `ota_check_body` | `vinga_server.ota` | DEBUG | 1 |
 | `activation_not_offered` | `vinga_server.ota` | WARNING | 2 |
 | `activation_complete` | `vinga_server.ota` | INFO | 1 |
 | `activation_pending` | `vinga_server.ota` | DEBUG | 1 |
@@ -1408,6 +1409,35 @@ device %s (%s, firmware %s) resolved to agent %s%s
 | `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable |  |
 | `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
 | `unloaded` | `IDENTIFIER_LIST` | yes | no |  |  |
+
+### `ota_check_body`
+
+The whole of what a board reported at its configuration check, for whoever is
+bringing an unfamiliar one up: the partition table, the flash size and the
+display block that no other surface keeps. At DEBUG, so no default-configured
+deployment retains or shows it; `vinga events tail --level DEBUG` is how
+somebody asks for it.
+
+#### Variant 1: `vinga_server.ota` at DEBUG
+
+```text
+device %s (%s, firmware %s) described itself; the body rides this event
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `said_device` (`ID`) | no | the `reported_mac` syntax |  |
+| 2 | `board` (`DESCRIPTOR`) | no | at most 64 characters, every one printable |  |
+| 3 | `firmware` (`DESCRIPTOR`) | no | at most 32 characters, every one printable |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable |  |
+| `board` | `DESCRIPTOR` | yes | no | at most 64 characters, every one printable |  |
+| `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable |  |
+| `body` | `DESCRIPTOR` | yes | yes | at most 8192 characters, every one printable | What the board sent, as a compact serialization of the parsed object: duplicate keys collapse to the last, escapes and numbers normalize, and everything outside printable ASCII leaves as an escape. Null for a request that carried no readable JSON object, which is a real state of an unfamiliar board rather than nothing to say. |
 
 ### `activation_not_offered`
 
