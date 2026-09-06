@@ -525,7 +525,7 @@ added where the other five live.
   guide has no diff worked example today.
 - [x] **[M3: an apply says what happened and that it
   worked](2026-09-06-cli-answer-style-implementation.md#m3-an-apply-says-what-happened-and-that-it-worked)**
-  (PR TBD). The content rule, the label table with its completeness
+  (PR #430). The content rule, the label table with its completeness
   pin, the apply-specific render callable (listing, flush, success
   sentence on stderr) wired as `APPLY.render` with the ordering pin, the MCP
   block only when entries exist; the apply pins re-cut; README
