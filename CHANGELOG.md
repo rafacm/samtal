@@ -109,6 +109,35 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- **A legacy control character in a name is no longer spoken raw**
+  (#414). A name is held to one URL path segment at write time only, and
+  the rule refuses a control character for a reason it states in as many
+  words: it does not survive a header or a log line intact. A row
+  written before that rule still boots and still names itself, so the
+  byte reached every sentence composed over a stored identity, the
+  loudest of them being a boot refusal on a server's stderr, where
+  nothing between the composition and the terminal escapes anything.
+  Every such sentence now leaves through `spoken_identity`, the
+  credential strip #381 put on those surfaces with the control
+  characters escaped as `\xNN` behind it. Escaped rather than replaced
+  or withheld, because unlike a credential-bearing name such a row is
+  reachable: a control character percent-encodes losslessly, so `%1b` in
+  a path fetches, renames and deletes it, and the escaped spelling is
+  what says which byte to encode. Every name a write would accept today
+  is printed byte for byte as it was. The rule deliberately stops at the
+  sentences: a document and a listing hand a name back as stored,
+  because a read is a fragment a write of it accepts back and every
+  writer of that document (JSON, YAML, the CLI's terminal door) already
+  neutralizes the byte on its own. Four locations that joined a section
+  to a stored name by hand now read the one composition the rest do.
+- **A credential written into a URL whose scheme a control character
+  splits is stripped again** (#414). `url_credential` looked for a
+  literal `://` before parsing, and the parser deletes every tab,
+  carriage return and newline before it reads anything, so
+  `https:/<CR>/user:password@host/v1` was a URL carrying a credential to
+  the library and to any client that opens one, and not one to the rule
+  that takes credentials out of what is displayed, recorded and spoken.
+  The test now runs on the value the parse will see.
 - **A legacy URL credential no longer reaches the provider build
   either** (#413). #381 put every DISPLAY of a stored identity through a
   strip and #382 put every REFUSAL through the same door, both of them
