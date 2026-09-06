@@ -474,3 +474,58 @@ added where the other five live.
   (documentation). Documentation footprint: `docs/architecture/
   cli-guide.md`, CHANGELOG, census manifest; the docs workflow is
   this PR's CI shape.
+
+## Plan review round
+
+Backend codex (codex-cli 0.153.0), model `gpt-5.6-sol`, 2026-09-06,
+against commit `52551544`; the reviewer ran 4m52s. Verdict: not
+ready, pending the P1 amendments.
+
+1. **P1: the new default-agent notice does not reach document
+   imports.** The plan changes only `write_default_agent`; an import
+   routes both `devices` and `default_agent` entries through
+   `api._applied_notice`, whose fallback is `_binding_notice`
+   (`api.py:2776-2807`), so the Getting Started import would still
+   say "The binding". Also `tests/support/notices.py` already holds
+   six notices, so the new one is the seventh, and it must join
+   `_COMPOSED`.
+
+2. **P1: the unknown-token diff group head cannot pass `Act.read()`
+   and contradicts the no-leak rule.** Diff `applies` fields are
+   scalar `DiffApplies` literals, and `_declared`'s tolerance is for
+   tuple-valued token sets only; an unknown scalar refuses the whole
+   answer, which is #386's settled behavior. The quoted-token head is
+   unreachable, and quoting a token also contradicts the plan's own
+   statement that an unknown token is never echoed.
+
+3. **P1: the single-write fallback prints an untrusted notice without
+   a display door.** `_acknowledged` passes
+   `str(acknowledgement["notice"])` straight to `_announced`
+   (`cli.py:4585`), unlike `_imported_entries`, which wraps its
+   sentence in `printable(..., UNBOUNDED)`. The hostile-notice tests
+   cover imports only, so an old or newer server can put an escape
+   sequence or a lone surrogate on stderr through a single write.
+
+4. **P2: the apply success line needs a stream-aware renderer and the
+   flush discipline.** `_apply_listing` returns one stdout string and
+   `APPLY` wraps it in `_printed`; the success sentence cannot live
+   there, and printing stderr afterwards without flushing stdout can
+   land the success above the listing it is about.
+
+5. **P2: M3 omits the maintained apply transcript it invalidates.**
+   `vinga-server/README.md:1122-1148` carries the full current apply
+   field dump and MCP status block, and none of the plan's inventory
+   greps (`applies at reload`, `configured:`, `not yet serving`)
+   finds it.
+
+6. **P2: mixed known and unknown import boundaries are
+   underspecified, and the named test can permit lost advice.** As
+   written, a mixed answer prints the count and the unknown entries'
+   sentences; nothing says the known entries' remedy survives, which
+   contradicts the plan's own boundary-survives decision.
+
+7. **P2: the determinism test the plan leans on does not exist for
+   these renderers.** The named suites render each answer once and
+   compare fields or substrings; no case renders twice and compares
+   bytes, and no case compares the terminal and redirected paths of
+   the new fixed sentences.
