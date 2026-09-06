@@ -79,9 +79,9 @@ ASCII one, and the two are indistinguishable on screen.
 ## Getting a board onto your server
 
 Onboarding is the same procedure on every board: flash the prebuilt
-firmware, write your server's address into the device's NVS `wifi`
-namespace under the key `ota_url` over USB, and provision WiFi from the
-device's own captive portal. That one URL is the firmware's only tie to
+firmware ([how](flashing.md)), write your server's address into the
+device's NVS `wifi` namespace under the key `ota_url` over USB, and
+provision WiFi from the device's own captive portal. That one URL is the firmware's only tie to
 a backend; the WebSocket endpoint, the device token, and everything
 else arrive from your server at runtime, which is why pointing a board
 somewhere else is a one-key change rather than a reflash.

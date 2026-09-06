@@ -183,8 +183,11 @@ off, whether a wake word is enabled and which word it is, the commands
 the device answers by voice, what the display shows, and the board's
 known quirks. Its common page carries what every board running the
 upstream firmware shares, so a guide covers only what is specific to
-its board. Only the Touch-LCD-1.54 guide is written in full; the other
-two are stubs marked 🚧 that grow as those boards reach working status.
+its board, and [`devices/flashing.md`](devices/flashing.md) carries
+the one procedure that is the same on all of them, writing the
+firmware over USB. Only the Touch-LCD-1.54 guide is written in full;
+the other two are stubs marked 🚧 that grow as those boards reach
+working status.
 Each section says whether its facts are read from the upstream board
 support code, verified in hands-on use, or not verified at all. These
 guides are also the knowledge source the planned built-in help agent

@@ -107,6 +107,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   puts the renamed agent on the running server. The CLI reference grows
   the command's page, generated from the tree as every page there is.
 
+### Added
+
+- **A page on flashing a board, `docs/devices/flashing.md`.** The
+  walkthrough has always told a reader to flash the prebuilt firmware
+  and no page in this repository said how, or where an image comes
+  from: the board guides describe the firmware they were tested on and
+  the common page starts after the flash. It carries the procedure
+  verified on a Waveshare ESP32-S3-Touch-LCD-1.54 on 2026-09-06, and
+  the four things that cost a session an hour: how to read what a
+  board is running before deciding to flash at all, that flashing
+  erases the NVS holding the WiFi credentials and the server's
+  address, that 460800 completes a 16 MB transfer where 921600
+  corrupts it, and that the port name moves between replugs. Upstream's
+  own guide is credited and linked; it is in Chinese and it walks a
+  board onto the xiaozhi.me service, which is the opposite destination
+  from this one.
+
 ### Changed
 
 - **The board is one step, and it says why it starts with a flash.**

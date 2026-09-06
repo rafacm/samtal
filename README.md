@@ -257,22 +257,20 @@ Importing is additive and never deletes, so the same document twice changes noth
 
 **Step 4. Set up the board**
 
-A board needs three things before it can reach your server: the xiaozhi firmware, your WiFi, and this server's URL. The firmware is upstream's, published as one archive per board on [78/xiaozhi-esp32's releases](https://github.com/78/xiaozhi-esp32/releases); this was walked with `v2.4.0_waveshare-esp32-s3-touch-lcd-1.54.zip`, which unpacks to the `merged-binary.bin` below.
+A board needs three things before it can reach your server: the xiaozhi firmware, your WiFi credentials, and this server's URL.
 
-**Flash** that merged binary at offset `0x0`. A board already running xiaozhi can skip this, since a server's address is one key in the board's NVS rather than a property of its firmware. Do not assume a new board is one of them: the Waveshare ESP32-S3-Touch-LCD-1.54 here arrived running the vendor's own demo, which speaks nothing a vinga server understands. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
+**Firmware**. It is published as one archive per board on [78/xiaozhi-esp32's releases](https://github.com/78/xiaozhi-esp32/releases). Here we used `v2.4.0_waveshare-esp32-s3-touch-lcd-1.54.zip`. A board already running xiaozhi can skip this; otherwise you need to flash it, by [the procedure on the common device page](docs/devices/flashing.md), which also says how to tell what a board is running now.
 
-**Get the address to give it.** The server derives it and answers it over the API, so this runs from the directory step 1 made like everything else:
+**Get the vinga server URL.** Run this command from the directory step 1 made like everything else:
 
 ```bash
 vinga info
 # ...
-# the URL to type into a device's captive portal, from server.public_url:
 # http://192.168.1.10:8003/x/AB2C4D5E/
 ```
 
-**Give the board that URL, and your WiFi.** How they get there depends on the image your board runs, so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which says which button brings its portal up and also covers its wake word, its display, and the rest of its controls. Where the image's captive portal carries a Custom OTA URL field in its advanced section, that is the whole step and no cable is needed: join the board's access point and enter your WiFi and the URL together. Where it does not, and the Touch-LCD-1.54 image tested here is one that does not, write the URL into the board's NVS over USB first, by [the procedure on the common page](docs/devices/README.md#writing-the-servers-address-into-nvs), then provision WiFi from the portal. The whole cable-free story, where a board's image allows it, is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
+**Configure your board’s WiFi access and vinga server URL.** TODO
 
-When a board does not turn up, `docker compose exec vinga vinga-server doctor` says what a device would be told on that URL, or what is wrong.
 
 **Step 5. Talk**
 
