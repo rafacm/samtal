@@ -42,7 +42,7 @@ trusting that it was; the short version is at the foot of this page.
 ## On this page
 
 - [What a reviewer holds a new command
-  to](#what-a-reviewer-holds-a-new-command-to): the eleven questions a
+  to](#what-a-reviewer-holds-a-new-command-to): the sixteen questions a
   new command answers, each linked to the rule behind it. This page's
   interface; everything after it is the reasoning.
 - [The two spellings](#the-two-spellings): `vinga` and
@@ -92,33 +92,57 @@ section that carries its reasoning.
    kind's own notice uses rather than new ones?
    ([A write says what it did and when it takes
    effect](#a-write-says-what-it-did-and-when-it-takes-effect))
-6. **Can any sentence it prints contain something the caller typed, or
-   something the network handed back?** Both are no.
-   ([A refusal is a fixed sentence that quotes nothing
-   back](#a-refusal-is-a-fixed-sentence-that-quotes-nothing-back))
-7. **Could a credential reach an argument** on any path through it,
-   including a mistyped one?
-   ([A credential is never an argument, and never travels in a
-   read](#a-credential-is-never-an-argument-and-never-travels-in-a-read))
-8. **Is every wait it makes bounded**, and if one is not, is the reason
-   written down where the constant is?
-   ([Bound every wait that has a bound, and write down why one does
-   not](#bound-every-wait-that-has-a-bound-and-write-down-why-one-does-not))
-9. **Is its description one lowercase sentence with no full stop, does
-   its help page render the same on every machine, and does any
-   terminal-dependent behavior it has leave the non-terminal path
-   complete?**
-   ([Naming a new noun, naming a new
-   verb](#naming-a-new-noun-naming-a-new-verb) for the description,
-   [Output is deterministic, and an answer cannot steer a
-   terminal](#output-is-deterministic-and-an-answer-cannot-steer-a-terminal)
-   for the rest)
-10. **Is any part of it written twice?** A verb list, a field name, a
+6. **Does it print only what has something to say?** An empty list, a
+   false flag and a section of nothing are absent rather than
+   enumerated, and a run with nothing to report says so in one fixed
+   sentence rather than printing nothing at all.
+   ([An answer prints what has something to
+   say](#an-answer-prints-what-has-something-to-say))
+7. **Does it answer in the words that were typed**, rather than in the
+   field names of the layer that did the work? And where it knows the
+   boundary set, does its own line replace the server's sentence rather
+   than following it?
+   ([An answer speaks the verb that was
+   typed](#an-answer-speaks-the-verb-that-was-typed))
+8. **If it changes something, does it say that it worked**, in one line
+   of its own on stderr, with no wall-clock number in it?
+   ([An action that succeeds says so](#an-action-that-succeeds-says-so))
+9. **Is a boundary stated once over the group it is true of**, rather
+   than once per kind or once per entry?
+   ([A boundary is stated once per run, over the
+   group](#a-boundary-is-stated-once-per-run-over-the-group))
+10. **Does it volunteer advice about a feature this deployment is not
+    using?** That one is no: a feature's own noun answers questions
+    about it.
+    ([A command volunteers no advice about features not in
+    use](#a-command-volunteers-no-advice-about-features-not-in-use))
+11. **Can any sentence it prints contain something the caller typed, or
+    something the network handed back?** Both are no.
+    ([A refusal is a fixed sentence that quotes nothing
+    back](#a-refusal-is-a-fixed-sentence-that-quotes-nothing-back))
+12. **Could a credential reach an argument** on any path through it,
+    including a mistyped one?
+    ([A credential is never an argument, and never travels in a
+    read](#a-credential-is-never-an-argument-and-never-travels-in-a-read))
+13. **Is every wait it makes bounded**, and if one is not, is the reason
+    written down where the constant is?
+    ([Bound every wait that has a bound, and write down why one does
+    not](#bound-every-wait-that-has-a-bound-and-write-down-why-one-does-not))
+14. **Is its description one lowercase sentence with no full stop, does
+    its help page render the same on every machine, and does any
+    terminal-dependent behavior it has leave the non-terminal path
+    complete?**
+    ([Naming a new noun, naming a new
+    verb](#naming-a-new-noun-naming-a-new-verb) for the description,
+    [Output is deterministic, and an answer cannot steer a
+    terminal](#output-is-deterministic-and-an-answer-cannot-steer-a-terminal)
+    for the rest)
+15. **Is any part of it written twice?** A verb list, a field name, a
     section name or an address that also exists on a model is derived
     from that model, not restated.
     ([The grammar is derived from the model it
     addresses](#the-grammar-is-derived-from-the-model-it-addresses))
-11. **If it destroys something**, does its row say so, so that it
+16. **If it destroys something**, does its row say so, so that it
     confirms at a terminal and takes `--force`? And is it destructive
     by the line the practice draws, rather than merely alarming?
     ([Prompt where there is somebody to ask, and never require
