@@ -49,13 +49,37 @@ default threshold does not carry it either. Asking is one flag on the
 command an operator already has, which is what the issue's "the
 asking is documented" needs documenting.
 
-### What the event carries: the said facts, and the body as one bounded value
+### What the event carries: its own declaration, the said facts, and the body
 
-A new variant on the OTA channel, emitted in `check_version` beside
-whichever of the four existing events fires, carrying the same
-`said` fields every check-in event carries (device, client, board,
-firmware, agents, unloaded, said_device), so the tail's one filter
-story holds, plus one new field: the body.
+A new event with its own identity, not a fifth variant under
+`OTA_CHECK`: joining the existing declaration would emit two records
+named `ota_check` per request and break every single-record
+assertion. The identity, chosen here so the milestone builds rather
+than decides:
+
+- **Event code `ota_check_body`**, declaration constant
+  `OTA_CHECK_BODY` beside `OTA_CHECK`, one variant class
+  `OtaCheckBodyReported`, exported through the catalog's `__all__`
+  the way its siblings are, with the declaration's note saying what
+  the event is for (the whole of what a board reported, for whoever
+  is bringing one up).
+- **`LEVEL` is `logging.DEBUG`** on `OTA_CHANNEL`.
+- **`TEMPLATE`** is `"device %s (%s, firmware %s) described itself;
+  the body rides this event"`, **`ARGS`**
+  `("said_device", "board", "firmware")`: the sentence interpolates
+  only the bounded arguments the sibling templates already
+  interpolate, and the body is a field, never a sentence.
+- **Carried fields**: `device`, `client`, `board`, `firmware` (the
+  same bounded `said` values the siblings carry, so a tail filtered
+  on a device shows this beside the outcome event), the nullable
+  `body`, and `said_device` as the rendered-only argument
+  (`carried=False`), exactly as the siblings declare it. `agents`
+  and `unloaded` are deliberately not repeated: they are the outcome
+  event's facts, emitted in the same breath, and this event is about
+  what the board said rather than what the server resolved.
+
+It is emitted in `check_version` beside whichever of the four
+existing events fires.
 
 The body travels as a new value type in `events/values.py`, in the
 far-side-retained class that is "bounded and sanitized at its
@@ -175,7 +199,7 @@ closing it is the capture's job, not this plan's.
 - **Inventories by tooling.** The emission sites for check-in events:
   `grep -n "events.emit" src/vinga_server/ota/reply.py` (six today,
   one added). The surfaces a body could reach:
-  `grep -rn "OtaCheckDescribed" src tests` after naming it, asserted
+  `grep -rn "OtaCheckBodyReported" src tests`, asserted
   by the sentinel test rather than by reading.
 
 ## Module layout
@@ -276,6 +300,13 @@ ready, pending the P1 amendments.
    plan must choose a separate event code and name the declaration
    constant, variant class, exact template, exact `ARGS`, carried
    fields and exports.
+
+   *Resolution*: accepted in full. The event is `ota_check_body`,
+   declaration `OTA_CHECK_BODY`, variant `OtaCheckBodyReported`, at
+   DEBUG on the OTA channel, with the exact template, `ARGS`, carried
+   fields and export path now written into the plan, and the
+   explicit statement that it does not join `OTA_CHECK`. The
+   inventory grep is re-keyed to the chosen name.
 
 4. **P2: the event-baseline inventory work is missing.** The
    repository requires a driver per emit path and a `CARRIED` row per
