@@ -612,6 +612,9 @@ def test_apply_prints_what_it_did_and_what_is_running(
     # And the status underneath, which is what says whether an entry
     # that started actually connected.
     assert "weather: down since " in printed.out
+    # And that it worked, on the stream that carries facts about this
+    # invocation rather than about the deployment.
+    assert printed.err == cli.INSTALLED + "\n"
 
 
 def test_a_section_answered_null_is_named_rather_than_missing() -> None:
@@ -737,6 +740,31 @@ def test_the_apply_renders_the_same_answer_as_the_same_bytes(
     assert first.err == second.err
 
 
+def test_what_an_apply_installed_is_read_before_the_success_under_it(run) -> None:
+    """The ordering rule the second stream costs.
+
+    Two streams reach one terminal and only one of them is buffered, so
+    what an operator reads is flush order rather than write order: the
+    sentence saying it worked would otherwise land above the listing it
+    is about. Asserted over one shared buffer with two wrappers on it,
+    for the reason the import's own ordering case gives.
+    """
+    servers = _configured({}, {"sam": []})
+    run.runtime["mcp_servers"] = servers
+    run.runtime["reload"] = _applied(servers, prompts=("sam",))
+    shared = io.BytesIO()
+    buffered = io.TextIOWrapper(shared, encoding="utf-8", write_through=False)
+    unbuffered = io.TextIOWrapper(shared, encoding="utf-8", write_through=True)
+
+    with contextlib.redirect_stdout(buffered), contextlib.redirect_stderr(unbuffered):
+        assert run("apply") == 0
+        buffered.flush()
+        written = shared.getvalue().decode("utf-8")
+
+    assert cli.INSTALLED in written
+    assert written.index("  changed: sam") < written.index(cli.INSTALLED)
+
+
 def test_a_name_the_apply_reports_does_not_steer_a_terminal(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -767,10 +795,13 @@ def test_apply_prints_the_refusal_the_api_answered(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """No server to reload is a 503 with a sentence, and the sentence is
-    what an operator reads: this client adds nothing to it."""
+    what an operator reads: this client adds nothing to it, and least of
+    all the sentence that says an apply worked."""
     assert run("apply") == 1
 
-    assert "no running server" in capsys.readouterr().err
+    refused = capsys.readouterr().err
+    assert "no running server" in refused
+    assert cli.INSTALLED not in refused
 
 
 def test_apply_refuses_an_answer_it_cannot_read(

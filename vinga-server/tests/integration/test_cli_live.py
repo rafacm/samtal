@@ -1077,8 +1077,10 @@ def test_an_apply_installs_what_an_import_wrote(
     assert "prompts:" in lines
     assert "  changed: sam" in lines
     assert "house" in printed.out
-    # And nothing waiting, which is the whole of what the apply buys.
-    assert printed.err == ""
+    # And nothing waiting, which is the whole of what the apply buys:
+    # the one line on stderr is this invocation having worked (#426),
+    # not something else to run.
+    assert printed.err == cli.INSTALLED + "\n"
 
     # The read that says the running server is serving this document
     # rather than the world it had a moment ago. Nothing in the store

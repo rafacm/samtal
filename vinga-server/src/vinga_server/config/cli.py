@@ -3319,6 +3319,14 @@ APPLY_LABELS: dict[tuple[str, str], str] = {
 # on stderr says, and stdout is the half a pipe reads for what happened.
 NOTHING_DIFFERED = "nothing differed from what this server was already serving."
 
+# And what an apply that answered at all says, on stderr, because "it
+# worked" is a fact about this invocation rather than about the
+# deployment (#426). No duration in it: the elapsed seconds are the
+# progress line's, drawn at a terminal and written nowhere else, and a
+# wall-clock number here would make two runs against one state different
+# bytes.
+INSTALLED = "the stored configuration is installed and serving."
+
 
 def _apply_listing(applied: Mapping[str, Any]) -> str:
     """What the apply installed, kind by kind, and then what is running.
@@ -5780,6 +5788,29 @@ PROMPT = Act(
     render=_printed(_prompt_listing),
 )
 
+
+def _applied(answer: Mapping[str, Any]) -> None:
+    """One apply read out: what it installed, and then that it worked.
+
+    Two streams rather than one, shaped like the import's renderer above
+    and for the same reason (#426): what was installed is the artifact
+    and goes to stdout, and that the command succeeded is a fact about
+    this invocation and goes to stderr. An action that succeeds says so
+    in a line of its own, because a listing that stops is not a
+    statement that anything worked, and an apply whose whole listing is
+    one sentence is exactly where that reads worst.
+
+    Its own callable rather than `_printed`, which prints one string and
+    knows nothing of a second stream. The flush between the halves is
+    the discipline `_acknowledged` and `_imported_entries` document:
+    stderr is unbuffered and stdout is not, so without it the success
+    could land above the listing it is about on a merged terminal.
+    """
+    print(_apply_listing(answer), end="")
+    sys.stdout.flush()
+    print(INSTALLED, file=sys.stderr)
+
+
 # The one act that changes what a server is doing without writing
 # anything, and it prints both halves of the answer: what the apply
 # installed, and what every configured MCP entry is doing now that it
@@ -5797,7 +5828,7 @@ APPLY = Act(
     narrates=True,
     answers=ConfigReloadResult,
     refusal=UNREADABLE_APPLY,
-    render=_printed(_apply_listing),
+    render=_applied,
 )
 
 
