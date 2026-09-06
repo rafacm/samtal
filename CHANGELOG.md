@@ -130,6 +130,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   writer of that document (JSON, YAML, the CLI's terminal door) already
   neutralizes the byte on its own. Four locations that joined a section
   to a stored name by hand now read the one composition the rest do.
+- **A stored secret's location no longer says either half of itself
+  verbatim** (#414). `SecretLocation.describe` is the one string that
+  thirteen encryption and decryption refusals and four write
+  acknowledgements are built from, and it rendered the entity's identity
+  and the credential slot exactly as stored. A slot is held to the
+  addressability rule at write time only, exactly as a name is, and
+  `verify_secrets` opens every stored envelope at startup, so an entity
+  or a slot written before that rule reached a boot's stderr whole. Both
+  halves now go through the same door every spoken identity does, split
+  into the parameters that address the entity first; the fields
+  themselves are untouched, because they are what a lookup is made from.
+- **A successful write no longer speaks a stored name verbatim either**
+  (#414). Ten acknowledgements joined a stored identity into the sentence
+  a 200 carries, and two of those are reachable with a name a write of
+  that name would refuse today: a delete goes by membership, so a legacy
+  row is deletable and said its own name on the way out, and a device
+  binding or the default agent references an agent rather than creating
+  one, carrying the name in a JSON body where a slash is no obstacle.
+  Binding a device to such an agent answered with the credential in it.
+  Every identity in an acknowledgement now leaves through the door, the
+  bound-agent list included.
 - **A credential written into a URL whose scheme a control character
   splits is stripped again** (#414). `url_credential` looked for a
   literal `://` before parsing, and the parser deletes every tab,

@@ -47,10 +47,11 @@ sanitized display takes away is "a spelling that never worked as a
 handle". A control character percent-encodes and decodes losslessly,
 which is exactly why `_check_addressable` refuses it for what it does to
 a log line rather than for what it does to routing. Measured rather than
-assumed: `GET /agents/bad%1Bname` answers 200, the rename answers 200,
-and the delete after it answers 200. The row is reachable, so the
-sentence naming it is a recipe, and `\x1b` says which byte to encode
-where a fixed mark does not.
+assumed: `GET /agents/bad%1Bname` answers 200, `DELETE` of that same
+spelling answers 200, and so does the rename. The row is reachable, so
+the sentence naming it is a recipe, and `\x1b` says which byte to encode
+where a fixed mark does not. It is also why the acknowledgements are
+part of this rule: what a delete answers with is that name, said back.
 
 **Rejected: replace with a fixed mark** (`?`, as `printing.printable`
 does). It loses which character it was, so it cannot be turned back into
@@ -131,7 +132,8 @@ everything in the second was composing a location by hand.
 | `providers/world.py` | `agents.<agent>: no <stage> provider is named` |
 | `providers/world.py` | the identity the build stamps on every provider |
 | `providers/registry.py` | the option names a type never asked about |
-| `config/api.py` | the agent rename acknowledgement |
+| `config/api.py` | every write acknowledgement, the rename included |
+| `secrets.SecretLocation.describe` | thirteen encryption and decryption refusals, and the four secret acknowledgements |
 
 | Where a location was spelled by hand | Now |
 | --- | --- |
@@ -181,9 +183,85 @@ and was already taken out.
 - `entities.entity_location(descriptor, *identity)`: unchanged in shape
   and now reading the composition, which is what carries the rule to
   every store refusal and to the whole provider build in one place.
+- `entities.SECRET_HOLDERS`: which kind holds a stored secret of each
+  kind a stored location may name, derived once from the registry and
+  read by the store, by the CLI's export and closed-set gate, and by a
+  location saying itself.
+- `secrets.SecretLocation.describe()`: how a location reads in a
+  sentence, which is thirteen refusals and four acknowledgements. Its
+  fields are the lookup and are untouched.
+- `api._acknowledge(what, notice)`: `what` is a sentence, and every
+  identity in one goes through the door at the site that composes it.
+  Not stripped inside the function, because what arrives is already a
+  sentence and `url_credential` would read one holding an address as
+  prose.
 
 No configuration key, event field or event sentence changed, and every
 committed reference regenerates byte-identical.
+
+## Review rounds
+
+**The sol round on PR #423, 2 P1s, both adopted.** Both were the same
+shape as each other and the same shape as the first pass's own gap: a
+surface that says a stored identity and was not on the census.
+
+- **A secret's location said both halves verbatim.**
+  `SecretLocation.describe` is one string and it is what thirteen
+  encryption and decryption refusals and four acknowledgements are built
+  from. `verify_secrets` opens every stored envelope at startup, so a
+  planted provider name and a planted slot reached a boot's stderr
+  whole. Both halves now leave through the door, and the FIELDS keep
+  what they are: `identity` and `slot` are what a lookup is made from
+  and are untouched, which is the line `entity_location` already draws.
+  The identity is split into the parameters that address the entity
+  before each is said, so the URL rule is asked of a name rather than of
+  a dotted join it would read as a scheme of its own. That needed the
+  kind-to-descriptor mapping, which was derived three times (the store,
+  the CLI's export and its closed-set gate, and now this);
+  `entities.SECRET_HOLDERS` is the one derivation and all three read it.
+- **Ten successful acknowledgements joined a stored name in raw**, and
+  two of them are reachable. A delete goes by membership, so a legacy
+  row is deletable and said its own name on the way out; and a device
+  binding and the default agent REFERENCE an agent rather than creating
+  one, carrying the name in a JSON body where a slash is no obstacle, so
+  `device aa:bb:cc:dd:ee:ff bound to https://user:<credential>@host/named`
+  came back with a 200. The first pass's reachability case renamed
+  before deleting, which is what hid the delete: renaming ahead of it is
+  the one route that never asks the delete to say the name.
+
+The design check the round asked for, answered by grep rather than by
+assertion: the only consumer of the `wrote` sentence anywhere is
+`cli._acknowledged`, which prints the line and reads nothing out of it.
+Nothing parses a name back out of one, so these are operator-facing
+sentences and the strip belongs in them.
+
+### The re-census
+
+Run again over `api.py` and `secrets.py`, and then over the tree, since
+every round on this chain has under-counted:
+
+```
+grep -rnE '(agents|providers|mcp_servers|prompt_fragments|agent_defaults|devices)\.\{' src/vinga_server/config/api.py src/vinga_server/config/secrets.py
+grep -nE '\{(name|agent|server|identity|slot|stage|old|new)[]!:}]|\{self\.|\{bound\.|\{stored\.|\{location\.|\{renamed\.' src/vinga_server/config/api.py src/vinga_server/config/secrets.py
+grep -rn 'describe()' src/
+grep -rnE 'raise [A-Za-z]*Error\(\s*f"' -A 2 src/
+```
+
+No third surface. The first returns nothing. The second returns only
+sites that now read the door, plus this repository's own vocabulary (a
+stage and a type in an OpenAPI description, a description filename, an
+environment variable name). The third returns sixteen callers, all of
+them the sentences named above. The fourth, over the whole tree, returns
+one stored identity inside a raised sentence that is not already through
+the door: `tools/mcp/manager.py`, which is #420's and was already named
+below; everything else it finds is a module attribute or an event field
+name this repository declares.
+
+Two neighbours were checked and are not surfaces. `_binding_notice`
+takes the unloaded names but reads them only for truthiness, so no name
+reaches that sentence. And `_applied`, the apply answer, carries
+`section` and `identity` as structured fields rather than in a sentence,
+which is exactly the shape #421 owns.
 
 ## What was checked and deliberately left
 
@@ -215,7 +293,7 @@ committed reference regenerates byte-identical.
 
 - Lint: `uv run ruff check .` clean.
 - Unit, the shape CI runs: `uv run pytest tests/unit -q -n auto --dist
-  loadfile`, 5912 passed and 19 skipped, 92 of them the cases added here
+  loadfile`, 5918 passed and 19 skipped, 98 of them the cases added here
   (5820 on the branch point). Not one existing pin moved, which is the
   byte-identical claim asserted from the other end.
 - Integration: `uv run pytest tests/integration -q`, 245 passed.
@@ -237,6 +315,13 @@ committed reference regenerates byte-identical.
     carried the byte.
   - The credential rule's pre-parse test, reverted: the broken-scheme
     URL was reported as carrying no credential.
+  - `SecretLocation.describe`, reverted to rendering both halves as
+    stored: three cases failed, two of them boots that open every
+    envelope, one in each suite.
+  - The acknowledgements, reverted (the three deletes and the
+    bound-agent list): four cases failed, including the device binding
+    in each suite, which is the one route a credential-bearing name
+    reaches a 200 by.
 - The reachability the decision turns on is driven end to end rather
   than argued: the planted row is fetched, renamed and deleted over the
   API by percent-encoding the byte, and the rename acknowledgement is
@@ -251,8 +336,10 @@ committed reference regenerates byte-identical.
 - `vinga-server/src/vinga_server/config/store.py`
 - `vinga-server/src/vinga_server/config/secrets.py`
 - `vinga-server/src/vinga_server/config/api.py`
+- `vinga-server/src/vinga_server/config/cli.py`
 - `vinga-server/src/vinga_server/providers/world.py`
 - `vinga-server/src/vinga_server/providers/registry.py`
 - `vinga-server/tests/unit/test_config_control_character_identities.py`
+- `vinga-server/tests/unit/test_config_url_credential_display.py`
 - `vinga-server/tests/unit/command-spellings.txt`
 - `CHANGELOG.md`
