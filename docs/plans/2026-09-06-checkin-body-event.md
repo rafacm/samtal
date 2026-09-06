@@ -61,22 +61,45 @@ The body travels as a new value type in `events/values.py`, in the
 far-side-retained class that is "bounded and sanitized at its
 decision site and bounded again here":
 
-- **The value is the parsed object re-serialized**, `json.dumps` with
-  compact separators and no key sorting, so it is the body the device
-  sent in the order it sent it, minus the whitespace that carries
-  nothing. Raw request bytes are deliberately not retained: the parse
-  is what bounds the shape (an object), and a body that did not parse
-  is a different fact below.
-- **The bound is 8192 characters**, with the truncation visible (the
-  value type's own mechanism). A real check-in with a full partition
-  table is one to two kilobytes; four times that is headroom for a
-  richer firmware, and a body past it is bounded exactly because
-  nothing vouches for it. The number is a named constant with this
-  paragraph beside it.
-- **The charset rule is the value class's `printable`**: every
-  unprintable character is replaced, so nothing in the body can steer
-  a terminal or a log pipeline, on the JSON log, the plain log and
-  the live stream alike.
+- **The value is a compact serialization of the parsed check-in
+  object**, preserving surviving key insertion order: what survives a
+  JSON parse, re-encoded. Raw request bytes are deliberately not
+  retained: the parse is what bounds the shape (an object), and a
+  body that did not parse is a different fact below.
+- **The exact transformation, at the decision site in `reply.py`**:
+  `json.JSONEncoder(ensure_ascii=True, separators=(",", ":"))`
+  driven through `iterencode`, accumulating chunks and **stopping as
+  soon as the accumulated length reaches the bound**, so the work and
+  the intermediate string are both O(bound) whatever the body's size.
+  `ensure_ascii=True` is the printability mechanism: every character
+  outside printable ASCII, control characters and lone surrogates
+  included, leaves as a `\uXXXX` escape, so the result is printable
+  by construction and no replacement pass exists to forget.
+  Non-finite numbers keep the encoder's default (`NaN`, `Infinity`,
+  printable ASCII words): this is a diagnostic representation of what
+  the parser accepted, not a JSON document anything re-parses, and
+  the policy is stated in the constant's comment.
+- **The bound is `CHECK_IN_BODY_LIMIT = 8192` characters, final
+  length included.** When the accumulation reaches it, the value is
+  cut at `8192 - len(marker)` and the literal marker
+  `...[truncated]` (printable ASCII, no ellipsis character) is
+  appended, so a truncated value is visibly truncated, never longer
+  than the bound, and carries nothing past the cut. A real check-in
+  with a full partition table is one to two kilobytes; four times
+  that is headroom for a richer firmware. The number is a named
+  constant with this paragraph beside it.
+- **The value class enforces the same two properties independently**:
+  the new value type in `events/values.py` declares the `printable`
+  charset rule and a maximum length of `CHECK_IN_BODY_LIMIT`, both of
+  which the class checks at construction the way its siblings do, so
+  a decision site that forgot the transformation is a refused value
+  rather than a leaked one. The constant has one home (`values.py`,
+  since the value class is the enforcing side) and the decision site
+  imports it.
+- **The tests assert the mechanism, not the intent**: the exact
+  marker at the exact position, the final length never exceeding the
+  bound, every character printable, and a sentinel planted past the
+  cut absent from the value.
 
 A body that could not be read as a JSON object is a real state of an
 unfamiliar board and must not vanish: the variant's body field is
@@ -235,6 +258,17 @@ ready, pending the P1 amendments.
    decision site and the value class each enforce the bound, and
    tests asserting the marker, the maximum final length,
    printability and absence of material past the cut.
+
+   *Resolution*: accepted in full; the hand-waved mechanism is
+   replaced by a specified one. `ensure_ascii=True` JSON encoding is
+   the printability mechanism (everything unprintable leaves as an
+   escape, lone surrogates included), `iterencode` with an
+   accumulation cap is the bounded producer, the literal marker and
+   its arithmetic are stated with the bound including the final
+   length, the constant lives in `values.py` with the value class
+   enforcing charset and length independently of the decision site,
+   and the tests assert marker, length, printability and
+   nothing-past-the-cut exactly.
 
 3. **P1: the event's catalog identity is unresolved.** Every variant
    belongs to a named declaration; joining `OTA_CHECK` would emit two
