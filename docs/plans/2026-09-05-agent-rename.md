@@ -1176,7 +1176,8 @@ where it is enforced rather than asserting it.
   corrected in the same change rather than in a later tidy-up, which is
   the rule #386 settled. Design footprint: one route making one
   repository call; `entities.py` deepens by one notice; no new module.
-- [ ] **M4: the verb.** `vinga agent rename <old> <new>` as one
+- [x] **[M4: the verb](2026-09-05-agent-rename-implementation.md#m4-the-verb)**
+  (PR TBD). `vinga agent rename <old> <new>` as one
   `Command` row with one `Act`, `destroys=False` with the reasoning in a
   comment on the row; the payload field on `Invocation`; the `declare`
   for one address and one payload word; the end-to-end cases through the

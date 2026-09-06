@@ -706,3 +706,161 @@ The first spelling of the record revision id is what caught the version
 column's width, and it was caught by running the migration rather than
 by reading about it: the migration altered the comment and then failed
 on its own stamp.
+
+## M4: the verb
+
+PR TBD.
+
+### What landed
+
+In the order the commits tell it: the verb with the two committed
+artifacts it moves, and the suite that drives it.
+
+- **`config/cli.py` gains one `Command` row and one `Act`.**
+  `RENAME_AGENT` is a POST whose path comes off the agent's own
+  descriptor (`_entity_path(entities.descriptor("agent"), "rename")`)
+  rather than off a path written out beside it, so the noun the verb
+  sits under and the address it reaches cannot come apart; `_new_name`
+  is the body, one key, sent exactly as it was typed. The row carries
+  `destroys=False` with the guide's reasoning in a comment on it, and
+  `_renamed_to` is the argument shape, one address positional and one
+  payload word behind it. `Invocation` gains `to`, spelled as the
+  body's own key the way `agents` is and placed with the payloads
+  rather than with the fields that address a row.
+- **The API contract's exclusion row goes.** M3 added it with a note
+  saying which milestone takes it away; the act now covers the
+  operation, and the suite's closure is what would have failed had
+  either half been done without the other.
+- **`docs/reference/cli.md` grows the command's page**, regenerated
+  through the generator and the marker-rebuild the CI step runs, and
+  the agent noun's own listing grows the line beside it.
+- **`tests/unit/test_config_cli_rename.py`,** ten cases in three
+  groups: the request recorded off the wire (one POST, the address as
+  one encoded segment, a body of exactly the one key), the three
+  boundary arms each against a server that chooses that arm, and the
+  refusals a terminal meets, which are the occupied destination naming
+  neither name, the second run finding nothing, the reachable no-leak
+  case and the absence of a confirmation.
+- **`tests/support/config_cli.py`'s runner gains one flag**,
+  `snapshot_only`, in the runtime table it already carries, so the
+  third arm can be driven through the registered command against a
+  server composed the way a handed configuration composes one.
+- **Both installed-artifact lanes gain a case**, because each of them
+  ends with a completeness test that holds the registration table to
+  what actually ran. The live lane's binds a board of its own to an
+  agent of its own, renames it, and reads the moved binding and the
+  absent old name back through the verbs an operator would use; the
+  wheel lane's makes the same act from a bare install, which is the
+  packaging claim beside it. Both leave the store as they found it.
+
+### Deviations from the plan
+
+Two, and neither changes what the milestone ships.
+
+1. **The respelling suite gains no licensed substitution.** The plan's
+   test list says it gains one "for the new stderr text", which was
+   written before it was clear where that suite's licence applies. The
+   transcript is a fixed recording of the commands the #223 re-cut
+   moved, captured on the commit before that rename, and the
+   substitution table licenses text that MOVED inside a line one of
+   those recorded steps prints. This milestone moves no such line: it
+   adds a command the transcript does not drive, and every step in it
+   prints what it printed. Verified rather than assumed, by running the
+   suite: two cases, both green with the table untouched. A
+   substitution added anyway would have been an entry nobody could name
+   a reason for, which the suite's own docstring says is what the table
+   must never grow.
+
+2. **The shared runner learned the snapshot mode.** The plan says the
+   three arms are driven end to end here and does not say what the
+   third one is driven against; the runner builds the API per command
+   and had no way to say the server around it was handed its
+   configuration. One key in the runtime table it already keeps for the
+   same kind of fact, defaulted to the ordinary deployment every other
+   suite drives, was smaller than a second runner and keeps the three
+   arms in one file where a reader compares them.
+
+### Discoveries
+
+- **The census guard is what makes the verb's arrival a single
+  change.** M3 had to write two sentences in prose because the spelling
+  named nothing; with the row registered, the same spelling in a code
+  comment and in the changelog entry passes the guard, and it passes on
+  the argument count too: the matcher reads a row's positional budget
+  off the built tree, and `agent rename <new> <old>` fits the two this
+  row declares.
+
+- **A one-segment claim cannot be asserted on `httpx.URL.path`.** That
+  attribute answers the decoded form, so a name holding a space reads
+  back as `/agents/the poet/rename` and an assertion on it passes for
+  a target no server would route. The claim is about what travels, so
+  it is made on `raw_path`, which is the encoded bytes.
+
+- **The body is asserted as a shape rather than as bytes.** How a JSON
+  encoder spaces a pair is the client library's business and moves with
+  its version, while what this milestone claims is the one key and
+  nothing beside it.
+
+- **A registered row owes the two lanes a case, and the plan's test
+  list does not mention it.** Each installed-artifact lane ends with a
+  completeness test whose inventory is `cli.COMMANDS` itself, so
+  registering a row and stopping there fails both from the side the row
+  joined. That is the closure working rather than an obstacle: it is
+  what stops a command from shipping without ever having reached a real
+  server, and it caught this one in the first integration run of the
+  milestone.
+
+- **The occupied destination's sentence holds neither fixture name.**
+  M3 recorded that `sam` is a substring of "the same name" and moved
+  its no-echo case onto `gardener`; the conflict sentence this file
+  drives says "an agent already exists under the new name", so `sam`
+  and `poet` are both honestly absent from it and the case reads the
+  way it says it does.
+
+- **The prose pages keep the wording M3 gave them**, and that is a
+  decision rather than an oversight. The plan's documentation footprint
+  puts the server README's two passages, the observability line, the
+  two memory docstrings and the agent descriptor's note in M3, and M3
+  corrected all of them; what it could not do was spell the verb, since
+  the census guard holds a written invocation to naming a registered
+  command. Adding the spelling to them now would be a second pass over
+  pages this milestone's review is not looking at, and none of them is
+  false without it: each says what a rename does, and the generated CLI
+  reference is where the command it is typed as is published. Recorded
+  here so a reviewer can overrule it deliberately rather than wonder
+  whether it was considered.
+
+### Open questions the plan left, and what M4 answers
+
+None, and none are left for anything after it: M4 is the last
+milestone, and the plan's own questions (the confirmation, the refusal
+set, the route, the boundary arms, the in-flight protocol) were
+resolved before M1. What remains open is what the plan states as
+remaining rather than as pending: the window between the write and the
+apply, and the follow-up M2 filed for the memory store's untranslated
+half of it.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 5804 passed,
+  19 skipped.
+- `uv run pytest tests/integration -q`: 245 passed, which is the lane's
+  243 and this milestone's two.
+- `scripts/check_doc_links.py .`: 206 files, 0 failures.
+- `uv run mypy`: clean.
+- **All seven generated-document drift checks: current.** `cli.md` and
+  the recipes inside it were regenerated in the commit that registered
+  the verb; the other five are untouched by this milestone and were
+  diffed anyway.
+- **The verb's own suite verified to bite, by mutation:** sending the
+  new name under a body key the route does not read fails eight of the
+  ten cases, and the two that survive are the refusals, which are
+  refused either way. The mutation was reverted.
+- **A note on the numbers.** Two lanes were running against this
+  machine's one Postgres for part of this milestone, which is what a
+  worktree stack costs: a run made while the other one was up answered
+  with connections terminated mid-connect rather than with failures of
+  its own. The numbers above are from runs made with nothing else on
+  the database, which is how the earlier ones in this document were
+  taken too.
