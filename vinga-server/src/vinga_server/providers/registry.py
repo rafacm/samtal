@@ -280,9 +280,20 @@ def construct_provider(
     label = provider_label(stage, name)
     entry = registration(stage, config.type)
     if entry is None:
+        # The rejected type is not quoted back, which is the answer
+        # `store._NOT_A_STAGE` gives a stage column holding what no stage
+        # is, and for the same two reasons. A word that is not one of a
+        # closed set this repository declared is not this repository's
+        # vocabulary, so the refusal names the rule it broke and the set
+        # it should have been in; and `type` is a stored value like any
+        # other, so a row written before the URL rule can hold a
+        # credential there and this sentence is printed to an operator's
+        # stderr as it is (#413). What could have been meant is the list,
+        # which is written by this deployment rather than by the row.
         known = ", ".join(sorted(_registrations()[stage]))
         raise ProviderError(
-            f'{label}: unknown {stage} provider type "{config.type}" (known types: {known})'
+            f"{label}: names no {stage} provider type that exists, and the type is "
+            f"not quoted back (known types: {known})"
         )
     # What the type says it accepts, checked before anything is built,
     # which is the ordering `finish()` established and this keeps: an

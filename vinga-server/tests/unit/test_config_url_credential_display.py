@@ -1181,6 +1181,15 @@ def test_the_cli_refuses_such_a_key_on_both_streams(
 # before the strip was on them.
 LAWFUL = "claude"
 
+# A `type` column holding what no provider type is, under the same
+# shape. The sharper half of that refusal, in the way the stage column
+# further up is the sharper half of its own: the credential is in the
+# rejected word itself, so a refusal that quoted the type back would
+# publish it whatever it did about the entry beside it. Nothing this
+# repository declared can be spelled with a `://` in it, so no lawful
+# type shortens to it either.
+NOT_A_TYPE_AT_ALL = f"https://user:{KEY_SENTINEL}@{HOST}/type"
+
 THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
 
 
@@ -1226,11 +1235,23 @@ async def test_the_build_of_a_stored_entry_names_it_without_its_credential(
     composed where a provider is constructed and handed to every factory
     and every option reader under it: an unknown type, a bad option, a
     missing extra and a library that would not start all name the entry
-    through this one string."""
-    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as caught:
-        await build_entry("llm", HISTORIC, ProviderConfig(type="no-such-type"))
+    through this one string.
 
-    assert f"providers.llm.{HISTORIC_SHOWN}: unknown llm provider type" in str(caught.value)
+    The TYPE is a credential-bearing one as well, which is the second
+    half of this refusal and was the sharper one: the entry's name is
+    what the label shows, and the rejected type used to be quoted back
+    beside it, so a planted row spelled a credential into a boot's
+    stderr whatever the label did. It is not quoted at all now, so this
+    case asserts its absence rather than a shortened spelling.
+    """
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as caught:
+        await build_entry("llm", HISTORIC, ProviderConfig(type=NOT_A_TYPE_AT_ALL))
+
+    message = str(caught.value)
+    assert f"providers.llm.{HISTORIC_SHOWN}: names no llm provider type that exists" in message
+    assert "(known types: anthropic, mock, openai_compatible)" in message
+    assert NOT_A_TYPE_AT_ALL not in message
+    assert without_url_credential(NOT_A_TYPE_AT_ALL) not in message
     _carries_no_sentinel(chain(caught.value), *_logged(caplog))
 
 
@@ -1376,7 +1397,7 @@ def test_a_boot_refused_by_the_build_reaches_an_operator_carrying_none(
     exception class alone, so the label never reaches that surface at
     all, which the assertion on the log below is the honest half of.
     """
-    app = create_app(world_named(HISTORIC, llm_type="no-such-type", llm=HISTORIC))
+    app = create_app(world_named(HISTORIC, llm_type=NOT_A_TYPE_AT_ALL, llm=HISTORIC))
 
     with caplog.at_level(logging.DEBUG), pytest.raises(StartupFailed):
         with TestClient(app):
@@ -1384,7 +1405,7 @@ def test_a_boot_refused_by_the_build_reaches_an_operator_carrying_none(
 
     failure = startup_failure(app)
     assert failure is not None
-    assert f"providers.llm.{HISTORIC_SHOWN}: unknown llm provider type" in failure
+    assert f"providers.llm.{HISTORIC_SHOWN}: names no llm provider type that exists" in failure
     _carries_no_sentinel(failure, *_logged(caplog))
 
 
@@ -1418,10 +1439,13 @@ async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
     ).payload()
     await provider.close()
 
-    assert str(unknown.value).startswith(f"providers.llm.{LAWFUL}: unknown llm provider type")
+    assert str(unknown.value).startswith(
+        f"providers.llm.{LAWFUL}: names no llm provider type that exists"
+    )
     assert str(declared.value).startswith(f'providers.llm.{LAWFUL}: "egress" is decided')
     assert str(unnamed.value).startswith(f"agents.{LAWFUL}: no llm provider is named")
     assert payload["provider"] == LAWFUL
+    assert payload["model"] == "qwen3:8b"
     assert fields_of(only(caplog, "provider_reaches_loopback"))["provider"] == LAWFUL
     assert world_named(LAWFUL, llm=LAWFUL).provider_for_agent(LAWFUL, "llm") == (
         LAWFUL,
