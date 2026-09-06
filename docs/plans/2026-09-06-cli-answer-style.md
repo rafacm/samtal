@@ -549,7 +549,9 @@ added where the other five live.
   wrap-protection reasoning stays in the docstring it lives in now.
   Documentation footprint: root `README.md` (two transcripts),
   CHANGELOG, census manifest.
-- [ ] **M5: the practices, written where reviewers look** (#426). The
+- [x] **[M5: the practices, written where reviewers
+  look](2026-09-06-cli-answer-style-implementation.md#m5-the-practices-written-where-reviewers-look)**
+  (#426, PR TBD). The
   five practices join `cli-guide.md` in its house shape (each with a
   merged example from M1-M4 and a historical counterexample quoted
   from the issues), the reviewer checklist at the top gains the

@@ -662,3 +662,185 @@ failures. The integration lane was not re-run: neither of the two
 transcripts it pins reaches this arm, since both of those deployments
 answer a null default agent, and the manifest moved only by the line
 numbers this change shifted plus the `vinga list` this paragraph names.
+## M5: the practices, written where reviewers look
+
+### What was done
+
+`docs/architecture/cli-guide.md`, in two commits: the practices, then
+the questions that reach them.
+
+**The five practices are five new sections**, in the order the checklist
+asks them, placed after "A write says what it did and when it takes
+effect" because that is where the page stops talking about the grammar
+and starts talking about the answer. Each is written in the page's house
+shape: the statement, the reasoning, an example naming the merged
+constants and renderers M1 to M4 produced, and one counterexample
+labelled **historical** quoting this repository's own pre-#426 output
+with the issue it came from.
+
+- **An answer prints what has something to say** (#426 for the
+  counterexample). Example: `_diff_listing` and `SERVING_THE_STORE`,
+  `_apply_listing` with `NOTHING_DIFFERED` and the `NOT_APPLIED` line a
+  null section keeps, `_configured_counts` with `NOTHING_YET`. It also
+  records where the rule stops, which is the two absences `info` prints
+  anyway (`no devices`, `no default agent`) and the `(none)` the memory
+  and status listings keep. Counterexample: the six-row `configured:`
+  block `info` printed whatever was in it.
+- **An answer speaks the verb that was typed** (#424). Example: the
+  import's count line and `APPLY_LABELS` with its completeness pin, plus
+  the statement that no response model moved. The boundary half is *not*
+  restated here: the section points at "the sentence states and the
+  client speaks" inside the write practice, which M1 amended, per the
+  locality rule. Counterexample: the pre-M1 import stderr, both
+  sentences and both remedies, with `The binding` said over a
+  `default_agent` write.
+- **An action that succeeds says so** (#426). Example: `_applied`, the
+  flush, and `INSTALLED` on stderr, with the stream split cross-linked.
+  The elapsed-time decision is a paragraph of its own: the duration is
+  `narrated`'s and never a byte of retained output, cross-linked to the
+  determinism practice whose licence it runs under. Counterexample: the
+  twenty-line apply dump, quoted from the transcript M3 replaced, which
+  ends without saying anything worked.
+- **A boundary is stated once per run, over the group** (#425). Example:
+  `HEADS`, `INSTALLS` and the import's one `NOT_SERVING_YET` clause, and
+  `READ_AS_ASKED` named as the deliberate exception that is about scope
+  rather than about a boundary. Counterexample: the whole pre-M2 diff
+  for Getting Started's state.
+- **A command volunteers no advice about features not in use** (#426).
+  Example: `_status_block` asked only where there are entries, with
+  `NOTHING_CONFIGURED` still the whole answer to `mcp-server status`,
+  and the deleted step-2 paragraph as the same instinct in a document.
+  Counterexample: that MCP paragraph printed under every apply.
+
+**The reviewer's checklist gained five questions**, 6 to 10, between the
+question about the streams and the one about refusals, so the answer's
+shape is asked about where a reviewer has just finished asking what the
+command prints and when its write lands. The questions behind them keep
+their wording and their links and move down; the list runs to sixteen,
+and both counts in "On this page" say so.
+
+`CHANGELOG.md` gained one `Changed` entry. No file under
+`vinga-server/src` changed, which is what a documentation milestone
+means here; the census manifest was regenerated, and `docs/reference/
+cli.md` and `docs/reference/api-openapi.json` are byte-identical.
+
+### The Getting Started re-read, and how it was done
+
+**Against rendered output, not a live deployment.** The plan offers
+either; a compose deployment was deliberately not run in this milestone,
+so what the walkthrough's four commands print was reproduced from the
+merged renderers and compared against the committed transcripts and the
+prose around them. Recorded plainly because it is the weaker of the two
+lanes: what it cannot catch is a server that answers something other
+than what these fixtures carry, and the integration lane, which does
+reach a live server, is what covers that and passed in M1 to M4.
+
+What was compared, and what it found:
+
+- **Step 2, `vinga info` on an empty store.** `_configured_counts`
+  renders `configured: nothing yet`, which is `README.md:175` exactly.
+  The sentence under it, which says the tally is the whole of what there
+  is to say about a deployment nothing has been written to, is true of
+  that line. No change needed.
+- **Step 4, `vinga info` for the onboarding URL.** `_identity_block`
+  with a `public_url` provenance renders `onboarding URL (the address a
+  device's captive portal asks for, labelled OTA there), from
+  server.public_url:` and the bare URL under it, which is
+  `README.md:272` and the line after it. No change needed.
+- **Step 3, `vinga import`.** The document names seven entries (four
+  providers, the shared defaults, one agent, the default agent);
+  `_imported_entries` prints the seven `created` lines on stdout and one
+  line on stderr reading: imported 7 entries, not serving yet: run
+  `vinga apply`. That is the sentence the plan's target block states. The
+  README carries no transcript for this command, and the prose beside it
+  ("That saved the document as your configuration and left the running
+  server alone") is what the stderr line now says in the operator's
+  words rather than something it contradicts. No change needed.
+- **Step 3, `vinga apply`.** The README carries no transcript and no
+  claim about what it prints, only the warning that the first one is
+  slow, which is still true and is what the progress line is for. The
+  maintained transcript is `vinga-server/README.md`'s, re-captured in M3
+  with its prose.
+- **The inventory grep re-run** (`applies at reload`, `configured:`,
+  `not yet serving`, `(none)`, `defaults_changed`, over `README.md`,
+  `vinga-server/README.md` and `docs/`, discounting `docs/plans/`): the
+  only hits left are `README.md:175`'s new line, the three `(none)`s in
+  the `mcp-server status` transcript, which the plan keeps deliberately,
+  a sentence in `vinga-server/README.md` describing what the *API*
+  answers, which is unchanged, and one unrelated line in a 2026-08-19
+  feature note. Nothing stale was found, so this milestone changed no
+  transcript and no walkthrough prose.
+
+### Where #426's "done when" stands
+
+- **The practices are in `cli-guide.md`, with merged examples and
+  labelled counterexamples.** Done in this milestone, and the checklist
+  reaches all five.
+- **`import`, `diff`, `apply` and `info` conform to them.** Done in M1
+  to M4 and pinned there: the import's one line, the diff's groups, the
+  apply's labelled outcomes, the tally. Every one of the four also
+  passed the content rule, which is what the "prints what has something
+  to say" pins assert per surface.
+- **An action that succeeds says so.** Done for the apply (`INSTALLED`,
+  M3) and for the import, whose count line is the same shape on the same
+  stream (M1). The verb that has no such line is a write acknowledgement,
+  which says what it wrote on stdout and is not silent about success by
+  the same argument.
+- **Determinism.** Each of the four surfaces gained an explicit
+  byte-equality case, streams captured separately where both are
+  written, and the two new fixed stderr sentences gained the
+  terminal-versus-redirected comparison in #297's shape. Recorded per
+  milestone above.
+- **#424 and #425 are closed by PRs #428 and #429**, as the plan's
+  checklist records. Whether GitHub shows them closed was not queried
+  from this milestone, which runs no GitHub commands.
+
+### Deviations from the plan
+
+Two, neither changing what the milestone delivers.
+
+**The re-read was done against rendered output rather than a live
+deployment.** The plan licenses either, "if one is available, otherwise
+against the suite's rendered output"; no compose deployment was raised
+here, so the second lane is what ran, and the section above says what
+that lane can and cannot see.
+
+**The historical diff was reconstructed rather than pasted.** #425's
+specimen is quoted in the issue, which this milestone does not read; the
+block in the guide is the pre-M2 renderer (`_diff_block` and
+`DIFF_INTRO`, at `f7311714~1`) run over `DIFF_PENDING`, the fixture the
+merged pin uses for the state Getting Started's step 2 leaves behind. So
+it is this repository's own output for that state rather than a
+paraphrase, which is what **historical** claims, and the sentence under
+it counts what the block itself shows rather than repeating the issue's
+count.
+
+### What building it turned up
+
+The census classifies a `vinga <verb>` spelling in this page as
+`respell` and holds it to naming a registered command, whatever it is
+quoting: the exception list is per-invocation, not per-block. Every
+spelling in the new counterexamples happens to be a live command
+(`vinga apply`, `vinga diff`, `vinga mcp-server set`), so nothing had to
+be excepted, but a historical block quoting a retired spelling would
+have failed the guard rather than the review, which is worth knowing
+before quoting one.
+
+### Verification
+
+Run from the repository root and from `vinga-server/`.
+
+- `python scripts/check_doc_links.py .`: 211 files, 0 failures, run
+  after each of the two guide commits, since the checklist links the
+  anchors the practices create.
+- `uv run python -m tests.unit.test_command_spellings`: regenerated
+  after the last documentation edit.
+- `uv run pytest tests/unit/test_command_spellings.py -q`: passed after
+  the regeneration.
+- `uv run ruff check .`: passed, and nothing under `vinga-server/src`
+  or `tests/` was edited by hand in this milestone.
+- `uv run pytest tests/unit -q`: run once at the end to show nothing
+  else moved.
+- `docs/reference/cli.md` and `docs/reference/api-openapi.json`:
+  byte-identical to the branch base. No help row moved and no response
+  model did.
