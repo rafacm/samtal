@@ -155,13 +155,13 @@ CHANGELOG.md:5535  historical  set-secret
 CHANGELOG.md:5535  historical  clear-secret
 CHANGELOG.md:5540  historical  set-secret
 README.md:173  respell  vinga info
-README.md:183  respell  vinga import
-README.md:228  respell  vinga apply
-README.md:231  respell  vinga device bind
-README.md:244  respell  vinga info
-README.md:257  respell  vinga device pending list
-README.md:258  respell  vinga device pending claim
-README.md:261  respell  vinga events
+README.md:191  respell  vinga import
+README.md:236  respell  vinga apply
+README.md:239  respell  vinga device bind
+README.md:252  respell  vinga info
+README.md:265  respell  vinga device pending list
+README.md:266  respell  vinga device pending claim
+README.md:269  respell  vinga events
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:157  historical  set-secret
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:214  historical  set-secret
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:291  historical  set-secret

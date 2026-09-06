@@ -171,9 +171,17 @@ Check the vinga server status with:
 
 ```bash
 vinga info
+# ...
+# configured:
+#   providers: 0
+#   mcp_servers: 0
+#   prompt_fragments: 0
+#   agents: 0
+#   devices: 0
+#   default_agent: (none)
 ```
 
-Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
+It answers with the API it reached, which build is serving, the URL a board will be given in step 5, and the tally above: everything at zero, which is the shape step 3 fills in. Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
 
 **Step 3. Configure an agent**
 
