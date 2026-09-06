@@ -921,7 +921,7 @@ docs/plans/2026-09-05-server-state-vocabulary.md:464  historical  vinga diff
 docs/plans/2026-09-05-server-state-vocabulary.md:590  historical  vinga-server config openapi
 docs/plans/2026-09-06-checkin-body-event.md:21  historical  vinga events tail
 docs/plans/2026-09-06-checkin-body-event.md:50  historical  vinga events tail
-docs/plans/2026-09-06-checkin-body-event.md:185  historical  vinga events tail
+docs/plans/2026-09-06-checkin-body-event.md:204  historical  vinga events tail
 docs/plans/2026-09-06-cli-answer-style-implementation.md:417  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style-implementation.md:483  historical  vinga apply
 docs/plans/2026-09-06-cli-answer-style-implementation.md:621  historical  vinga info
@@ -1404,11 +1404,11 @@ vinga-server/src/vinga_server/events/catalog.py:990  respell  vinga-server confi
 vinga-server/src/vinga_server/events/catalog.py:2209  respell  vinga-server config device pending claim
 vinga-server/src/vinga_server/events/catalog.py:2255  respell  vinga-server config apply
 vinga-server/src/vinga_server/events/catalog.py:2330  respell  vinga events tail
-vinga-server/src/vinga_server/events/catalog.py:2390  respell  vinga-server config device bind
-vinga-server/src/vinga_server/events/catalog.py:2539  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:2568  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:2584  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:3339  respell  vinga events tail
+vinga-server/src/vinga_server/events/catalog.py:2392  respell  vinga-server config device bind
+vinga-server/src/vinga_server/events/catalog.py:2541  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:2570  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:2586  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:3341  respell  vinga events tail
 vinga-server/src/vinga_server/memory/__init__.py:36  respell  vinga memory
 vinga-server/src/vinga_server/memory/store.py:278  respell  vinga-server config memory list agent
 vinga-server/src/vinga_server/memory/store.py:279  respell  vinga-server config memory delete agent
@@ -1615,7 +1615,7 @@ vinga-server/tests/unit/test_device_bindings.py:207  respell  vinga-server confi
 vinga-server/tests/unit/test_device_bindings.py:238  respell  vinga-server config apply
 vinga-server/tests/unit/test_device_endpoint.py:4  respell  vinga simulator
 vinga-server/tests/unit/test_docker_entrypoint.py:128  respell  config provider show llm claude
-vinga-server/tests/unit/test_event_descriptor_sanitization.py:451  respell  vinga events tail
+vinga-server/tests/unit/test_event_descriptor_sanitization.py:453  respell  vinga events tail
 vinga-server/tests/unit/test_event_docs.py:340  respell  vinga-server config apply
 vinga-server/tests/unit/test_mcp_status_reflection.py:16  respell  config mcp-server status
 vinga-server/tests/unit/test_mcp_status_reflection.py:113  respell  vinga-server config mcp-server status
