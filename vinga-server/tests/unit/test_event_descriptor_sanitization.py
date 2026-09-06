@@ -28,6 +28,12 @@ one per value class:
 Both spellings are shaped so a substring hunt for them cannot match by
 accident, which is what makes the second half a real search rather than
 a formality.
+
+A fifth site joined them with #427, and it is the same model at a
+different bound: `ota_check_body` keeps the whole of what a board
+reported, so its section below plants its rejected sentinel past
+`CHECK_IN_BODY_LIMIT` rather than past a descriptor's, and asserts the
+truncation mechanism as well as the containment.
 """
 
 import json
@@ -44,13 +50,16 @@ from starlette.websockets import WebSocketDisconnect
 from tests.support.apps import entered_client
 from tests.support.checkin import MOCK_AGENT, MOCK_PROVIDERS, NORMALIZED, SYSTEM_INFO
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with_agent
-from tests.support.events import fields_of, only
+from tests.support.events import events, fields_of, only
 from tests.support.wire import handshake, shake_hands
 from vinga_server.app import create_app
 from vinga_server.auth import build_device_auth
 from vinga_server.config import Config
 from vinga_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
+from vinga_server.events.catalog import OtaCheckBodyReported
+from vinga_server.events.live import Filters, LiveEvents, Streamed, Subscription
+from vinga_server.events.values import CHECK_IN_BODY_LIMIT, CHECK_IN_BODY_TRUNCATED
 from vinga_server.logs import JsonFormatter
 from vinga_server.ota import OTA_PATH
 
@@ -77,10 +86,22 @@ class Tap:
     def emit(self, emission: Emission) -> None:
         self.seen.append(emission)
 
-    def rendered(self) -> str:
+    def rendered(self, without: str | None = None) -> str:
+        """Everything this tap was handed, or everything but one event's
+        emissions.
+
+        `without` has exactly one caller and names exactly one event.
+        `ota_check_body` deliberately retains the whole of what a board
+        sent, bounded at `CHECK_IN_BODY_LIMIT` rather than at any
+        descriptor's limit, so a sentinel planted past the BOARD bound
+        is comfortably inside the BODY bound and its presence there says
+        nothing about whether the board bound held. Every other claim in
+        this file is over everything the tap saw.
+        """
         return "\n".join(
             "\n".join([str(one.payload), str(one.message), str(one.args), repr(one.args)])
             for one in self.seen
+            if without is None or one.payload.get("event") != without
         )
 
 
@@ -211,7 +232,16 @@ def test_a_rejected_descriptor_reaches_no_retained_surface(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     """The negative half. What the bound cut away is on no surface at
-    all."""
+    all.
+
+    "The bound" is the board's and the firmware's, which is what this
+    file is about. The check-in body event has a bound of its own and
+    keeps what a board sent whole inside it, deliberately and at DEBUG:
+    the retained log at the default level never sees it, which is what
+    `both_formats` reads back here, and the tap sees every emission
+    before its own filtering, which is why the tap's reading skips that
+    one event and nothing else.
+    """
     with ota_client() as client, caplog.at_level(logging.INFO):
         check_in(
             client,
@@ -227,7 +257,7 @@ def test_a_rejected_descriptor_reaches_no_retained_surface(
     assert REJECTED not in record.getMessage()
     assert REJECTED not in both_formats(caplog)
     assert tap.seen
-    assert REJECTED not in tap.rendered()
+    assert REJECTED not in tap.rendered(without="ota_check_body")
 
 
 def test_the_ota_reply_and_the_recorded_facts_are_untouched(
@@ -299,6 +329,230 @@ def test_the_json_record_carries_the_bounded_copy_and_nothing_else(
     assert written["board"].isprintable()
     assert len(written["board"]) <= BOARD_LIMIT
     assert REJECTED not in json.dumps(written)
+
+
+# --- ota.py: the whole of what a board reported -----------------------
+#
+# `ota_check_body` is the one event that retains a far-side value whole
+# rather than in a field-sized slice, which is why its sentinel is its
+# own and not a reuse of the two above. What it keeps is a compact
+# serialization of the PARSED body, `ensure_ascii` escaped and cut at
+# `CHECK_IN_BODY_LIMIT`, so the sentinel below is planted past that cut
+# rather than past a descriptor's.
+#
+# The body is sent as raw bytes rather than through the client's `json=`
+# helper, and that is load-bearing: httpx serializes with
+# `ensure_ascii=False`, so a lone surrogate would fail in the test's own
+# encoder and never reach the server at all. What arrives here is what a
+# stranger's curl would put on the wire.
+
+
+async def drained(subscription: Subscription) -> list[Streamed]:
+    """Everything one live reader was handed, without waiting.
+
+    A check-in emits its outcome and then its body, so a reader at DEBUG
+    is handed both and the test picks the one it is about rather than
+    assuming which arrived first.
+    """
+    held: list[Streamed] = []
+    while True:
+        item = await subscription.next(timeout=0)
+        if item is None:
+            return held
+        assert isinstance(item, Streamed), "the reader fell behind in a test"
+        held.append(item)
+
+
+def raw_check_in(client: TestClient, text: str):
+    """One check-in whose body is exactly these bytes."""
+    return client.post(
+        OTA_PATH,
+        content=text.encode(),
+        headers={
+            "Device-Id": DEVICE_MAC,
+            "Client-Id": DEVICE_UUID,
+            "Content-Type": "application/json",
+        },
+    )
+
+
+# The sentinel body: a terminal escape and a newline inside a string, a
+# lone surrogate no UTF-8 encoder will take, the admissible sentinel
+# where it survives, and a field long enough that the rejected sentinel
+# at its end is past the cut.
+HOSTILE_REPORTED = {
+    **SYSTEM_INFO,
+    "board": {"type": ADMISSIBLE, "note": "\x1b[2J\nrepaint and split"},
+    "surrogate": "\ud800",
+    "partitions": "p" * (CHECK_IN_BODY_LIMIT * 2) + REJECTED,
+}
+
+# What goes on the wire, spaces and all, and what a compact
+# reserialization of it is. The two differ deliberately: the value is a
+# serialization of the PARSED object rather than the bytes as sent, so
+# the whitespace a stranger chose is not what the bound is spent on.
+HOSTILE_JSON = json.dumps(HOSTILE_REPORTED, ensure_ascii=True)
+HOSTILE_COMPACT = json.dumps(HOSTILE_REPORTED, ensure_ascii=True, separators=(",", ":"))
+
+
+async def test_the_reported_body_is_bounded_escaped_and_cut_where_it_says(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The sentinel, on every surface the body travels and on none of
+    the two it must not.
+
+    Positive on the payload, on the JSON formatter's output, on an
+    attached tap and on the live stream, because those are where a
+    structured field goes. Negative on the text formatter and on the
+    message arguments, because the template interpolates only the
+    bounded `said` values its siblings interpolate: the body is a field
+    and never a sentence.
+
+    And the mechanism rather than the intent: the exact marker at the
+    exact position, a final length inside the bound, every character
+    printable, and the sentinel planted past the cut nowhere at all.
+    """
+    hub = LiveEvents()
+    watching = hub.subscribe(Filters(level=logging.DEBUG))
+    attach_server_tap(hub)
+    try:
+        with ota_client() as client, caplog.at_level(logging.DEBUG):
+            response = raw_check_in(client, HOSTILE_JSON)
+        streamed = await drained(watching)
+    finally:
+        detach_server_tap(hub)
+        hub.unsubscribe(watching)
+
+    assert response.status_code == 200
+    record = only(caplog, "ota_check_body")
+    body = fields_of(record)["body"]
+
+    # The bound, marker included, and the marker exactly where the
+    # arithmetic puts it.
+    assert isinstance(body, str)
+    assert len(body) == CHECK_IN_BODY_LIMIT
+    assert body.endswith(CHECK_IN_BODY_TRUNCATED)
+    assert body[: -len(CHECK_IN_BODY_TRUNCATED)] == HOSTILE_COMPACT[
+        : CHECK_IN_BODY_LIMIT - len(CHECK_IN_BODY_TRUNCATED)
+    ]
+    # Printable throughout, which is `ensure_ascii`'s doing rather than a
+    # replacement pass: the escape sequence and the lone surrogate leave
+    # as `\uXXXX` text.
+    assert body.isprintable()
+    assert '"note":"\\u001b[2J\\nrepaint and split"' in body
+    assert '"surrogate":"\\ud800"' in body
+    # Nothing from past the cut, on any surface.
+    assert REJECTED not in body
+    assert carrying(caplog, REJECTED) == set()
+    assert REJECTED not in both_formats(caplog)
+    assert REJECTED not in tap.rendered()
+
+    # Where the body goes: the JSON record a collector keeps, the tap,
+    # and the live stream a `vinga events tail --level DEBUG` reads.
+    written = json.loads(JsonFormatter().format(record))
+    assert written["body"] == body
+    # Read off the tap's payload rather than hunted for in its
+    # rendering: an escaped body is full of backslashes, and a `repr`
+    # doubles every one of them, so a substring search would answer no
+    # to a value that is plainly there.
+    assert [
+        one.payload["body"]
+        for one in tap.seen
+        if one.payload["event"] == "ota_check_body"
+    ] == [body]
+    assert [one.fields["body"] for one in streamed if one.fields["event"] == "ota_check_body"] == [
+        body
+    ]
+
+    # And where it does not: the sentence and the arguments behind it.
+    assert body not in record.getMessage()
+    assert body not in repr(record.args)
+    assert record.args == (DEVICE_MAC, ADMISSIBLE, SYSTEM_INFO["application"]["version"])
+
+
+def test_a_body_inside_the_bound_is_carried_whole(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The carried case: a board reporting a partition table and a
+    display block gets both onto the event, byte for byte after the
+    compacting, and is answered exactly as it is today."""
+    reported = {
+        **SYSTEM_INFO,
+        "partition_table": [
+            {"label": "nvs", "type": 1, "subtype": 2, "address": 36864, "size": 16384},
+            {"label": "factory", "type": 0, "subtype": 0, "address": 65536, "size": 4194304},
+        ],
+        "display": {"width": 240, "height": 240, "type": "st7789"},
+    }
+    text = json.dumps(reported, ensure_ascii=True)
+
+    with ota_client() as client, caplog.at_level(logging.DEBUG):
+        response = raw_check_in(client, text)
+
+    body = fields_of(only(caplog, "ota_check_body"))["body"]
+    assert body == json.dumps(reported, ensure_ascii=True, separators=(",", ":"))
+    assert len(body) < CHECK_IN_BODY_LIMIT
+    assert CHECK_IN_BODY_TRUNCATED not in body
+    # The reply is the reply it has always been: this feature observes.
+    assert response.json()["firmware"]["version"] == SYSTEM_INFO["application"]["version"]
+
+
+def test_a_body_that_is_no_object_at_all_says_so_with_a_null(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The null case. A request carrying no readable JSON object is a
+    real state of an unfamiliar board, so the event states it rather
+    than skipping the emission, and the device is still answered."""
+    with ota_client() as client, caplog.at_level(logging.DEBUG):
+        response = raw_check_in(client, "not json at all")
+
+    assert response.status_code == 200
+    fields = fields_of(only(caplog, "ota_check_body"))
+    assert fields["body"] is None
+    # The four `said` values are still there: what the board is, this
+    # server still says, whether or not it could read what it sent.
+    assert fields["board"] == "unknown"
+    assert fields["firmware"] == "0.0.0"
+
+
+def test_the_body_event_is_emitted_whatever_the_check_resolved_to(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unconditional, because the boards this exists for are exactly the
+    ones whose outcome is unpredictable: a device this server resolves
+    to nothing at all still describes itself."""
+    with entered_client(Config()) as client, caplog.at_level(logging.DEBUG):
+        raw_check_in(client, json.dumps(SYSTEM_INFO, ensure_ascii=True))
+
+    assert fields_of(only(caplog, "ota_check"))["agents"] == []
+    assert fields_of(only(caplog, "ota_check_body"))["body"] is not None
+
+
+def test_the_default_level_shows_neither_a_tail_nor_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The whole of "off unless asked for", on both filters at once: a
+    retained log at the default level writes no record, and a live
+    subscription at the default level is handed none.
+
+    The threshold itself is `test_events_live.py`'s
+    `test_the_level_is_a_threshold_and_info_is_the_default`; what is
+    asserted here is that this event is on the quiet side of it.
+    """
+    with ota_client() as client, caplog.at_level(logging.INFO):
+        raw_check_in(client, json.dumps(SYSTEM_INFO, ensure_ascii=True))
+
+    assert events(caplog, "ota_check_body") == []
+    assert events(caplog, "ota_check")
+    assert not Filters().admits(
+        Emission(
+            payload={"event": "ota_check_body"},
+            at=0.0,
+            level=OtaCheckBodyReported.LEVEL,
+            message="",
+            args=(),
+        )
+    )
 
 
 # --- ota.py: the Client-Id header a check-in carries ------------------

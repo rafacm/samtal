@@ -106,13 +106,15 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     phrase that would not synthesize says so too (#384), and
     ninety-two since a sentence shaped like a leaked tool call is
     dropped rather than spoken and a reply left with nothing sayable in
-    it says the phrase for the other reason (#385). The last of those
-    shares its emit site with the two above it, which is what the
-    identity numbering under one method is for: what a driver names is
-    a path through a site rather than a line of source."""
+    it says the phrase for the other reason (#385), and ninety-three
+    since a check-in reports the whole of what the board said as an
+    event of its own (#427). The #385 pair shares its emit site with the
+    two above it, which is what the identity numbering under one method
+    is for: what a driver names is a path through a site rather than a
+    line of source."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 92
+    assert len(set(claimed)) == len(claimed) == 93
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -818,6 +820,10 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.ota.reply:check_version #4": (
         ("OtaCheckResolved", ("agents", "board", "client", "device", "event", "firmware",
                               "unloaded")),
+    ),
+    "vinga_server.ota.reply:check_version #5": (
+        ("OtaCheckBodyReported", ("board", "body", "client", "device", "event",
+                                  "firmware")),
     ),
     "vinga_server.ota.reply:_activation #1": (
         ("ActivationNotOfferedUnreadable", ("device", "event", "reason")),
