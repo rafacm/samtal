@@ -49,7 +49,7 @@ inventory being the last guideline.
 ## Adding a command, a noun, a verb or a flag
 
 - [**cli-guide.md**](cli-guide.md): what a reviewer holds a new
-  command to, as eleven questions at the top of the page, each linked
+  command to, as sixteen questions at the top of the page, each linked
   to the rule behind it. Everything after that checklist is the
   reasoning: the noun-verb grammar and why it is that way, and each
   practice with an example and a counterexample.
