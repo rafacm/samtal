@@ -50,7 +50,6 @@ from tests.support.events import both_formats, fields_of, only
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs, serving
-from vinga_server.app import StartupFailed, create_app, startup_failure
 from vinga_server.build_info import CONTAINER_ENV
 from vinga_server.config import Config, entities, views
 from vinga_server.config.api import build_api
@@ -1385,28 +1384,71 @@ async def test_the_container_warning_names_the_entry_without_its_credential(
     _carries_no_sentinel(both_formats(caplog))
 
 
+@pytest.fixture
+def unbuildable(store: ConfigStore) -> ConfigStore:
+    """A deployment whose stored world composes and will not build: one
+    agent named the way no write would allow, on an llm entry named the
+    same way and filed under a type that is not one.
+
+    The three other stages are ordinary mock entries, so that what
+    refuses the boot is this entry rather than an agent with a stage
+    naming nothing, and so that the refusal under test is the one the
+    constructor raises.
+    """
+    _plant(store, "provider", ("llm", HISTORIC), ProviderConfig(type=NOT_A_TYPE_AT_ALL))
+    for stage, name in (("asr", "ears"), ("tts", "voice"), ("vad", "gate")):
+        _plant(store, "provider", (stage, name), ProviderConfig(type="mock"))
+    _plant(
+        store,
+        "agent",
+        (HISTORIC,),
+        AgentConfig(prompt="hi", llm=HISTORIC, asr="ears", tts="voice", vad="gate"),
+    )
+    planted(
+        store,
+        insert(schema.domain_settings).values(
+            key=schema.DEFAULT_AGENT_KEY, value=HISTORIC
+        ),
+    )
+    return store
+
+
 def test_a_boot_refused_by_the_build_reaches_an_operator_carrying_none(
+    unbuildable: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Where a build refusal is actually met: the lifespan catches it,
-    records the sentence and raises `StartupFailed`, and `serving.run`
-    prints exactly that sentence to stderr and leaves with 1.
+    """Where a build refusal is actually met, through the entry point
+    rather than through the lifespan alone.
+
+    The whole way down: the stored halves are read, the app is described,
+    `serve` runs it, uvicorn's lifespan build refuses, uvicorn calls
+    `sys.exit(3)`, `serve` swallows that exactly because a boot failure
+    was recorded, its log filter drops uvicorn's own rendering of it, and
+    `run` prints the one sentence to stderr and answers 1. Asserting on
+    `startup_failure` instead would pass with the print gone, with the
+    print unsafe, or with uvicorn's traceback beside it, which is why
+    both streams and the absence of a traceback are the claim (#382's
+    stderr case has this shape for the composition's own refusals).
 
     An apply is deliberately not a second case here. A build that
     refuses under a reload answers with a fixed sentence and logs the
     exception class alone, so the label never reaches that surface at
     all, which the assertion on the log below is the honest half of.
     """
-    app = create_app(world_named(HISTORIC, llm_type=NOT_A_TYPE_AT_ALL, llm=HISTORIC))
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
 
-    with caplog.at_level(logging.DEBUG), pytest.raises(StartupFailed):
-        with TestClient(app):
-            pass
+    with caplog.at_level(logging.DEBUG):
+        assert serving.run(None) == 1
 
-    failure = startup_failure(app)
-    assert failure is not None
-    assert f"providers.llm.{HISTORIC_SHOWN}: names no llm provider type that exists" in failure
-    _carries_no_sentinel(failure, *_logged(caplog))
+    printed = capsys.readouterr()
+    assert f"providers.llm.{HISTORIC_SHOWN}: names no llm provider type that exists" in (
+        printed.err
+    )
+    assert "Traceback" not in printed.out + printed.err
+    assert not [record for record in caplog.records if record.exc_info is not None]
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
 
 
 async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
